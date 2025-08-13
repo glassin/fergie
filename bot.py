@@ -1,7 +1,7 @@
 import os, random, aiohttp, discord
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
-from datetime import date, time as dtime, timezone  # NEW: fixed-time schedules use UTC times
+from datetime import date, time as dtime, timezone  # fixed-time schedules use UTC times
 
 TOKEN       = os.getenv("DISCORD_TOKEN")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
@@ -109,7 +109,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
-    # START fixed-time tasks (UTC times; change hours to your preference)
+    # fixed-time tasks (UTC times)
     user1_twice_daily_fixed.start()
     user2_twice_daily_fixed.start()
     user3_task.start()
@@ -122,8 +122,10 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
+    content_lower = (message.content or "").lower().strip()
+
     # Auto BBL trigger without command prefix
-    if (message.content or "").strip().lower() == "bbl":
+    if content_lower == "bbl":
         gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
         await message.channel.send(gif_url)
         return
@@ -134,6 +136,20 @@ async def on_message(message: discord.Message):
         if last_lobo_reply_date != today:
             await message.channel.send(f"<@{LOBO_ID}> send me money lobo.")
             last_lobo_reply_date = today
+
+    # SPECIAL: phrase "pinche fergie" (anyone) → :ppeyeroll: (or 🙄)
+    if "pinche fergie" in content_lower:
+        # For USER1_ID, also send the extra bratty reply
+        if message.author.id == USER1_ID:
+            reply_options = ["pinche sancho", "wtf do you want now mfer!!!!"]
+            await message.reply(random.choice(reply_options), mention_author=False)
+
+        # Send server emoji :ppeyeroll: (fallback to 🙄)
+        em = None
+        if message.guild:
+            em = discord.utils.get(message.guild.emojis, name="ppeyeroll")
+        await message.channel.send(str(em) if em else "🙄")
+        return
 
     # 🥖🍑 trigger: only when the user replies to the BOT's message
     if message.reference and message.reference.resolved:
@@ -151,8 +167,7 @@ async def on_message(message: discord.Message):
         mentioned = True
     elif bot.user:
         bid = bot.user.id
-        c = message.content or ""
-        if f"<@{bid}>" in c or f"<@!{bid}>" in c:
+        if f"<@{bid}>" in (message.content or "") or f"<@!{bid}>" in (message.content or ""):
             mentioned = True
 
     if mentioned:
@@ -191,8 +206,7 @@ async def six_hour_emoji():
     if channel:
         await channel.send(BREAD_EMOJI)
 
-# === NEW: Fixed-time (UTC) twice-daily schedules ===
-# Change the hours below to whatever times you prefer, in UTC.
+# === Fixed-time (UTC) twice-daily schedules ===
 @tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
 async def user1_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
@@ -258,4 +272,3 @@ if __name__ == "__main__":
     if not TOKEN or not TENOR_KEY or not CHANNEL_ID:
         raise SystemExit("Please set DISCORD_TOKEN, TENOR_API_KEY, and CHANNEL_ID environment variables.")
     bot.run(TOKEN)
-
