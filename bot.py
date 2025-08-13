@@ -13,7 +13,7 @@ REPLY_CHANCE = 0.10  # random replies to regular messages (non-mentions)
 
 # ----- Discord Setup -----
 intents = discord.Intents.default()
-intents.message_content = True  # make sure this is enabled in the Developer Portal too
+intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ----- Tenor fetch -----
@@ -44,7 +44,6 @@ BREAD_PUNS = [
     "Some secrets are best kept on the loaf-down.",
 ]
 
-# Only your mention lines:
 MENTION_RESPONSES = [
     "very cheugi",
     "cayuuuuuute",
@@ -56,6 +55,13 @@ MENTION_RESPONSES = [
     "I'm having a horrible day.",
     "oh my gaaaaawwwwww........d"
 ]
+
+# ----- Commands -----
+@bot.command()
+async def ping(ctx):
+    """Test command to check bot responsiveness"""
+    print("[LOG] !ping command received")
+    await ctx.send("Pong! 🏓 I'm alive and can send messages.")
 
 # ----- Events -----
 @bot.event
@@ -69,20 +75,65 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    # ===== Robust mention detection =====
-    # (1) Standard parsed mentions list
-    mentioned = bot.user in message.mentions if bot.user else False
-
-    # (2) Raw fallback: <@ID> and <@!ID> formats
-    if not mentioned and bot.user:
+    # ===== Mention detection =====
+    mentioned = False
+    if bot.user and bot.user in message.mentions:
+        mentioned = True
+    elif bot.user:
         bot_id = bot.user.id
         content = message.content or ""
         if f"<@{bot_id}>" in content or f"<@!{bot_id}>" in content:
             mentioned = True
 
     if mentioned:
-        # Only your custom lines when the bot is @mentioned
-        await message.reply(random.choice(MENTION_RESPONSES), mention_author=False)
-        return  # don't also do the random reply below
+        print(f"[LOG] Mention detected from {message.author} in #{message.channel}")
+        try:
+            await message.reply(random.choice(MENTION_RESPONSES), mention_author=False)
+        except Exception as e:
+            print(f"[ERROR] Mention reply failed: {e}")
+        return
 
-    # ===== Ex
+    # ===== Random bread reply =====
+    if random.random() < REPLY_CHANCE:
+        print(f"[LOG] Random bread reply triggered for {message.author}")
+        gif = await fetch_bread_gif()
+        choice = random.choice([
+            random.choice(BREAD_PUNS),
+            gif if gif else random.choice(BREAD_PUNS),
+            (random.choice(BREAD_PUNS) + (f"\n{gif}" if gif else "")),
+        ])
+        try:
+            await message.reply(choice, mention_author=False)
+        except Exception as e:
+            print(f"[ERROR] Random reply failed: {e}")
+
+    await bot.process_commands(message)
+
+# ----- Scheduled tasks -----
+@tasks.loop(hours=4)
+async def four_hour_post():
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        print("[ERROR] Could not find channel for 4-hour post")
+        return
+    gif = await fetch_bread_gif()
+    text = random.choice([
+        random.choice(BREAD_PUNS),
+        f"Fresh bread drop! 🥖\n{gif}" if gif else random.choice(BREAD_PUNS),
+        f"{random.choice(BREAD_PUNS)}\n{gif}" if gif else random.choice(BREAD_PUNS),
+    ])
+    print(f"[LOG] Sending 4-hour bread post to #{channel}")
+    await channel.send(text)
+
+@tasks.loop(hours=6)
+async def six_hour_emoji():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        print(f"[LOG] Sending bread emoji to #{channel}")
+        await channel.send(BREAD_EMOJI)
+
+# ----- Entrypoint -----
+if __name__ == "__main__":
+    if not TOKEN or not TENOR_KEY or not CHANNEL_ID:
+        raise SystemExit("Please set DISCORD_TOKEN, TENOR_API_KEY and CHANNEL_ID environment variables.")
+    bot.run(TOKEN)
