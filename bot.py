@@ -53,6 +53,7 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
+    daily_money_post.start()
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -86,6 +87,12 @@ async def six_hour_emoji():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         await channel.send(BREAD_EMOJI)
+
+@tasks.loop(hours=24)
+async def daily_money_post():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send("Someone send me money.  $Sfergielicious for $180")
 
 if __name__ == "__main__":
     if not TOKEN or not TENOR_KEY or not CHANNEL_ID:
