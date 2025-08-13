@@ -92,7 +92,7 @@ USER3_LINES = [
     "twinnies!!!",
     "girly!",
     "we hate it here r-right girly?",
-    "wen girlie wen?!?!"
+    "wen girlie wen?!?!",
     "the parasites r-right girlie?"
 ]
 
@@ -125,7 +125,7 @@ async def on_message(message: discord.Message):
                 await message.channel.send("🥖🍑")
                 reply_count[uid] = 0
 
-    # Robust mention detection → immediate bratty/feral reply
+    # Robust mention detection → reply ONLY with bratty lines
     mentioned = False
     if bot.user and (bot.user in message.mentions):
         mentioned = True
@@ -136,7 +136,7 @@ async def on_message(message: discord.Message):
             mentioned = True
 
     if mentioned:
-        choice = random.choice(BRATTY_LINES + FERAL_LINES)
+        choice = random.choice(BRATTY_LINES)  # Only bratty lines for mentions
         await message.reply(choice, mention_author=False)
         await bot.process_commands(message)
         return
