@@ -75,6 +75,7 @@ USER3_LINES = [
     "girly!",
     "we hate it here r-right girly?",
     "wen girlie wen?!?!"
+    "the parasites r-right girlie?"
 ]
 
 # Track replies for baguette + peach trigger
