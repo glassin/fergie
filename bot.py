@@ -1,6 +1,7 @@
 import os, random, aiohttp, discord
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
+from datetime import date
 
 TOKEN       = os.getenv("DISCORD_TOKEN")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
@@ -12,9 +13,10 @@ RESULT_LIMIT = 20
 REPLY_CHANCE = 0.10
 
 # Specific member IDs
-USER1_ID = 1028310674318839878  # callate! (twice/day)
-USER2_ID = 534227493360762891   # why don't you leave already? (twice/day)
+USER1_ID = 1028310674318839878  # callate! (twice/day) -> "callate!"
+USER2_ID = 534227493360762891   # leave already? (twice/day) -> "shooo cornman!"
 USER3_ID = 661077262468382761   # 3x/day random lines
+LOBO_ID  = 919405253470871562   # once/day when they post -> "send me money lobo."
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -98,6 +100,8 @@ USER3_LINES = [
 
 # Track replies for baguette + peach trigger (only when replying to the bot)
 reply_count = {}
+# Track last day we replied to Lobo
+last_lobo_reply_date = None
 
 # ---- Events ----
 @bot.event
@@ -112,8 +116,23 @@ async def on_ready():
 
 @bot.event
 async def on_message(message: discord.Message):
+    global last_lobo_reply_date
+
     if message.author.bot:
         return
+
+    # Auto BBL trigger without command prefix
+    if (message.content or "").strip().lower() == "bbl":
+        gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
+        await message.channel.send(gif_url)
+        return
+
+    # Once a day only when LOBO_ID posts
+    if message.author.id == LOBO_ID:
+        today = date.today()
+        if last_lobo_reply_date != today:
+            await message.channel.send(f"<@{LOBO_ID}> send me money lobo.")
+            last_lobo_reply_date = today
 
     # 🥖🍑 trigger: only when the user replies to the BOT's message
     if message.reference and message.reference.resolved:
@@ -225,6 +244,11 @@ async def scam(ctx):
         f"Send me money instead 💗 $Sfergielicious"
     )
     await ctx.send(msg)
+
+@bot.command(name="bbl", help="Send the ultimate BBL GIF 💃")
+async def bbl(ctx):
+    gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
+    await ctx.send(gif_url)
 
 # ---- Start ----
 if __name__ == "__main__":
