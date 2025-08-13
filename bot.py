@@ -796,7 +796,7 @@ async def scam(ctx):
         f"✨ **SCAM ALERT** ✨\n"
         f"BTC is at {_fmt_price(btc)} ({_fmt_change(btc_ch)}) — like… are you KIDDING me?? 😤\n"
         f"ETH is {_fmt_price(eth)} ({_fmt_change(eth_ch)}) — ew… who’s buying this rn??? 🙄\n"
-        f"Send me money instead 💗 $Sfergielicious"
+        f"Send me money instead 💗 $fergielicious"
     )
     await ctx.send(msg)
 
