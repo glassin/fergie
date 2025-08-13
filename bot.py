@@ -151,7 +151,10 @@ USER3_LINES = [
     "girly!",
     "we hate it here r-right girly?",
     "wen girlie wen?!?!",
-    "the parasites r-right girly?"
+    "the parasites r-right girly?",
+    "girl so confusing",
+    "omg sancho is soooooo annoying",
+    "ATTACK GIRLIE!",
 ]
 
 # ===== Economy storage & helpers =====
