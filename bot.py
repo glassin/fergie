@@ -1,7 +1,7 @@
 import os, random, aiohttp, discord
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
-from datetime import date
+from datetime import date, time as dtime, timezone  # NEW: fixed-time schedules use UTC times
 
 TOKEN       = os.getenv("DISCORD_TOKEN")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
@@ -109,8 +109,9 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
-    user1_task.start()
-    user2_task.start()
+    # START fixed-time tasks (UTC times; change hours to your preference)
+    user1_twice_daily_fixed.start()
+    user2_twice_daily_fixed.start()
     user3_task.start()
     daily_scam_post.start()  # daily random "SCAM!!!"
 
@@ -190,17 +191,19 @@ async def six_hour_emoji():
     if channel:
         await channel.send(BREAD_EMOJI)
 
-@tasks.loop(hours=12)
-async def user1_task():
+# === NEW: Fixed-time (UTC) twice-daily schedules ===
+# Change the hours below to whatever times you prefer, in UTC.
+@tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
+async def user1_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER1_ID}> oooomph")
+        await channel.send(f"<@{USER1_ID}> callate!")
 
-@tasks.loop(hours=12)
-async def user2_task():
+@tasks.loop(time=(dtime(hour=11, tzinfo=timezone.utc), dtime(hour=23, tzinfo=timezone.utc)))
+async def user2_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER2_ID}> harrrrash")
+        await channel.send(f"<@{USER2_ID}> shooo cornman!")
 
 @tasks.loop(hours=8)
 async def user3_task():
@@ -255,3 +258,4 @@ if __name__ == "__main__":
     if not TOKEN or not TENOR_KEY or not CHANNEL_ID:
         raise SystemExit("Please set DISCORD_TOKEN, TENOR_API_KEY, and CHANNEL_ID environment variables.")
     bot.run(TOKEN)
+
