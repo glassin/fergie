@@ -12,8 +12,8 @@ RESULT_LIMIT = 20
 REPLY_CHANCE = 0.10
 
 # Specific member IDs
-USER1_ID = 1028310674318839878  # oooomph
-USER2_ID = 534227493360762891   # harrrrash
+USER1_ID = 1028310674318839878  # callate!
+USER2_ID = 534227493360762891   # why don't you leave already?!?
 USER3_ID = 661077262468382761   # twinnies / girly / etc
 
 intents = discord.Intents.default()
@@ -64,8 +64,8 @@ BRATTY_LINES = [
 ]
 
 FERAL_LINES = [
-    "gnaw gnaw gnaw >:3", "hisssss 🐍", "I will destroy you (playfully)",
-    "claw claw claw", "REEEEEEEEEEEEEEEE"
+    "I’m about to throw bread crumbs EVERYWHERE",
+    "LET ME SCREAM INTO A LOAF"
 ]
 
 REACTION_EMOTES = ["🤭", "😏", "😢", "😊", "🙄", "💗", "🫶"]
