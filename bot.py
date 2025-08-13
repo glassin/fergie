@@ -1,7 +1,8 @@
 import os, random, aiohttp, discord, json, asyncio, time, math
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
-from datetime import date, time as dtime, timezone
+from datetime import date, time as dtime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 TOKEN       = os.getenv("DISCORD_TOKEN")
@@ -11,38 +12,48 @@ BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
 SEARCH_TERM  = "bread"
 RESULT_LIMIT = 20
-REPLY_CHANCE = 0.10
+REPLY_CHANCE = 0.10  # random non-tag chatter probability
 
-# Specific member IDs
-USER1_ID = 1028310674318839878  # callate! (twice/day)
-USER2_ID = 534227493360762891   # shooo cornman! (twice/day)
-USER3_ID = 661077262468382761   # 3x/day random lines
-LOBO_ID  = 919405253470871562   # once/day when they post -> "send me money lobo."
+# Specific member IDs (used by some scheduled/post triggers)
+USER1_ID = 1028310674318839878
+USER2_ID = 534227493360762891
+USER3_ID = 661077262468382761
+LOBO_ID  = 919405253470871562
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ===================== Bread Economy Settings =====================
-BANK_FILE = Path(os.getenv("BREAD_BANK_FILE", "bread_bank.json"))    # storage
-TREASURY_MAX = int(os.getenv("TREASURY_MAX", "100000"))              # total supply cap
-USER_WALLET_CAP = int(os.getenv("USER_WALLET_CAP", str(TREASURY_MAX // 10)))  # 10% cap (10k)
-CLAIM_AMOUNT = int(os.getenv("CLAIM_AMOUNT", "250"))                 # daily claim payout
+BANK_FILE = Path(os.getenv("BREAD_BANK_FILE", "bread_bank.json"))
+TREASURY_MAX = int(os.getenv("TREASURY_MAX", "500000"))              # total supply cap
+USER_WALLET_CAP = int(os.getenv("USER_WALLET_CAP", str(TREASURY_MAX // 10)))  # wallet cap = 10% of treasury
+CLAIM_AMOUNT = int(os.getenv("CLAIM_AMOUNT", "250"))                 # daily payout
 CLAIM_COOLDOWN_HOURS = int(os.getenv("CLAIM_COOLDOWN_HOURS", "24"))
-CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))       # must have >= this saved
-DAILY_GIFT_CAP = int(os.getenv("DAILY_GIFT_CAP", "2000"))            # max you can send/day
-GIFT_TAX_TIERS = [                                                   # progressive tax
-    (1000, 0.05),
-    (3000, 0.10),
-    (6000, 0.15),
-]
-GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))            # per-bet ceiling
-GAMBLE_WIN_PROB = float(os.getenv("GAMBLE_WIN_PROB", "0.485"))       # tiny house edge
-# ==================================================================
+CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))       # for manual !claim
+DAILY_GIFT_CAP = int(os.getenv("DAILY_GIFT_CAP", "2000"))
+GIFT_TAX_TIERS = [(1000,0.05),(3000,0.10),(6000,0.15)]
+GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))
 
-# ---- Phrase pack (safe; tweak freely) ----
+# ===== Advanced roll settings (jackpot only on `!roll all`) =====
+JACKPOT_CHANCE = float(os.getenv("JACKPOT_CHANCE", "0.01"))   # 1.00%
+JACKPOT_MULT   = float(os.getenv("JACKPOT_MULT", "20.0"))     # 20x profit
+# Risk tiers by bet% of wallet: (low, high, win_prob, profit_mult)
+RISK_TABLE = [
+    (0.00, 0.10, 0.62, 0.50),   # tiny: 62% win 0.5x
+    (0.10, 0.30, 0.52, 0.85),   # small: 52% win 0.85x
+    (0.30, 0.60, 0.41, 1.25),   # medium: 41% win 1.25x
+    (0.60, 1.01, 0.30, 1.60),   # YOLO: 30% win 1.6x
+]
+# ===================================================
+
+INACTIVE_WINDOW_HOURS = int(os.getenv("INACTIVE_WINDOW_HOURS", "24"))  # penalty window
+PENALTY_IMAGE = "https://postimg.cc/v1c50sVc"  # (page link; swap to direct i.postimg.cc/<file>.png if you have it)
+
+# ---- Phrase pack ----
 PHRASES = {
-    "claim_success": "here's your 250 nikka",
+    "claim_success": "here's your 250 Jammies",
     "claim_gate": "save at least **{need}** first. no savings, no allowance. send me money 💗 $Sfergielicious",
     "claim_cooldown": "not yet. come back in **{hrs}h {mins}m**.",
     "bank_empty": "the bank is empty. tragic. 💀 come back later.",
@@ -52,18 +63,16 @@ PHRASES = {
     "gift_cap_left": "daily gift cap is **{cap}**. you can still send **{left}** today.",
     "gift_insufficient": "you only have **{bal}**.",
     "gamble_win": "WOOOOOOO you WON {amount} 🎉 new: **{bal}**",
-    "gamble_lose": "LMFAO you lost {amount} nikka 😭 new: **{bal}**",
+    "gamble_lose": "LMFAO you lost {amount} Jammies 😭 new: **{bal}**",
     "gamble_max": "max you can bet rn is **{maxb}** (bank or cap limit).",
-    "half_zero": "you have nothing to take. touch some dough first. 💀",
-    "half_taken": "GIMME ALL YOUR MONIES! 😈 enjoy being brokies! took **{taken}** → new: **{bal}**",
     "seed_bank": "Bank refilled by **{added}**. Vault: **{vault}**",
     "seed_user": "Seeded {user} **{give}** → new: **{bal}**",
     "take_bank": "Removed **{amt}** from bank. Vault: **{vault}**",
     "take_user": "Took **{amt}** from {user} → new: **{bal}** (to bank)",
     "setbal_user": "Set {user} to **{bal}** (Δ {delta}; treasury now **{vault}**)",
     "no_funds": "The bank is empty. 💀",
+    "penalty": "got my nailz done girlies. ty for the monies!!! hahaha"
 }
-# ================================================================
 
 # ---- Hawaii images/GIFs ----
 HAWAII_IMAGES = [
@@ -108,7 +117,7 @@ async def fetch_crypto_prices():
                 return None
             return await r.json()
 
-# ---- Responses ----
+# ---- Chat lines ----
 BREAD_PUNS = [
     "I loaf you more than words can say 🍞❤️",
     "You’re the best thing since sliced bread!",
@@ -118,7 +127,8 @@ BREAD_PUNS = [
     "You’re toast-ally awesome!",
     "Bready or not, here I crumb! 🍞",
     "Let’s get this bread 💪",
-    "Some secrets are best kept on the loaf-down."
+    "Some secrets are best kept on the loaf-down.",
+    "MMMMM"  # added
 ]
 
 BRATTY_LINES = [
@@ -136,7 +146,6 @@ FERAL_LINES = [
     "I’m about to throw bread crumbs EVERYWHERE",
     "LET ME SCREAM INTO A LOAF"
 ]
-
 REACTION_EMOTES = ["🤭", "😏", "😢", "😊", "🙄", "💗", "🫶"]
 
 USER3_LINES = [
@@ -157,7 +166,7 @@ def _today_key() -> str:
 economy_lock = asyncio.Lock()
 economy = {
     "treasury": TREASURY_MAX,
-    "users": {}  # str(user_id): {balance, last_claim, last_gift_day, gifted_today, _lobo_date}
+    "users": {}  # str(user_id): {balance, last_claim, last_gift_day, gifted_today, last_active, _lobo_date}
 }
 
 def _load_bank():
@@ -182,7 +191,13 @@ def _user(uid: int):
     suid = str(uid)
     u = economy["users"].get(suid)
     if not u:
-        u = {"balance": 0, "last_claim": 0, "last_gift_day": "", "gifted_today": 0}
+        u = {
+            "balance": 0,
+            "last_claim": 0,
+            "last_gift_day": "",
+            "gifted_today": 0,
+            "last_active": 0.0
+        }
         economy["users"][suid] = u
     return u
 
@@ -210,6 +225,18 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
     net = amount - tax
     return max(0, net), max(0, tax)
 
+def _mark_active(uid: int):
+    _user(uid)["last_active"] = _now()
+
+def _pick_risk_tier(bet: int, balance: int):
+    if balance <= 0:
+        return RISK_TABLE[0][2], RISK_TABLE[0][3]
+    pct = bet / max(1, balance)
+    for low, high, winp, mult in RISK_TABLE:
+        if low <= pct < high:
+            return winp, mult
+    return RISK_TABLE[-1][2], RISK_TABLE[-1][3]
+
 # ---- Events ----
 @bot.event
 async def on_ready():
@@ -217,10 +244,8 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
-    user1_twice_daily_fixed.start()
-    user2_twice_daily_fixed.start()
-    user3_task.start()
     daily_scam_post.start()
+    daily_auto_allowance.start()  # 8am PT allowance + penalties
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -230,7 +255,7 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
-    # --- IMPORTANT: Process commands first (fixes !claim/!bal reliability)
+    # Process commands first
     if content.strip().startswith("!"):
         await bot.process_commands(message)
         return
@@ -261,7 +286,7 @@ async def on_message(message: discord.Message):
         await message.channel.send(str(em) if em else "🙄")
         return
 
-    # 🥖🍑 easter egg
+    # 🥖🍑 easter egg: 2 replies to the bot → baguette+peach
     if message.reference and message.reference.resolved:
         replied_to_msg = message.reference.resolved
         if replied_to_msg.author.id == bot.user.id:
@@ -281,12 +306,11 @@ async def on_message(message: discord.Message):
         bid = bot.user.id
         if f"<@{bid}>" in content or f"<@!{bid}>" in content:
             mentioned = True
-
     if mentioned:
         await message.reply(random.choice(BRATTY_LINES), mention_author=False)
         return
 
-    # Random chat sass
+    # Random chat sass (non-tag chatter enabled)
     if random.random() < REPLY_CHANCE:
         choice = random.choice([random.choice(BRATTY_LINES),
                                 random.choice(FERAL_LINES),
@@ -312,30 +336,58 @@ async def six_hour_emoji():
     if channel:
         await channel.send(BREAD_EMOJI)
 
-@tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
-async def user1_twice_daily_fixed():
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel:
-        await channel.send(f"<@{USER1_ID}> callate!")
-
-@tasks.loop(time=(dtime(hour=11, tzinfo=timezone.utc), dtime(hour=23, tzinfo=timezone.utc)))
-async def user2_twice_daily_fixed():
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel:
-        await channel.send(f"<@{USER2_ID}> shooo cornman!")
-
-@tasks.loop(hours=8)
-async def user3_task():
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel:
-        phrase = random.choice(USER3_LINES)
-        await channel.send(f"<@{USER3_ID}> {phrase}")
-
 @tasks.loop(hours=24)
 async def daily_scam_post():
     channel = bot.get_channel(CHANNEL_ID)
     if channel and random.random() < 0.7:
         await channel.send("SCAM!!! 🚨🙄💅")
+
+# ======== Daily auto allowance + inactivity penalties (8am PT) ========
+@tasks.loop(time=dtime(hour=8, tzinfo=ZoneInfo("America/Los_Angeles")))
+async def daily_auto_allowance():
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel:
+        return
+    guild = channel.guild
+    if not guild:
+        return
+
+    utc_now = _now()
+    inactive_cutoff = utc_now - INACTIVE_WINDOW_HOURS * 3600
+    changed = False
+
+    async with economy_lock:
+        for m in guild.members:
+            if m.bot:
+                continue
+            u = _user(m.id)
+
+            # 1) Daily allowance
+            if economy["treasury"] > 0:
+                pay = min(CLAIM_AMOUNT, economy["treasury"])
+                new_bal = u["balance"] + pay
+                final_bal, skim = _cap_wallet(new_bal)
+                economy["treasury"] -= max(0, (pay - skim))
+                u["balance"] = final_bal
+                changed = True
+
+            # 2) Inactivity penalty
+            last_active = u.get("last_active", 0.0)
+            if last_active == 0.0 or last_active < inactive_cutoff:
+                if u["balance"] > 0:
+                    taken = u["balance"] // 2
+                    if taken > 0:
+                        u["balance"] -= taken
+                        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + taken)
+                        changed = True
+                        try:
+                            # vibe + pic (no hard @)
+                            await channel.send(f"{PHRASES['penalty']}\n{PENALTY_IMAGE}")
+                        except Exception:
+                            pass
+
+        if changed:
+            _save_bank()
 
 # ================== Economy Commands ==================
 def _cooldown_left(last_ts: float, hours: int) -> tuple[int, int]:
@@ -359,31 +411,26 @@ async def balance(ctx, member: discord.Member | None = None):
         u = _user(target.id)
     await ctx.send(f"{target.mention} has **{_fmt_bread(u['balance'])}** (cap {USER_WALLET_CAP} {BREAD_EMOJI}).")
 
-@bot.command(name="claim", help=f"Claim daily bread allowance ({CLAIM_AMOUNT} {BREAD_EMOJI}, 24h cd)")
+@bot.command(name="claim", help=f"Claim daily bread allowance manually ({CLAIM_AMOUNT} {BREAD_EMOJI}, 24h cd)")
 async def claim(ctx):
     uid = ctx.author.id
     async with economy_lock:
         u = _user(uid)
-        # require savings floor
         if u["balance"] < CLAIM_REQUIREMENT:
             await ctx.send(f"{ctx.author.mention} " + PHRASES["claim_gate"].format(need=_fmt_bread(CLAIM_REQUIREMENT)))
             return
-        # cooldown
         hrs_left, mins_left = _cooldown_left(u["last_claim"], CLAIM_COOLDOWN_HOURS)
         if hrs_left or mins_left:
             await ctx.send(f"{ctx.author.mention} " + PHRASES["claim_cooldown"].format(hrs=hrs_left, mins=mins_left))
             return
-        # bank funds
         if economy["treasury"] <= 0:
             await ctx.send(PHRASES["bank_empty"])
             return
 
         pay = min(CLAIM_AMOUNT, economy["treasury"])
-        before = u["balance"]
-        new_bal = before + pay
+        new_bal = u["balance"] + pay
         final_bal, skim = _cap_wallet(new_bal)
 
-        # reduce treasury only by net leaving the bank
         economy["treasury"] -= (pay - skim)
         u["balance"] = final_bal
         u["last_claim"] = _now()
@@ -432,16 +479,12 @@ async def gift(ctx, member: discord.Member, amount: int):
         economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + tax + skim)
         recv["balance"] = recv_final
         giver["gifted_today"] += amount
-
+        _mark_active(ctx.author.id)
         _save_bank()
 
-    parts = [
-        PHRASES["gift_sent"].format(giver=ctx.author.mention, recv=member.mention, amount=_fmt_bread(net))
-    ]
-    if tax:
-        parts.append(PHRASES["gift_tax"].format(tax=_fmt_bread(tax)))
-    if skim:
-        parts.append(PHRASES["gift_skim"].format(skim=_fmt_bread(skim)))
+    parts = [PHRASES["gift_sent"].format(giver=ctx.author.mention, recv=member.mention, amount=_fmt_bread(net))]
+    if tax: parts.append(PHRASES["gift_tax"].format(tax=_fmt_bread(tax)))
+    if skim: parts.append(PHRASES["gift_skim"].format(skim=_fmt_bread(skim)))
     await ctx.send(" ".join(parts))
 
 @bot.command(name="lb", help="Top 10 richest bread hoarders")
@@ -460,55 +503,137 @@ async def lb(ctx):
         lines.append(f"{rank}. **{name}** — {_fmt_bread(bal)}")
     await ctx.send("**Bread Leaderboard**\n" + "\n".join(lines))
 
-@bot.command(name="gamble", help="Flip a coin vs the bank: !gamble 100")
-async def gamble(ctx, amount: int):
-    if amount <= 0:
-        await ctx.send("try a positive bet, casino clown. 🙄")
-        return
+@bot.command(name="richlist", help="Alias of !lb")
+async def richlist(ctx):
+    await lb(ctx)
 
+def _resolve_roll_amount(u_balance: int, arg: str | int) -> int:
+    if isinstance(arg, int):
+        return max(0, arg)
+    s = str(arg).lower()
+    if s == "all":
+        return u_balance
+    if s == "half":
+        return u_balance // 2
+    try:
+        return max(0, int(s))
+    except Exception:
+        return 0
+
+@bot.command(name="roll", help="Tiered roll (jackpot on `!roll all`): !roll 100 | !roll all | !roll half")
+async def roll(ctx, amount: str):
     async with economy_lock:
         u = _user(ctx.author.id)
-        if amount > u["balance"]:
+        bet = _resolve_roll_amount(u["balance"], amount)
+        if bet <= 0:
+            await ctx.send("try a positive bet, casino clown. 🙄")
+            return
+        if bet > u["balance"]:
             await ctx.send(f"{ctx.author.mention} you only have **{_fmt_bread(u['balance'])}**.")
             return
         max_affordable = min(GAMBLE_MAX_BET, u["balance"])
-        if economy["treasury"] < amount:
-            max_affordable = min(max_affordable, economy["treasury"])
-        if amount > max_affordable:
+        if bet > max_affordable:
             await ctx.send(PHRASES["gamble_max"].format(maxb=_fmt_bread(max_affordable)))
             return
 
-        win = (random.random() < GAMBLE_WIN_PROB)
+        # JACKPOT only if user rolled "all"
+        sarg = str(amount).lower()
+        jackpot_hit = False
+        if sarg == "all" and random.random() < JACKPOT_CHANCE:
+            jackpot_hit = True
+            profit = int(bet * JACKPOT_MULT)
+            headroom = USER_WALLET_CAP - u["balance"]
+            payable = max(0, min(profit, headroom, economy["treasury"]))
+            if payable > 0:
+                new_bal = u["balance"] + payable
+                final_bal, skim = _cap_wallet(new_bal)
+                u["balance"] = final_bal
+                economy["treasury"] -= max(0, payable - skim)
+                _mark_active(ctx.author.id)
+                _save_bank()
+                msg = (
+                    f"🎰 **JACKPOT** 🎰 profit **{_fmt_bread(payable)}** "
+                    f"→ new: **{_fmt_bread(final_bal)}**"
+                )
+                if skim:
+                    msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
+                await ctx.send(f"{ctx.author.mention} {msg}")
+                return
+            # if bank/headroom can’t pay, fall through to normal roll
+
+        # Normal tiered roll
+        win_prob, profit_mult = _pick_risk_tier(bet, u["balance"])
+        win = (random.random() < win_prob)
+
         if win:
-            new_bal = u["balance"] + amount
+            profit = int(bet * profit_mult)
+            headroom = USER_WALLET_CAP - u["balance"]
+            payable = max(0, min(profit, headroom, economy["treasury"]))
+            if payable <= 0:
+                await ctx.send(f"{ctx.author.mention} the bank can’t pay your win right now. try later 😤")
+                return
+            new_bal = u["balance"] + payable
             final_bal, skim = _cap_wallet(new_bal)
-            economy["treasury"] -= (amount - skim)
             u["balance"] = final_bal
-            text = PHRASES["gamble_win"].format(amount=_fmt_bread(amount), bal=_fmt_bread(final_bal))
+            economy["treasury"] -= max(0, payable - skim)
+            text = PHRASES["gamble_win"].format(amount=_fmt_bread(payable), bal=_fmt_bread(final_bal))
             if skim:
                 text += f" (cap skim {_fmt_bread(skim)} back to bank)"
         else:
-            u["balance"] -= amount
-            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amount)
-            text = PHRASES["gamble_lose"].format(amount=_fmt_bread(amount), bal=_fmt_bread(u["balance"]))
+            u["balance"] -= bet
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + bet)
+            text = PHRASES["gamble_lose"].format(amount=_fmt_bread(bet), bal=_fmt_bread(u["balance"]))
 
+        _mark_active(ctx.author.id)
         _save_bank()
 
     await ctx.send(f"{ctx.author.mention} {text}")
 
-@bot.command(name="half", help="Give the bank half your bread 😈")
-async def half(ctx):
+@bot.command(name="putasos", help="Try to rob someone: !putasos @user (low success, big fail penalty)")
+async def putasos(ctx, member: discord.Member):
+    if member.id == ctx.author.id:
+        await ctx.send("stealing from yourself? iconic, but no.")
+        return
+    if member.bot:
+        await ctx.send("you can’t rob bots. they have no pockets.")
+        return
+
+    SUCCESS_CHANCE = 0.15
+    STEAL_PCT_MIN, STEAL_PCT_MAX = 0.10, 0.25
+    FAIL_LOSE_PCT = 0.12
+
     async with economy_lock:
-        u = _user(ctx.author.id)
-        if u["balance"] <= 0:
-            await ctx.send(PHRASES["half_zero"])
+        thief = _user(ctx.author.id)
+        victim = _user(member.id)
+
+        if thief["balance"] <= 0:
+            await ctx.send("you’re broke. go touch some dough first.")
             return
-        taken = u["balance"] // 2
-        u["balance"] -= taken
-        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + taken)
-        _save_bank()
-        msg = PHRASES["half_taken"].format(taken=_fmt_bread(taken), bal=_fmt_bread(u["balance"]))
-    await ctx.send(f"{ctx.author.mention} {msg}")
+        if victim["balance"] <= 0:
+            await ctx.send("they’re broke. pick a richer target.")
+            return
+
+        if random.random() < SUCCESS_CHANCE:
+            steal_pct = random.uniform(STEAL_PCT_MIN, STEAL_PCT_MAX)
+            take = max(1, int(victim["balance"] * steal_pct))
+            victim["balance"] -= take
+            new_bal = thief["balance"] + take
+            final_bal, skim = _cap_wallet(new_bal)
+            thief["balance"] = final_bal
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + skim)
+            _mark_active(ctx.author.id)
+            _save_bank()
+            msg = f"successful heist 😈 you stole **{_fmt_bread(take)}** from {member.mention} → new: **{_fmt_bread(thief['balance'])}**"
+            if skim:
+                msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
+            await ctx.send(f"{ctx.author.mention} {msg}")
+        else:
+            loss = max(1, int(thief["balance"] * FAIL_LOSE_PCT))
+            thief["balance"] -= loss
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + loss)
+            _mark_active(ctx.author.id)
+            _save_bank()
+            await ctx.send(f"{ctx.author.mention} got caught 💀 lost **{_fmt_bread(loss)}** to the bank. new: **{_fmt_bread(thief['balance'])}**")
 
 # ================== Admin Commands ==================
 from discord.ext import commands as _admin
@@ -592,7 +717,7 @@ async def take(ctx, target: str = None, amount: int = None):
         u = _user(member.id)
         amt = min(amount, u["balance"])
         u["balance"] -= amt
-        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amt)  # return to bank
+        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amt)
         _save_bank()
     await ctx.send(PHRASES["take_user"].format(amt=_fmt_bread(amt), user=member.mention, bal=_fmt_bread(u["balance"])))
 
@@ -612,7 +737,7 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
 
     async with economy_lock:
         u = _user(member.id)
-        amount = min(amount, USER_WALLET_CAP)  # enforce cap
+        amount = min(amount, USER_WALLET_CAP)
         delta = amount - u["balance"]
         if delta > 0:
             take = min(delta, economy["treasury"])
