@@ -31,7 +31,7 @@ CLAIM_AMOUNT = int(os.getenv("CLAIM_AMOUNT", "250"))                 # daily cla
 CLAIM_COOLDOWN_HOURS = int(os.getenv("CLAIM_COOLDOWN_HOURS", "24"))
 CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))       # must have >= this saved
 DAILY_GIFT_CAP = int(os.getenv("DAILY_GIFT_CAP", "2000"))            # max you can send/day
-GIFT_TAX_TIERS = [                                                   # progressive tax
+GIFT_TAX_Tiers = [                                                   # progressive tax
     (1000, 0.05),
     (3000, 0.10),
     (6000, 0.15),
@@ -126,7 +126,9 @@ BRATTY_LINES = [
 
 FERAL_LINES = [
     "I’m about to throw bread crumbs EVERYWHERE",
-    "LET ME SCREAM INTO A LOAF"
+    "LET ME SCREAM INTO A LOAF",
+    "UGGGHHH",
+    "I'M HONGREEEEEEEEEEE"
 ]
 
 REACTION_EMOTES = ["🤭", "😏", "😢", "😊", "🙄", "💗", "🫶"]
@@ -191,14 +193,14 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
     tax = 0
     remaining = amount
     prev_threshold = 0
-    for threshold, rate in GIFT_TAX_TIERS:
+    for threshold, rate in GIFT_TAX_Tiers:
         if remaining <= 0: break
         portion = max(0, min(remaining, threshold - prev_threshold))
         tax += math.floor(portion * rate)
         remaining -= portion
         prev_threshold = threshold
-    if remaining > 0 and GIFT_TAX_TIERS:
-        tax += math.floor(remaining * GIFT_TAX_TIERS[-1][1])
+    if remaining > 0 and GIFT_TAX_Tiers:
+        tax += math.floor(remaining * GIFT_TAX_Tiers[-1][1])
     net = amount - tax
     return max(0, net), max(0, tax)
 
@@ -341,7 +343,7 @@ async def bank(ctx):
         t = economy["treasury"]
     await ctx.send(f"Bank vault: **{_fmt_bread(t)}** remaining.")
 
-@bot.command(name="balance", help="See your bread balance (or someone else's)")
+@bot.command(name="balance", aliases=["bal", "wallet"], help="See your bread balance (or someone else's)")
 async def balance(ctx, member: discord.Member | None = None):
     target = member or ctx.author
     async with economy_lock:
@@ -353,26 +355,37 @@ async def claim(ctx):
     uid = ctx.author.id
     async with economy_lock:
         u = _user(uid)
+        # require savings floor
         if u["balance"] < CLAIM_REQUIREMENT:
             await ctx.send(f"{ctx.author.mention} " + PHRASES["claim_gate"].format(need=_fmt_bread(CLAIM_REQUIREMENT)))
             return
+        # cooldown
         hrs_left, mins_left = _cooldown_left(u["last_claim"], CLAIM_COOLDOWN_HOURS)
         if hrs_left or mins_left:
             await ctx.send(f"{ctx.author.mention} " + PHRASES["claim_cooldown"].format(hrs=hrs_left, mins=mins_left))
             return
+        # bank funds
         if economy["treasury"] <= 0:
             await ctx.send(PHRASES["bank_empty"])
             return
 
         pay = min(CLAIM_AMOUNT, economy["treasury"])
-        new_bal = u["balance"] + pay
+        before = u["balance"]
+        new_bal = before + pay
         final_bal, skim = _cap_wallet(new_bal)
+
+        # reduce treasury only by net leaving the bank
         economy["treasury"] -= (pay - skim)
         u["balance"] = final_bal
         u["last_claim"] = _now()
+        vault = economy["treasury"]
         _save_bank()
 
-    msg = f"{ctx.author.mention} {PHRASES['claim_success']}"
+    msg = (
+        f"{ctx.author.mention} {PHRASES['claim_success']} "
+        f"(paid {_fmt_bread(pay)}) → **new balance: {_fmt_bread(final_bal)}** · "
+        f"**bank: {_fmt_bread(vault)}**"
+    )
     if skim:
         msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
     await ctx.send(msg)
@@ -593,18 +606,15 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
         amount = min(amount, USER_WALLET_CAP)  # enforce cap
         delta = amount - u["balance"]
         if delta > 0:
-            # need to pull from treasury
             take = min(delta, economy["treasury"])
             u["balance"] += take
             delta_applied = take
             economy["treasury"] -= take
         else:
-            # return to treasury
             give_back = min(-delta, TREASURY_MAX - economy["treasury"])
             u["balance"] -= give_back
             delta_applied = -give_back
             economy["treasury"] += give_back
-        # If treasury couldn’t cover full positive delta, u.balance < desired amount
         _save_bank()
 
     await ctx.send(PHRASES["setbal_user"].format(
