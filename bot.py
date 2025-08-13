@@ -1,4 +1,3 @@
-
 import os, random, aiohttp, discord
 from discord.ext import tasks, commands
 
@@ -39,6 +38,19 @@ BREAD_PUNS = [
     "Some secrets are best kept on the loaf-down.",
 ]
 
+# === Your mention-only responses (exactly as provided) ===
+MENTION_RESPONSES = [
+    "very cheugi",
+    "cayuuuuuute",
+    "I hate it here!",
+    "SEND ME TO THE ER MF!!!",
+    "send me monies!!!",
+    "*sigh*",
+    "*double sigh*",
+    "I'm having a horrible day.",
+    "oh my gaaaaawwwwww........d"
+]
+
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
@@ -49,6 +61,13 @@ async def on_ready():
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
+
+    # --- Handle @mentions first using ONLY your custom lines ---
+    if bot.user in message.mentions:
+        await message.reply(random.choice(MENTION_RESPONSES), mention_author=False)
+        return  # don't also do the random reply below
+
+    # --- Existing random 10% reply behavior (non-mentions) ---
     if random.random() < REPLY_CHANCE:
         gif = await fetch_bread_gif()
         choice = random.choice([
@@ -57,6 +76,7 @@ async def on_message(message: discord.Message):
             (random.choice(BREAD_PUNS) + (f"\n{gif}" if gif else "")),
         ])
         await message.reply(choice, mention_author=False)
+
     await bot.process_commands(message)
 
 @tasks.loop(hours=4)
