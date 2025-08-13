@@ -20,6 +20,12 @@ USER2_ID = 534227493360762891
 USER3_ID = 661077262468382761
 LOBO_ID  = 919405253470871562
 
+# ---------- Casino channel restriction ----------
+GAMBLE_CHANNEL_ID = 1405320084028784753
+def _is_gamble_channel(ch_id: int) -> bool:
+    return ch_id == GAMBLE_CHANNEL_ID
+# -----------------------------------------------
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # needed for daily member sweep
@@ -529,6 +535,10 @@ def _resolve_roll_amount(u_balance: int, arg: str | int) -> int:
 
 @bot.command(name="roll", help="Bet vs the bank: !roll 100 | !roll all | !roll half (jackpot on ALL)")
 async def roll(ctx, amount: str):
+    if not _is_gamble_channel(ctx.channel.id):
+        await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>.")
+        return
+
     async with economy_lock:
         u = _user(ctx.author.id)
         bet = _resolve_roll_amount(u["balance"], amount)
@@ -551,9 +561,9 @@ async def roll(ctx, amount: str):
         frac = bet / max(1, USER_WALLET_CAP)
         win_prob = BASE_ROLL_WIN_PROB
         if frac <= 0.05:      # tiny bet
-            win_prob += 0.05   # 51%
+            win_prob += 0.05   # ~51%
         elif frac >= 0.5:     # very large bet
-            win_prob -= 0.06   # 40%
+            win_prob -= 0.06   # ~40%
 
         jackpot_hit = False
         jackpot_mult = 1
@@ -606,6 +616,10 @@ async def roll(ctx, amount: str):
 
 @bot.command(name="putasos", help="Try to rob someone: !putasos @user (low success, big fail penalty)")
 async def putasos(ctx, member: discord.Member):
+    if not _is_gamble_channel(ctx.channel.id):
+        await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>.")
+        return
+
     if member.id == ctx.author.id:
         await ctx.send("stealing from yourself? iconic, but no.")
         return
@@ -808,6 +822,10 @@ async def bbl(ctx):
 @bot.command(name="hawaii", help="Send a random Hawaii pic or Eddie Murphy GIF 🌺")
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
+
+# ---------- Placeholder: future Pinterest command ----------
+# def <your future pinterest fetcher here>():
+#     pass
 
 # ---- Start ----
 if __name__ == "__main__":
