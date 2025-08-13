@@ -31,7 +31,7 @@ CLAIM_AMOUNT = int(os.getenv("CLAIM_AMOUNT", "250"))                 # daily cla
 CLAIM_COOLDOWN_HOURS = int(os.getenv("CLAIM_COOLDOWN_HOURS", "24"))
 CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))       # must have >= this saved
 DAILY_GIFT_CAP = int(os.getenv("DAILY_GIFT_CAP", "2000"))            # max you can send/day
-GIFT_TAX_Tiers = [                                                   # progressive tax
+GIFT_TAX_TIERS = [                                                   # progressive tax
     (1000, 0.05),
     (3000, 0.10),
     (6000, 0.15),
@@ -64,6 +64,14 @@ PHRASES = {
     "no_funds": "The bank is empty. 💀",
 }
 # ================================================================
+
+# ---- Hawaii images/GIFs ----
+HAWAII_IMAGES = [
+    "https://i.postimg.cc/bGdhZDfs/Screenshot-14.png",
+    "https://i.postimg.cc/cKjNwxdT/Screenshot-15.png",
+    "https://i.postimg.cc/gxgpcy5C/Screenshot-5.png",
+    "https://tenor.com/view/eddie-murphy-raw-eddie-swing-eddie-raw-gif-16629597",
+]
 
 # ---- Tenor helpers ----
 async def fetch_gif(query: str, limit: int = 20):
@@ -121,14 +129,12 @@ BRATTY_LINES = [
     "wen coffee colon cleansing?", "skinnie winnie", "labooobies",
     "I want a pumpkin cream cold brewwwww",
     "update I want it to be fall already . need cold breeze, sweaters and flared leggings and a cute beanie and Halloween decor",
-    "JONATHAN!", "HEAR ME!!!!", "UGH!"
+    "JONATHAN!", "UGH!"
 ]
 
 FERAL_LINES = [
     "I’m about to throw bread crumbs EVERYWHERE",
-    "LET ME SCREAM INTO A LOAF",
-    "UGGGHHH",
-    "I'M HONGREEEEEEEEEEE"
+    "LET ME SCREAM INTO A LOAF"
 ]
 
 REACTION_EMOTES = ["🤭", "😏", "😢", "😊", "🙄", "💗", "🫶"]
@@ -193,14 +199,14 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
     tax = 0
     remaining = amount
     prev_threshold = 0
-    for threshold, rate in GIFT_TAX_Tiers:
+    for threshold, rate in GIFT_TAX_TIERS:
         if remaining <= 0: break
         portion = max(0, min(remaining, threshold - prev_threshold))
         tax += math.floor(portion * rate)
         remaining -= portion
         prev_threshold = threshold
-    if remaining > 0 and GIFT_TAX_Tiers:
-        tax += math.floor(remaining * GIFT_TAX_Tiers[-1][1])
+    if remaining > 0 and GIFT_TAX_TIERS:
+        tax += math.floor(remaining * GIFT_TAX_TIERS[-1][1])
     net = amount - tax
     return max(0, net), max(0, tax)
 
@@ -221,10 +227,16 @@ async def on_message(message: discord.Message):
     if message.author.bot:
         return
 
-    content_lower = (message.content or "").lower().strip()
+    content = (message.content or "")
+    lower = content.lower().strip()
+
+    # --- IMPORTANT: Process commands first (fixes !claim/!bal reliability)
+    if content.strip().startswith("!"):
+        await bot.process_commands(message)
+        return
 
     # Auto BBL trigger
-    if content_lower == "bbl":
+    if lower == "bbl":
         gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
         await message.channel.send(gif_url)
         return
@@ -239,7 +251,7 @@ async def on_message(message: discord.Message):
             _save_bank()
 
     # Phrase trigger → :ppeyeroll:
-    if "pinche fergie" in content_lower:
+    if "pinche fergie" in lower:
         if message.author.id == USER1_ID:
             reply_options = ["pinche sancho", "wtf do you want now mfer!!!!"]
             await message.reply(random.choice(reply_options), mention_author=False)
@@ -267,12 +279,11 @@ async def on_message(message: discord.Message):
         mentioned = True
     elif bot.user:
         bid = bot.user.id
-        if f"<@{bid}>" in (message.content or "") or f"<@!{bid}>" in (message.content or ""):
+        if f"<@{bid}>" in content or f"<@!{bid}>" in content:
             mentioned = True
 
     if mentioned:
         await message.reply(random.choice(BRATTY_LINES), mention_author=False)
-        await bot.process_commands(message)
         return
 
     # Random chat sass
@@ -281,8 +292,6 @@ async def on_message(message: discord.Message):
                                 random.choice(FERAL_LINES),
                                 random.choice(REACTION_EMOTES)])
         await message.reply(choice, mention_author=False)
-
-    await bot.process_commands(message)
 
 # ---- Bread posts & schedules ----
 @tasks.loop(hours=4)
@@ -624,14 +633,7 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
         vault=_fmt_bread(economy["treasury"])
     ))
 
-@setbal.error
-async def setbal_error(ctx, error):
-    if isinstance(error, _admin.MissingPermissions):
-        await ctx.send("You need **Manage Server** to use this, babe. 💅")
-    else:
-        await ctx.send("Set failed. Usage: `!setbal @user 5000`")
-
-# ---- Other Commands (existing) ----
+# ---- Fun commands ----
 @bot.command(name="cafe", help="Send a random coffee GIF ☕")
 async def cafe(ctx, *, term: str = "coffee"):
     query = term if term else "coffee"
@@ -662,6 +664,10 @@ async def scam(ctx):
 async def bbl(ctx):
     gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
     await ctx.send(gif_url)
+
+@bot.command(name="hawaii", help="Send a random Hawaii pic or Eddie Murphy GIF 🌺")
+async def hawaii(ctx):
+    await ctx.send(random.choice(HAWAII_IMAGES))
 
 # ---- Start ----
 if __name__ == "__main__":
