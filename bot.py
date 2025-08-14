@@ -7,7 +7,7 @@ from pathlib import Path
 
 TOKEN       = os.getenv("DISCORD_TOKEN")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
-CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))  # main chatter channel (for bread posts, papo bonks, etc.)
+CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
 SEARCH_TERM  = "bread"
@@ -20,13 +20,11 @@ USER2_ID = 534227493360762891
 USER3_ID = 661077262468382761
 LOBO_ID  = 919405253470871562
 
-# ---------- Channels ----------
+# ---------- Casino channel restriction ----------
 GAMBLE_CHANNEL_ID = 1405320084028784753
-KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
-FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
 def _is_gamble_channel(ch_id: int) -> bool:
     return ch_id == GAMBLE_CHANNEL_ID
-# ------------------------------
+# -----------------------------------------------
 
 # ---------- Jump scare (global) ----------
 JUMPSCARE_TRIGGER = "concha"
@@ -40,96 +38,39 @@ SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 SPOTIFY_PLAYLIST_ID = os.getenv("SPOTIFY_PLAYLIST_ID", "6l190qy5x9xY8Uk3bb2FYl")
 SPOTIFY_MARKET = os.getenv("SPOTIFY_MARKET", "US")
+KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
 # -----------------------------------------
 
-# ---------- FIT images (Dropbox direct links) ----------
-FIT_IMAGE_URLS = [
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428436586.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428436588.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428436590.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428460433.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428460441.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428460444.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428460449.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428480541.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428564378.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428579528.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428584042.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428584327.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428584984.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428594035.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428615016.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428617050.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428617944.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428620092.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428620094.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428620122.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428620123.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428620127.webp?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428620154.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428627797.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428647263.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428658246.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428659385.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428659387.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428660923.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428660925.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428660935.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428660949.png?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428660953.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428663709.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428665085.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428682595.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428686674.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428686800.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428699946.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428710024.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428710026.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428710028.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428720200.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428720213.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428720221.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428720223.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428720227.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428740286.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428750735.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428750739.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428787714.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428787718.webp?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428788228.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428815368.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428836350.png?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428877548.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428877550.png?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428917172.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428917179.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
-    "https://www.dropbox.com/scl/fi/o2dal4mzff5hdw1zdi1b0/pinterest_681169512428919577.jpg?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&dl=1",
+# ---------- FIT (pinterest-style) ----------
+FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
+# Direct Discord CDN image links (public)
+FIT_IMAGES = [
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470866879414323/pinterest_681169512428877550.png?ex=689ef23f&is=689da0bf&hm=6333fbb250a112ecd271bf33cf4212687b8d01d8200a2e614af2851068a65f65&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867483525140/pinterest_681169512428917172.jpg?ex=689ef23f&is=689da0bf&hm=9f7e993b0c4391b27262f6bab9e7eba41af434f27d386ea0e3f7af1a2dcf62ef&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867810422854/pinterest_681169512428917179.jpg?ex=689ef23f&is=689da0bf&hm=738196039bf19fb99b72610d3a30641bb5a8cec28998919e92b3d7dc34c30c28&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470868087373895/pinterest_681169512428919577.jpg?ex=689ef23f&is=689da0bf&hm=f0921729a0c51ac94303ea123209689650e42ec6aebdf585b8609308a34ea7ec&",
 ]
-FIT_CAPTION = "OMFG look at this one girlie!!! we neeeeeeeeed! 💗"
-FIT_REPLY_USER_ID = USER3_ID
-SLAP_PEACH_EMOTE = "<a:slap_peach:1227392416617730078>"
-SCISSOR_EMOJI = "✂️"
+SLAP_PEACH = "<a:slap_peach:1227392416617730078>"
+SCISSORS = "✂️"
+# -----------------------------------------
 
-# ---------- Papo bonk (3 random times/day) ----------
-PAPO_USER_ID = USER1_ID
-PAPO_BONK_TEXT = (
-    "stop being horny papo! bad papo! "
-    "<a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788>"
-)
-# ----------------------------------------------------
+# ---------- Bonk Papo random 3x daily ----------
+BONK_TARGET_ID = USER1_ID
+BONK_EMOTE = "<a:bonk_papo:1216928539413188788>"
+# -----------------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True
+intents.members = True  # needed for daily member sweep
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ===================== Bread Economy Settings =====================
 BANK_FILE = Path(os.getenv("BREAD_BANK_FILE", "bread_bank.json"))
-TREASURY_MAX = int(os.getenv("TREASURY_MAX", "500000"))
-USER_WALLET_CAP = int(os.getenv("USER_WALLET_CAP", str(TREASURY_MAX // 10)))
-CLAIM_AMOUNT = int(os.getenv("CLAIM_AMOUNT", "250"))
+TREASURY_MAX = int(os.getenv("TREASURY_MAX", "500000"))              # total supply cap
+USER_WALLET_CAP = int(os.getenv("USER_WALLET_CAP", str(TREASURY_MAX // 10)))  # wallet cap = 10% of treasury
+CLAIM_AMOUNT = int(os.getenv("CLAIM_AMOUNT", "250"))                 # daily payout
 CLAIM_COOLDOWN_HOURS = int(os.getenv("CLAIM_COOLDOWN_HOURS", "24"))
-CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))
+CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))       # for manual !claim
 DAILY_GIFT_CAP = int(os.getenv("DAILY_GIFT_CAP", "2000"))
 GIFT_TAX_TIERS = [(1000,0.05),(3000,0.10),(6000,0.15)]
 GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))
@@ -324,7 +265,6 @@ def _mark_active(uid: int):
 _spotify_token = {"access_token": None, "expires_at": 0}
 
 async def _get_spotify_token():
-    # cached token
     if _spotify_token["access_token"] and _now() < _spotify_token["expires_at"] - 30:
         return _spotify_token["access_token"]
 
@@ -367,43 +307,56 @@ async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
                         t = item.get("track") or {}
                         if t and not t.get("is_local") and t.get("id"):
                             tracks.append(f"https://open.spotify.com/track/{t['id']}")
-                    url = data.get("next")
-                    params = None
+                    url = data.get("next"); params = None
     except Exception:
         pass
     return tracks
 
-# ---- Random time pickers ----
-def _pick_random_times_today(n: int, start_hour=10, end_hour=22, tz_name="America/Los_Angeles"):
-    tz = ZoneInfo(tz_name)
+# ---- Random time pickers (PT) ----
+def _pick_two_random_times_today():
+    tz = ZoneInfo("America/Los_Angeles")
     today = datetime.now(tz=tz).date()
-    start = datetime.combine(today, dtime(hour=start_hour, tzinfo=tz))
-    end   = datetime.combine(today, dtime(hour=end_hour, tzinfo=tz))
-    total_minutes = int((end - start).total_seconds() // 60)
-    chosen = set()
-    while len(chosen) < n:
-        offset = random.randint(0, total_minutes)
-        dt = (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
-        chosen.add(dt)
-    return sorted(chosen)
+    start = datetime.combine(today, dtime(hour=10, tzinfo=tz))
+    end   = datetime.combine(today, dtime(hour=22, tzinfo=tz))
+    def rand_dt():
+        delta_minutes = int((end - start).total_seconds() // 60)
+        offset = random.randint(0, delta_minutes)
+        return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
+    t1 = rand_dt(); t2 = rand_dt()
+    while abs((t2 - t1).total_seconds()) < 300:
+        t2 = rand_dt()
+    return sorted([t1, t2])
+
+def _pick_one_random_time_today():
+    tz = ZoneInfo("America/Los_Angeles")
+    today = datetime.now(tz=tz).date()
+    start = datetime.combine(today, dtime(hour=10, tzinfo=tz))
+    end   = datetime.combine(today, dtime(hour=22, tzinfo=tz))
+    delta_minutes = int((end - start).total_seconds() // 60)
+    offset = random.randint(0, delta_minutes)
+    return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
+
+def _pick_three_random_times_today():
+    ts = _pick_two_random_times_today()
+    # pick a third time that isn't too close to the other two
+    while True:
+        t3 = _pick_one_random_time_today()
+        if all(abs((t3 - t).total_seconds()) >= 600 for t in ts):  # 10+ min apart
+            break
+    return sorted(ts + [t3])
 
 # ---- Events ----
 @bot.event
 async def on_ready():
     _load_bank()
     if not hasattr(bot, "_js_last"):
-        bot._js_last = {}  # user_id -> last jumpscare trigger time (seconds)
-    # Schedulers state
+        bot._js_last = {}
     if not hasattr(bot, "_kewchie_times"):
-        bot._kewchie_times = []
-        bot._kewchie_posted = set()
+        bot._kewchie_times = []; bot._kewchie_posted = set()
     if not hasattr(bot, "_fit_times"):
-        bot._fit_times = []
-        bot._fit_posted = set()
-    if not hasattr(bot, "_papo_times"):
-        bot._papo_times = []
-        bot._papo_posted = set()
-
+        bot._fit_times = []; bot._fit_posted = set()
+    if not hasattr(bot, "_bonk_times"):
+        bot._bonk_times = []; bot._bonk_posted = set()
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
@@ -411,11 +364,84 @@ async def on_ready():
     user2_twice_daily_fixed.start()
     user3_task.start()
     daily_scam_post.start()
-    daily_auto_allowance.start()
-    kewchie_daily_scheduler.start()
-    fit_daily_scheduler.start()
-    papo_bonk_scheduler.start()
+    daily_auto_allowance.start()  # 8am PT allowance + penalties
+    kewchie_daily_scheduler.start()  # random twice-daily posts
+    fit_daily_scheduler.start()      # random once-daily fit post
+    bonk_daily_scheduler.start()     # random 3x daily bonk messages
 
+# ---- Schedulers ----
+@tasks.loop(minutes=1)
+async def kewchie_daily_scheduler():
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if (not bot._kewchie_times) or (bot._kewchie_times[0].date() != now_utc.date()):
+        bot._kewchie_times = _pick_two_random_times_today()
+        bot._kewchie_posted = set()
+    for t in bot._kewchie_times:
+        key = ("kew", t.isoformat())
+        if now_utc == t and key not in bot._kewchie_posted:
+            channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
+            if channel:
+                links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
+                await channel.send(random.choice(links) if links else "Playlist isn't available right now 😭")
+            bot._kewchie_posted.add(key)
+
+@kewchie_daily_scheduler.before_loop
+async def _wait_kewchie_ready():
+    await bot.wait_until_ready()
+
+@tasks.loop(minutes=1)
+async def fit_daily_scheduler():
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if (not bot._fit_times) or (bot._fit_times[0].date() != now_utc.date()):
+        bot._fit_times = [_pick_one_random_time_today()]
+        bot._fit_posted = set()
+    for t in bot._fit_times:
+        key = ("fit", t.isoformat())
+        if now_utc == t and key not in bot._fit_posted:
+            ch = bot.get_channel(FIT_CHANNEL_ID)
+            if ch and FIT_IMAGES:
+                img = random.choice(FIT_IMAGES)
+                sent = await ch.send(img)
+                await ch.send("OMFG look at this one girlie!!! we neeeeeeeeed! 💗")
+                # Watch for USER3 reply for 20s
+                try:
+                    def check(m: discord.Message):
+                        if m.author.id != USER3_ID or m.channel.id != FIT_CHANNEL_ID:
+                            return False
+                        # If they replied to the image message, or just spoke after it
+                        if m.reference and getattr(m.reference, "message_id", None) == sent.id:
+                            return True
+                        return m.created_at > sent.created_at
+                    reply = await bot.wait_for("message", timeout=20.0, check=check)
+                    if reply:
+                        await ch.send(f"{SLAP_PEACH} you know you'd look good in this girlie! you go girl! {SCISSORS}")
+                except asyncio.TimeoutError:
+                    pass
+            bot._fit_posted.add(key)
+
+@fit_daily_scheduler.before_loop
+async def _wait_fit_ready():
+    await bot.wait_until_ready()
+
+@tasks.loop(minutes=1)
+async def bonk_daily_scheduler():
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if (not bot._bonk_times) or (bot._bonk_times[0].date() != now_utc.date()):
+        bot._bonk_times = _pick_three_random_times_today()
+        bot._bonk_posted = set()
+    for t in bot._bonk_times:
+        key = ("bonk", t.isoformat())
+        if now_utc == t and key not in bot._bonk_posted:
+            ch = bot.get_channel(CHANNEL_ID)
+            if ch:
+                await ch.send(f"<@{BONK_TARGET_ID}> stop being horny papo! bad papo! {BONK_EMOTE}{BONK_EMOTE}{BONK_EMOTE}")
+            bot._bonk_posted.add(key)
+
+@bonk_daily_scheduler.before_loop
+async def _wait_bonk_ready():
+    await bot.wait_until_ready()
+
+# ---- on_message ----
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
@@ -429,7 +455,7 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
         return
 
-    # Global jump scare trigger
+    # Global jump scare trigger (image + creepy line), per-user cooldown
     if JUMPSCARE_TRIGGER in lower:
         now = _now()
         last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
@@ -477,8 +503,7 @@ async def on_message(message: discord.Message):
                 await message.channel.send("🥖🍑")
                 bot._reply_counts[uid] = 0
 
-    # Special: always reply to USER3_ID with a USER3_LINES phrase (100%),
-    # with a 20% chance to append one of the REACTION_EMOTES
+    # Special: always reply to USER3_ID with USER3_LINES (100%), 20% chance to add reaction emote
     if message.author.id == USER3_ID:
         phrase = random.choice(USER3_LINES)
         if random.random() < 0.20:
@@ -579,7 +604,7 @@ async def daily_auto_allowance():
                 u["balance"] = final_bal
                 changed = True
 
-            # 2) Inactivity penalty
+            # 2) Inactivity penalty (no roll/putasos in the last N days)
             last_active = u.get("last_active", 0.0)
             if last_active == 0.0 or last_active < inactive_cutoff:
                 if u["balance"] > 0:
@@ -686,8 +711,6 @@ async def gift(ctx, member: discord.Member, amount: int):
         economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + tax + skim)
         recv["balance"] = recv_final
         giver["gifted_today"] += amount
-        # NOTE: gifting no longer updates last_active (only roll/putasos do)
-
         _save_bank()
 
     parts = [PHRASES["gift_sent"].format(giver=ctx.author.mention, recv=member.mention, amount=_fmt_bread(net))]
@@ -753,22 +776,17 @@ async def roll(ctx, amount: str):
 
         frac = bet / max(1, USER_WALLET_CAP)
         win_prob = BASE_ROLL_WIN_PROB
-        if frac <= 0.05:
-            win_prob += 0.05
-        elif frac >= 0.5:
-            win_prob -= 0.06
+        if frac <= 0.05: win_prob += 0.05
+        elif frac >= 0.5: win_prob -= 0.06
 
         jackpot_hit = False
         jackpot_mult = 1
-
         if isinstance(amount, str) and amount.lower() == "all":
             r = random.random()
             if r < 0.005:
-                jackpot_hit = True
-                jackpot_mult = 15
+                jackpot_hit = True; jackpot_mult = 15
             elif r < 0.025:
-                jackpot_hit = True
-                jackpot_mult = 3
+                jackpot_hit = True; jackpot_mult = 3
 
         if jackpot_hit:
             payout = bet * (jackpot_mult - 1)
@@ -793,8 +811,7 @@ async def roll(ctx, amount: str):
             economy["treasury"] -= (bet - skim)
             u["balance"] = final_bal
             text = PHRASES["gamble_win"].format(amount=_fmt_bread(bet), bal=_fmt_bread(final_bal))
-            if skim:
-                text += f" (cap skim {_fmt_bread(skim)} back to bank)"
+            if skim: text += f" (cap skim {_fmt_bread(skim)} back to bank)"
         else:
             u["balance"] -= bet
             economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + bet)
@@ -841,8 +858,7 @@ async def putasos(ctx, member: discord.Member):
             _mark_active(ctx.author.id)
             _save_bank()
             msg = f"successful heist 😈 you stole **{_fmt_bread(take)}** from {member.mention} → new: **{_fmt_bread(thief['balance'])}**"
-            if skim:
-                msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
+            if skim: msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
             await ctx.send(f"{ctx.author.mention} {msg}")
         else:
             loss = max(1, int(thief["balance"] * FAIL_LOSE_PCT))
@@ -975,6 +991,42 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
         vault=_fmt_bread(economy["treasury"])
     ))
 
+# ---- Fun commands ----
+@bot.command(name="cafe", help="Send a random coffee GIF ☕")
+async def cafe(ctx, *, term: str = "coffee"):
+    query = term if term else "coffee"
+    async with ctx.channel.typing():
+        gif = await fetch_gif(query)
+    await ctx.send(gif if gif else "☕")
+
+@bot.command(name="scam", help="Show current BTC & ETH prices (USD, bratty style)")
+async def scam(ctx):
+    async with ctx.channel.typing():
+        data = await fetch_crypto_prices()
+    if not data or "bitcoin" not in data or "ethereum" not in data:
+        await ctx.send("Ugh 🙄 can't even get the prices rn... this is SO scammy 💅")
+        return
+    btc = data["bitcoin"]["usd"]
+    btc_ch = data["bitcoin"].get("usd_24h_change", 0.0)
+    eth = data["ethereum"]["usd"]
+    eth_ch = data["ethereum"].get("usd_24h_change", 0.0)
+    msg = (
+        f"✨ **SCAM ALERT** ✨\n"
+        f"BTC is at {_fmt_price(btc)} ({_fmt_change(btc_ch)}) — like… are you KIDDING me?? 😤\n"
+        f"ETH is {_fmt_price(eth)} ({_fmt_change(eth_ch)}) — ew… who’s buying this rn??? 🙄\n"
+        f"Send me money instead 💗 $fergielicious"
+    )
+    await ctx.send(msg)
+
+@bot.command(name="bbl", help="Send the ultimate BBL GIF 💃")
+async def bbl(ctx):
+    gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
+    await ctx.send(gif_url)
+
+@bot.command(name="hawaii", help="Send a random Hawaii pic or Eddie Murphy GIF 🌺")
+async def hawaii(ctx):
+    await ctx.send(random.choice(HAWAII_IMAGES))
+
 # ---- Kewchie commands ----
 @bot.command(name="kewchie", help="Post a random Kali Uchis song from the playlist (in the kewchie channel)")
 async def kewchie(ctx):
@@ -1007,95 +1059,31 @@ async def kewchie_debug(ctx):
     )
     await ctx.send(f"```{msg}```")
 
-# ---- FIT command & helpers ----
-async def _await_user3_reply_to(message: discord.Message, timeout_sec: int = 20):
-    """Wait for USER3 to reply to the given message within timeout."""
-    def check(m: discord.Message):
-        return (
-            m.author.id == FIT_REPLY_USER_ID and
-            m.channel.id == message.channel.id and
-            m.reference is not None and
-            m.reference.message_id == message.id
-        )
-    try:
-        await bot.wait_for("message", check=check, timeout=timeout_sec)
-        await message.channel.send(f"{SLAP_PEACH_EMOTE} you know you'd look good in this girlie! you go girl! {SCISSOR_EMOJI}")
-    except asyncio.TimeoutError:
-        pass
-
-async def _post_random_fit(channel: discord.TextChannel):
-    url = random.choice(FIT_IMAGE_URLS)
-    sent = await channel.send(url)
-    await channel.send(FIT_CAPTION)
-    # Start a background watcher for USER3 reply
-    asyncio.create_task(_await_user3_reply_to(sent, timeout_sec=20))
-
-@bot.command(name="fit", help="Post a random outfit inspo in the fit channel")
+# ---- FIT command ----
+@bot.command(name="fit", help="Post a random fit pic in the fit channel")
 async def fit(ctx):
     if ctx.channel.id != FIT_CHANNEL_ID:
         await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>")
         return
-    await _post_random_fit(ctx.channel)
-
-# ---- Daily schedulers (random times) ----
-def _ensure_today_times(container_attr: str, posted_attr: str, n: int):
-    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    times = getattr(bot, container_attr)
-    if (not times) or (times[0].date() != now_utc.date()):
-        setattr(bot, container_attr, _pick_random_times_today(n))
-        setattr(bot, posted_attr, set())
-
-@tasks.loop(minutes=1)
-async def kewchie_daily_scheduler():
-    _ensure_today_times("_kewchie_times", "_kewchie_posted", 2)
-    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    for t in bot._kewchie_times:
-        key = t.isoformat()
-        if now_utc == t and key not in bot._kewchie_posted:
-            channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
-            if channel:
-                links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
-                if links:
-                    await channel.send(random.choice(links))
-                else:
-                    await channel.send("Playlist isn't available right now 😭")
-            bot._kewchie_posted.add(key)
-
-@kewchie_daily_scheduler.before_loop
-async def _wait_bot_ready_kewchie():
-    await bot.wait_until_ready()
-
-@tasks.loop(minutes=1)
-async def fit_daily_scheduler():
-    _ensure_today_times("_fit_times", "_fit_posted", 1)
-    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    for t in bot._fit_times:
-        key = t.isoformat()
-        if now_utc == t and key not in bot._fit_posted:
-            channel = bot.get_channel(FIT_CHANNEL_ID)
-            if channel:
-                await _post_random_fit(channel)
-            bot._fit_posted.add(key)
-
-@fit_daily_scheduler.before_loop
-async def _wait_bot_ready_fit():
-    await bot.wait_until_ready()
-
-@tasks.loop(minutes=1)
-async def papo_bonk_scheduler():
-    _ensure_today_times("_papo_times", "_papo_posted", 3)
-    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    for t in bot._papo_times:
-        key = t.isoformat()
-        if now_utc == t and key not in bot._papo_posted:
-            channel = bot.get_channel(CHANNEL_ID)
-            if channel:
-                await channel.send(f"<@{PAPO_USER_ID}> {PAPO_BONK_TEXT}")
-            bot._papo_posted.add(key)
-
-@papo_bonk_scheduler.before_loop
-async def _wait_bot_ready_papo():
-    await bot.wait_until_ready()
+    if not FIT_IMAGES:
+        await ctx.send("no pics yet, girlie 😭")
+        return
+    img = random.choice(FIT_IMAGES)
+    sent = await ctx.send(img)
+    await ctx.send("OMFG look at this one girlie!!! we neeeeeeeeed! 💗")
+    # Watch for USER3 reply for 20s
+    try:
+        def check(m: discord.Message):
+            if m.author.id != USER3_ID or m.channel.id != FIT_CHANNEL_ID:
+                return False
+            if m.reference and getattr(m.reference, "message_id", None) == sent.id:
+                return True
+            return m.created_at > sent.created_at
+        reply = await bot.wait_for("message", timeout=20.0, check=check)
+        if reply:
+            await ctx.send(f"{SLAP_PEACH} you know you'd look good in this girlie! you go girl! {SCISSORS}")
+    except asyncio.TimeoutError:
+        pass
 
 # ---- Start ----
 if __name__ == "__main__":
