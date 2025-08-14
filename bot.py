@@ -819,7 +819,7 @@ async def roll(ctx, amount: str):
         _save_bank()
     await ctx.send(f"{ctx.author.mention} {text}")
 
-@bot.command(name="putasos", help="Try to rob someone: !putasos @user (low success, big fail penalty)")
+@bot.command(name="putasos", help="Try to rob someone kombat klubz style: !putasos @user (low success, big fail penalty)")
 async def putasos(ctx, member: discord.Member):
     if not _is_gamble_channel(ctx.channel.id):
         await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>.")
@@ -1013,7 +1013,7 @@ async def airdrop_today(ctx):
     await ctx.send("Manual airdrop executed for today ✅")
 
 # ---- Fun / misc commands ----
-@bot.command(name="cafe", help="Send a random coffee GIF ☕")
+@bot.command(name="cafe", help="owl y lark ☕")
 async def cafe(ctx, *, term: str = "coffee"):
     query = term if term else "coffee"
     async with ctx.channel.typing():
