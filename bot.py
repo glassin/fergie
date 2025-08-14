@@ -29,6 +29,7 @@ def _is_gamble_channel(ch_id: int) -> bool:
 # ---------- Jump scare (global) ----------
 JUMPSCARE_TRIGGER = "concha"
 JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
+JUMPSCARE_EMOJI = "<:monkagiga:692488006426427392>"
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
 # ---------------------------------------
 
@@ -269,7 +270,7 @@ async def on_message(message: discord.Message):
         last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
         if now - last >= JUMPSCARE_COOLDOWN_SECONDS:
             await message.channel.send(JUMPSCARE_IMAGE_URL)
-            await message.channel.send("the parasites!!! :monkagiga:")
+            await message.channel.send(f"the parasites!!! {JUMPSCARE_EMOJI}")
             bot._js_last[message.author.id] = now
         return
 
@@ -310,15 +311,6 @@ async def on_message(message: discord.Message):
             if bot._reply_counts[uid] >= 2:
                 await message.channel.send("🥖🍑")
                 bot._reply_counts[uid] = 0
-
-    # Special: always reply to USER3_ID with a USER3_LINES phrase (100%),
-    # with a 20% chance to append one of the REACTION_EMOTES
-    if message.author.id == USER3_ID:
-        phrase = random.choice(USER3_LINES)
-        if random.random() < 0.20:
-            phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"
-        await message.reply(phrase, mention_author=False)
-        return
 
     # Mention → bratty only
     mentioned = False
