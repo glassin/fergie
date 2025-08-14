@@ -30,24 +30,17 @@ def _is_gamble_channel(ch_id: int) -> bool:
 JUMPSCARE_TRIGGER = "concha"
 JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
+JUMPSCARE_EMOTE = "<:monkagiga:1131711987794063511>"
 # ---------------------------------------
 
-# ---------- Kali Uchis auto-post (two random times per day, PT) ----------
-KALI_CHANNEL_ID = 1131573379577675826
-KALI_PLAYLIST_URL = "https://open.spotify.com/playlist/6l190qy5x9xY8Uk3bb2FYl"
-KALI_TRACKS_FILE = Path("kali_tracks.json")
-# Reasonable daytime window; change if you want overnight posts:
-KALI_START_HOUR_PT = 10  # 10:00 PT
-KALI_END_HOUR_PT   = 22  # 22:00 PT
-
-DEFAULT_KALI_TRACKS = [
-    # Replace these with real track URLs from the playlist; these are placeholders/examples.
-    "https://open.spotify.com/track/0Fv7Kdlm6KpO4B9S3l7hJH",
-    "https://open.spotify.com/track/7G9D9gH7sQf1qz0V1zKZ4S",
-    "https://open.spotify.com/track/6ZFbXIJkuI1dVNWvzJzown",
-    "https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b",
-]
-# ------------------------------------------------------------------------
+# ---------- Kali Uchis playlist auto-post ----------
+KEWCHIE_CHANNEL_ID = 1131573379577675826
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+SPOTIFY_PLAYLIST_ID = os.getenv("SPOTIFY_PLAYLIST_ID", "6l190qy5x9xY8Uk3bb2FYl")  # your playlist
+# We'll choose two random times per day (PT) and post exactly then.
+PT = ZoneInfo("America/Los_Angeles")
+# -----------------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -64,11 +57,10 @@ CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))       # for manua
 DAILY_GIFT_CAP = int(os.getenv("DAILY_GIFT_CAP", "2000"))
 GIFT_TAX_TIERS = [(1000,0.05),(3000,0.10),(6000,0.15)]
 GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))
-# Base coin win chance is not 50/50 anymore; we vary by bet size and jackpot path
 BASE_ROLL_WIN_PROB = float(os.getenv("BASE_ROLL_WIN_PROB", "0.46"))
-INACTIVE_WINDOW_DAYS = int(os.getenv("INACTIVE_WINDOW_DAYS", "7"))   # penalty window (days, default 7)
-PENALTY_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"  # replace with your direct image link if needed
-JACKPOT_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"  # used on roll all jackpot too
+INACTIVE_WINDOW_DAYS = int(os.getenv("INACTIVE_WINDOW_DAYS", "7"))   # penalty window (days)
+PENALTY_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
+JACKPOT_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
 # ==================================================================
 
 # ---- Phrase pack ----
@@ -252,81 +244,144 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
 def _mark_active(uid: int):
     _user(uid)["last_active"] = _now()
 
-# ---------- Kali helpers ----------
-def _load_kali_tracks() -> list[str]:
-    try:
-        if KALI_TRACKS_FILE.exists():
-            data = json.loads(KALI_TRACKS_FILE.read_text())
-            if isinstance(data, list) and data:
-                return [str(x) for x in data]
-    except Exception:
-        pass
-    return list(DEFAULT_KALI_TRACKS)
+# ---------- Spotify helpers ----------
+_spotify_cache = {
+    "token": None,
+    "token_exp": 0.0,
+    "tracks": []  # list of track URLs
+}
 
-def _pt_now() -> datetime:
-    return datetime.now(ZoneInfo("America/Los_Angeles"))
+async def _spotify_get_token():
+    # Client Credentials flow (no redirect needed)
+    if _spotify_cache["token"] and _now() < _spotify_cache["token_exp"] - 60:
+        return _spotify_cache["token"]
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        return None
+    token_url = "https://accounts.spotify.com/api/token"
+    data = {"grant_type": "client_credentials"}
+    auth = aiohttp.BasicAuth(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET)
+    async with aiohttp.ClientSession() as s:
+        async with s.post(token_url, data=data, auth=auth, timeout=15) as r:
+            if r.status != 200:
+                return None
+            js = await r.json()
+            tok = js.get("access_token")
+            expires_in = js.get("expires_in", 3600)
+            _spotify_cache["token"] = tok
+            _spotify_cache["token_exp"] = _now() + expires_in
+            return tok
 
-def _pick_random_times_pt(start_hour: int, end_hour: int, k: int) -> list[datetime]:
-    """Pick k random datetimes between today's [start_hour, end_hour] in PT.
-       If we're past end_hour, schedule for tomorrow."""
-    tz = ZoneInfo("America/Los_Angeles")
-    now = datetime.now(tz)
-    base_day = now.date()
-    start = datetime.combine(base_day, dtime(hour=start_hour, tzinfo=tz))
-    end   = datetime.combine(base_day, dtime(hour=end_hour, tzinfo=tz))
-    if now >= end:
-        # move to tomorrow
-        base_day = base_day + timedelta(days=1)
-        start = datetime.combine(base_day, dtime(hour=start_hour, tzinfo=tz))
-        end   = datetime.combine(base_day, dtime(hour=end_hour, tzinfo=tz))
-    # ensure we don't schedule in the past today
-    window_start = max(now + timedelta(minutes=1), start)
-    total_minutes = max(1, int((end - window_start).total_seconds() // 60))
-    if total_minutes <= k:
-        # small window; just space them out
-        times = [window_start + timedelta(minutes=i * max(1, total_minutes // k)) for i in range(k)]
-        return sorted(times)
-    picks = sorted(random.sample(range(total_minutes), k))
-    return [window_start + timedelta(minutes=m) for m in picks]
+async def _spotify_fetch_playlist_tracks(playlist_id: str):
+    token = await _spotify_get_token()
+    if not token:
+        return []
+    tracks = []
+    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks?fields=items(track(external_urls,uri,is_local)),next&limit=100"
+    headers = {"Authorization": f"Bearer {token}"}
+    async with aiohttp.ClientSession() as s:
+        while url:
+            async with s.get(url, headers=headers, timeout=20) as r:
+                if r.status != 200:
+                    break
+                js = await r.json()
+                for it in js.get("items", []):
+                    tr = it.get("track") or {}
+                    if not tr or tr.get("is_local"):
+                        continue
+                    ext = tr.get("external_urls", {})
+                    spot = ext.get("spotify")
+                    if spot:
+                        tracks.append(spot)
+                url = js.get("next")
+    return tracks
 
-async def _post_random_kali_track():
-    channel = bot.get_channel(KALI_CHANNEL_ID)
+async def _ensure_kewchie_tracks_loaded():
+    if _spotify_cache["tracks"]:
+        return True
+    tr = await _spotify_fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
+    _spotify_cache["tracks"] = tr
+    return len(tr) > 0
+
+def _kewchie_random_track() -> str | None:
+    if not _spotify_cache["tracks"]:
+        return None
+    return random.choice(_spotify_cache["tracks"])
+
+# ---------- Kewchie daily scheduler ----------
+_kewchie_schedule = {
+    "day_key": "",     # PT day key, e.g., 2025-08-13
+    "times_utc": [],   # sorted list of two epoch seconds
+    "posted": 0
+}
+
+def _pt_day_key(dt_utc: datetime | None = None) -> str:
+    now = dt_utc.astimezone(PT) if dt_utc else datetime.now(PT)
+    return now.date().isoformat()
+
+def _random_times_two_for_today() -> list[float]:
+    # Pick two distinct random instants in the current PT day (00:00–24:00 PT),
+    # return as UTC epoch seconds, sorted.
+    today_pt = datetime.now(PT).date()
+    start_pt = datetime.combine(today_pt, dtime(0, 0, tzinfo=PT))
+    end_pt = start_pt + timedelta(days=1)
+    # pick seconds offset in [0, 86400)
+    t1 = random.randint(0, 86399)
+    t2 = random.randint(0, 86399)
+    while t2 == t1:
+        t2 = random.randint(0, 86399)
+    times_pt = [start_pt + timedelta(seconds=t1), start_pt + timedelta(seconds=t2)]
+    times_pt.sort()
+    return [times_pt[0].astimezone(timezone.utc).timestamp(),
+            times_pt[1].astimezone(timezone.utc).timestamp()]
+
+async def _kewchie_reset_schedule_if_needed():
+    now_utc = datetime.now(timezone.utc)
+    dk = _pt_day_key(now_utc)
+    if _kewchie_schedule["day_key"] != dk or len(_kewchie_schedule["times_utc"]) != 2:
+        _kewchie_schedule["day_key"] = dk
+        _kewchie_schedule["times_utc"] = _random_times_two_for_today()
+        _kewchie_schedule["posted"] = 0
+
+async def _maybe_post_kewchie():
+    channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
     if not channel:
         return
-    tracks = _load_kali_tracks()
-    if not tracks:
+    await _ensure_kewchie_tracks_loaded()
+    link = _kewchie_random_track()
+    if not link:
+        await channel.send("Couldn't load the Kali playlist right now 😭")
         return
-    await channel.send(random.choice(tracks))
+    await channel.send(link)
 
-async def _kali_random_two_daily_loop():
-    """Background loop: each cycle picks two random times in the PT window and posts one track at each time."""
-    await bot.wait_until_ready()
-    tz = ZoneInfo("America/Los_Angeles")
-    while not bot.is_closed():
-        targets = _pick_random_times_pt(KALI_START_HOUR_PT, KALI_END_HOUR_PT, 2)
-        for when in targets:
-            # sleep until 'when' (PT)
-            while True:
-                now = datetime.now(tz)
-                wait = (when - now).total_seconds()
-                if wait <= 0:
-                    break
-                # sleep in chunks so shutdowns don't get stuck
-                await asyncio.sleep(min(wait, 300))
-            await _post_random_kali_track()
-        # after finishing today's two posts, loop to pick new times again
+@tasks.loop(seconds=30)
+async def kewchie_scheduler():
+    # Runs every 30s; if it's time for one of today's two posts, do it.
+    await _kewchie_reset_schedule_if_needed()
+    if _kewchie_schedule["posted"] >= 2:
+        return
+    now = _now()
+    next_idx = _kewchie_schedule["posted"]
+    next_ts = _kewchie_schedule["times_utc"][next_idx]
+    if now >= next_ts:
+        try:
+            await _maybe_post_kewchie()
+        finally:
+            _kewchie_schedule["posted"] += 1
 
-# ---- Events ----
+# ======================================== Events ========================================
 @bot.event
 async def on_ready():
     _load_bank()
     if not hasattr(bot, "_js_last"):
         bot._js_last = {}  # user_id -> last jumpscare trigger time (seconds)
-    # start Kali background loop (random two per day)
-    if not hasattr(bot, "_kali_task"):
-        bot._kali_task = asyncio.create_task(_kali_random_two_daily_loop())
-
     print(f"Logged in as {bot.user}")
+
+    # Preload Spotify tracks (non-blocking safety)
+    try:
+        await _ensure_kewchie_tracks_loaded()
+    except Exception:
+        pass
+
     four_hour_post.start()
     six_hour_emoji.start()
     user1_twice_daily_fixed.start()
@@ -334,6 +389,7 @@ async def on_ready():
     user3_task.start()
     daily_scam_post.start()
     daily_auto_allowance.start()  # 8am PT allowance + penalties
+    kewchie_scheduler.start()     # start the twice-a-day random posting loop
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -354,7 +410,7 @@ async def on_message(message: discord.Message):
         last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
         if now - last >= JUMPSCARE_COOLDOWN_SECONDS:
             await message.channel.send(JUMPSCARE_IMAGE_URL)
-            await message.channel.send("the parasites!!! <:monkagiga:1131711987794063511>")
+            await message.channel.send(f"the parasites!!! {JUMPSCARE_EMOTE}")
             bot._js_last[message.author.id] = now
         return
 
@@ -606,7 +662,6 @@ async def gift(ctx, member: discord.Member, amount: int):
         recv["balance"] = recv_final
         giver["gifted_today"] += amount
         # NOTE: gifting no longer updates last_active (only roll/putasos do)
-
         _save_bank()
 
     parts = [PHRASES["gift_sent"].format(giver=ctx.author.mention, recv=member.mention, amount=_fmt_bread(net))]
@@ -671,13 +726,12 @@ async def roll(ctx, amount: str):
             await ctx.send(PHRASES["gamble_max"].format(maxb=_fmt_bread(max_affordable)))
             return
 
-        # Win probabilities by size (spicier but fair-ish)
-        # small bets slightly higher win chance; large bets slightly lower
+        # Win probabilities by size
         frac = bet / max(1, USER_WALLET_CAP)
         win_prob = BASE_ROLL_WIN_PROB
-        if frac <= 0.05:      # tiny bet
+        if frac <= 0.05:
             win_prob += 0.05   # ~51%
-        elif frac >= 0.5:     # very large bet
+        elif frac >= 0.5:
             win_prob -= 0.06   # ~40%
 
         jackpot_hit = False
@@ -685,7 +739,6 @@ async def roll(ctx, amount: str):
 
         # JACKPOT path only on "all"
         if isinstance(amount, str) and amount.lower() == "all":
-            # ~0.5% to hit giga jackpot (x15), else ~2% mini-jackpot (x3)
             r = random.random()
             if r < 0.005:
                 jackpot_hit = True
@@ -695,12 +748,11 @@ async def roll(ctx, amount: str):
                 jackpot_mult = 3
 
         if jackpot_hit:
-            payout = bet * (jackpot_mult - 1)  # additional gain beyond original bet
-            # check bank/tighten to wallet cap
+            payout = bet * (jackpot_mult - 1)
             available_from_bank = min(economy["treasury"], payout)
             new_bal = u["balance"] + available_from_bank
             final_bal, skim = _cap_wallet(new_bal)
-            paid_from_bank = (final_bal - u["balance"]) + skim  # total removed incl skim return
+            paid_from_bank = (final_bal - u["balance"]) + skim
             economy["treasury"] -= max(0, paid_from_bank - skim)
             u["balance"] = final_bal
             _mark_active(ctx.author.id)
@@ -743,8 +795,8 @@ async def putasos(ctx, member: discord.Member):
         return
 
     SUCCESS_CHANCE = 0.15
-    STEAL_PCT_MIN, STEAL_PCT_MAX = 0.10, 0.25   # 10–25% of victim on success
-    FAIL_LOSE_PCT = 0.12                        # thief loses 12% of own balance to bank
+    STEAL_PCT_MIN, STEAL_PCT_MAX = 0.10, 0.25
+    FAIL_LOSE_PCT = 0.12
 
     async with economy_lock:
         thief = _user(ctx.author.id)
@@ -772,28 +824,12 @@ async def putasos(ctx, member: discord.Member):
                 msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
             await ctx.send(f"{ctx.author.mention} {msg}")
         else:
-            loss = max(1, int(thief["balance"] * 0.12))
+            loss = max(1, int(thief["balance"] * FAIL_LOSE_PCT))
             thief["balance"] -= loss
             economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + loss)
             _mark_active(ctx.author.id)
             _save_bank()
             await ctx.send(f"{ctx.author.mention} got caught 💀 lost **{_fmt_bread(loss)}** to the bank. new: **{_fmt_bread(thief['balance'])}**")
-
-# ============== Manual command to post a random Kali track ==============
-@bot.command(name="kewchie", help="Post a random Kali Uchis song link to the dedicated music channel")
-async def kewchie(ctx):
-    """Posts a random track to the configured KALI_CHANNEL_ID (even if invoked elsewhere)."""
-    channel = bot.get_channel(KALI_CHANNEL_ID)
-    if not channel:
-        await ctx.send("I can't find the Kali channel right now. 🤯")
-        return
-    tracks = _load_kali_tracks()
-    if not tracks:
-        await ctx.send("No tracks loaded yet. Add some to kali_tracks.json!")
-        return
-    await channel.send(random.choice(tracks))
-    if ctx.channel.id != KALI_CHANNEL_ID:
-        await ctx.send(f"Posted in <#{KALI_CHANNEL_ID}> ✅")
 
 # ================== Admin Commands ==================
 from discord.ext import commands as _admin
@@ -953,6 +989,25 @@ async def bbl(ctx):
 @bot.command(name="hawaii", help="Send a random Hawaii pic or Eddie Murphy GIF 🌺")
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
+
+# ---- Kewchie command: post random track from playlist to the specific channel ----
+@bot.command(name="kewchie", help="Post a random Kali Uchis song link in the designated channel")
+async def kewchie(ctx):
+    channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
+    if not channel:
+        await ctx.send("Can't find the Kewchie channel right now.")
+        return
+    ok = await _ensure_kewchie_tracks_loaded()
+    if not ok:
+        await ctx.send("Playlist isn't available right now 😭")
+        return
+    link = _kewchie_random_track()
+    if not link:
+        await ctx.send("No tracks found in the playlist.")
+        return
+    await channel.send(link)
+    if ctx.channel.id != KEWCHIE_CHANNEL_ID:
+        await ctx.send(f"Posted one in <#{KEWCHIE_CHANNEL_ID}>")
 
 # ---------- Placeholder: future Pinterest command ----------
 # def <your future pinterest fetcher here>():
