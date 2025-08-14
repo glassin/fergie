@@ -21,9 +21,9 @@ RESULT_LIMIT = 20
 REPLY_CHANCE = 0.10
 
 # Specific member IDs
-USER1_ID = 1028310674318839878
-USER2_ID = 534227493360762891
-USER3_ID = 661077262468382761
+SANCHO_ID = 1028310674318839878
+CORNMAN_ID = 534227493360762891
+VIVVY_ID = 661077262468382761
 LOBO_ID  = 919405253470871562
 
 # ---------- Casino channel restriction ----------
@@ -925,7 +925,7 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
     ))
 
 # ================== Fun / Media Commands ==================
-@bot.command(name="cafe", help="Send a random coffee GIF ☕")
+@bot.command(name="cafe", help="owl y lark ☕")
 async def cafe(ctx, *, term: str = "coffee"):
     query = term if term else "coffee"
     async with ctx.channel.typing():
@@ -958,12 +958,12 @@ async def scam(ctx):
     )
     await ctx.send(msg)
 
-@bot.command(name="bbl", help="Send the ultimate BBL GIF 💃")
+@bot.command(name="bbl", help="see fergies culo")
 async def bbl(ctx):
     gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
     await ctx.send(gif_url)
 
-@bot.command(name="hawaii", help="Send a random Hawaii pic or Eddie Murphy GIF 🌺")
+@bot.command(name="hawaii", help="pix from vivvy's trip 🌺")
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
 
@@ -996,7 +996,7 @@ async def kewchie_debug(ctx):
     await ctx.send(f"```{msg}```")
 
 # ---- FIT command & auto daily ----
-@bot.command(name="fit", help="Post a random fit pic in the fit channel")
+@bot.command(name="fit", help="fergies fits")
 async def fit(ctx):
     if ctx.channel.id != FIT_CHANNEL_ID:
         await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>"); return
