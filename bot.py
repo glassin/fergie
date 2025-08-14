@@ -1,4 +1,4 @@
-import os, random, aiohttp, discord, json, asyncio, time, math
+import os, random, aiohttp, discord, json, asyncio, time, math, re
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
@@ -187,7 +187,8 @@ async def _db_get(key: str):
         row = await con.fetchrow("SELECT value FROM kv WHERE key=$1", key)
         return None if not row else row["value"]
 
-async def _db_set(key: str, value: dict):
+async def _db_set(key: str, value):
+    # Value can be dict or list (JSON-serializable)
     if not db_pool: return
     async with db_pool.acquire() as con:
         await con.execute("""
@@ -337,12 +338,123 @@ def _pick_three_times_today_pt():
         times.add(rand_dt())
     return list(times)
 
+# ================== Mimic (realistic, subtle) ==================
+# ---------- Mimic USER3 (occasional, realistic) ----------
+MIMIC_TARGET_ID = USER3_ID                # 661077262468382761
+MIMIC_MAX_CORPUS = 1500                   # keep ~1500 lines
+MIMIC_MIN_LEN = 4                         # min words in a generated line
+MIMIC_MAX_LEN = 24                        # max words in a generated line
+MIMIC_COOLDOWN_MINUTES = 240              # ≥ 4 hours between mimics
+MIMIC_CHANCE = 0.012                      # ~1.2% chance when eligible
+MIMIC_ACTIVE_HOURS_PT = (9, 23)           # only 9:00–22:59 PT
+MIMIC_ALLOW_CHANNELS = None               # e.g., {CHANNEL_ID} to limit to one channel
+
+# ---------- Mimic storage/state ----------
+_mimic_cache: list[str] = []
+_mimic_last_ts: float = 0.0
+_mimic_enabled: bool = True
+_mimic_recent_lines: list[str] = []
+
+async def _load_mimic_state():
+    """Load mimic corpus + settings (if DB available)."""
+    global _mimic_cache, _mimic_enabled
+    data = await _db_get("mimic_corpus")
+    if isinstance(data, list):
+        _mimic_cache = [str(x) for x in data][-MIMIC_MAX_CORPUS:]
+    else:
+        _mimic_cache = []
+    settings = await _db_get("mimic_settings")
+    if isinstance(settings, dict) and "enabled" in settings:
+        _mimic_enabled = bool(settings["enabled"])
+
+async def _save_mimic_corpus():
+    if db_pool:
+        await _db_set("mimic_corpus", _mimic_cache[-MIMIC_MAX_CORPUS:])
+
+async def _save_mimic_settings():
+    if db_pool:
+        await _db_set("mimic_settings", {"enabled": _mimic_enabled})
+
+_WORD_RE = re.compile(r"[A-Za-z0-9_:'’$%#@]+|[.!?]+", re.UNICODE)
+
+def _mimic_clean(msg: str) -> str:
+    s = (msg or "").strip()
+    if not s or s.startswith("!"):  # ignore commands
+        return ""
+    s = re.sub(r"https?://\S+", "", s)  # links
+    s = re.sub(r"<@!?\d+>", "", s)      # mentions
+    s = re.sub(r"<#\d+>", "", s)        # channel mentions
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def _mimic_tokenize(text: str):
+    return _WORD_RE.findall(text)
+
+def _mimic_markov_build(corpus: list[str], order: int = 2):
+    edges = {}
+    for line in corpus:
+        toks = _mimic_tokenize(line)
+        if len(toks) < order + 1:
+            continue
+        for i in range(len(toks) - order):
+            key = tuple(toks[i:i+order])
+            nxt = toks[i+order]
+            edges.setdefault(key, []).append(nxt)
+    return edges
+
+def _mimic_generate(corpus: list[str]) -> str | None:
+    if not corpus:
+        return None
+    order = 3 if random.random() < 0.35 else 2
+    graph = _mimic_markov_build(corpus, order=order)
+    if not graph:
+        return None
+
+    starts = [k for k in graph if re.match(r"[A-Za-z0-9@#$:]", k[0])]
+    state = random.choice(starts or list(graph.keys()))
+    out = list(state)
+
+    for _ in range(MIMIC_MAX_LEN):
+        nxts = graph.get(tuple(out[-order:]))
+        if not nxts:
+            break
+        nxt = random.choice(nxts)
+        out.append(nxt)
+        if out[-1] in (".", "!", "?") and len(out) >= MIMIC_MIN_LEN:
+            break
+
+    # join with tight punctuation
+    text = []
+    for tok in out:
+        if tok in (".", "!", "?", ",", ";", ":") and text:
+            text[-1] = text[-1] + tok
+        else:
+            text.append(tok)
+    s = " ".join(text).strip()
+    s = s[:280]
+    if len(s.split()) < MIMIC_MIN_LEN:
+        return None
+
+    # tiny emoji sprinkle
+    if random.random() < 0.12 and REACTION_EMOTES:
+        s = f"{s} {random.choice(REACTION_EMOTES)}"
+
+    # avoid immediate repeats
+    if s in _mimic_recent_lines:
+        return None
+    _mimic_recent_lines.append(s)
+    if len(_mimic_recent_lines) > 10:
+        _mimic_recent_lines.pop(0)
+
+    return s
+
 # ================== Events ==================
 @bot.event
 async def on_ready():
     # DB init & load economy
     await _db_init()
     await _load_bank()
+    await _load_mimic_state()
 
     if not hasattr(bot, "_js_last"):
         bot._js_last = {}
@@ -422,6 +534,15 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
+    # Learn from USER3's natural messages (sanitized)
+    if message.author.id == USER3_ID:
+        cleaned = _mimic_clean(message.content)
+        if cleaned:
+            _mimic_cache.append(cleaned)
+            if len(_mimic_cache) > MIMIC_MAX_CORPUS:
+                del _mimic_cache[0:len(_mimic_cache) - MIMIC_MAX_CORPUS]
+            await _save_mimic_corpus()
+
     # Process commands first
     if content.strip().startswith("!"):
         await bot.process_commands(message)
@@ -480,7 +601,7 @@ async def on_message(message: discord.Message):
         if random.random() < 0.35:
             phrase = random.choice(USER3_LINES)
             if random.random() < 0.20:
-                phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"  # typo fix below
+                phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"
             await message.reply(phrase, mention_author=False)
             return
 
@@ -496,6 +617,32 @@ async def on_message(message: discord.Message):
     if mentioned:
         await message.reply(random.choice(BRATTY_LINES), mention_author=False)
         return
+
+    # Rare, realistic mimic in USER3's style (before global sass)
+    try:
+        global _mimic_last_ts
+        if _mimic_enabled and _mimic_cache:
+            channel_ok = (MIMIC_ALLOW_CHANNELS is None) or (message.channel.id in MIMIC_ALLOW_CHANNELS)
+            not_casino = not _is_gamble_channel(message.channel.id)
+            now_pt = datetime.now(ZoneInfo("America/Los_Angeles"))
+            start_h, end_h = MIMIC_ACTIVE_HOURS_PT
+            within_hours = (start_h <= now_pt.hour < end_h)
+            now_ts = _now()
+            cooldown_ok = (now_ts - _mimic_last_ts) >= (MIMIC_COOLDOWN_MINUTES * 60)
+            chance_ok = (random.random() < MIMIC_CHANCE)
+
+            if channel_ok and not_casino and within_hours and cooldown_ok and chance_ok:
+                generated = _mimic_generate(_mimic_cache)
+                if generated:
+                    if random.random() < 0.35:
+                        await message.reply(generated, mention_author=False)
+                    else:
+                        await message.channel.send(generated)
+                    _mimic_last_ts = now_ts
+                    return
+    except Exception:
+        # swallow any mimic error to never affect normal bot behavior
+        pass
 
     # Random chat sass (global)
     if random.random() < REPLY_CHANCE:
@@ -939,6 +1086,34 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
         delta=_fmt_bread(delta_applied), vault=_fmt_bread(economy["treasury"])
     ))
 
+@bot.command(name="mimic", help="ADMIN: Toggle or view USER3 mimic behavior. Usage: !mimic on | !mimic off | !mimic status")
+@_admin.has_permissions(manage_guild=True)
+async def mimic_cmd(ctx, mode: str | None = None):
+    global _mimic_enabled
+    if not mode:
+        await ctx.send("Usage: `!mimic on` | `!mimic off` | `!mimic status`")
+        return
+    mode_l = mode.lower().strip()
+    if mode_l == "on":
+        _mimic_enabled = True
+        await _save_mimic_settings()
+        await ctx.send("Mimic is **ON** ✅")
+    elif mode_l == "off":
+        _mimic_enabled = False
+        await _save_mimic_settings()
+        await ctx.send("Mimic is **OFF** ⛔")
+    elif mode_l == "status":
+        await ctx.send(f"Mimic is **{'ON ✅' if _mimic_enabled else 'OFF ⛔'}**")
+    else:
+        await ctx.send("Usage: `!mimic on` | `!mimic off` | `!mimic status`")
+
+@mimic_cmd.error
+async def mimic_cmd_error(ctx, error):
+    if isinstance(error, _admin.MissingPermissions):
+        await ctx.send("You need **Manage Server** to use this, babe. 💅")
+    else:
+        await ctx.send("Usage: `!mimic on` | `!mimic off` | `!mimic status`")
+
 # ================== Fun / Media Commands ==================
 @bot.command(name="cafe", help="owl y lark")
 async def cafe(ctx, *, term: str = "coffee"):
@@ -1140,7 +1315,8 @@ async def halp(ctx, *, command: str | None = None):
             "`!seed @user <amt>` — Give bread (respects wallet cap)\n"
             "`!take bank <amt>` — Burn from bank\n"
             "`!take @user <amt>` — Take from user to bank\n"
-            "`!setbal @user <amt>` — Set a user’s exact balance (capped to wallet)"
+            "`!setbal @user <amt>` — Set a user’s exact balance (capped to wallet)\n"
+            "`!mimic on|off|status` — Toggle or view USER3 mimic behavior"
         ),
         inline=False
     )
@@ -1185,7 +1361,4 @@ async def version(ctx):
 if __name__ == "__main__":
     if not TOKEN or not TENOR_KEY or not CHANNEL_ID:
         raise SystemExit("Please set DISCORD_TOKEN, TENOR_API_KEY, and CHANNEL_ID environment variables.")
-    # Final tiny typo fix for earlier block (safe at runtime)
-    if 'REACTION_EMOETS' in globals():
-        pass
     bot.run(TOKEN)
