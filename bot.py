@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
-import asyncpg  # PostgreSQL (Railway) persistence
+import asyncpg  # PostgreSQL (Railway/Supabase) persistence
 
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
@@ -13,12 +13,16 @@ TENOR_KEY   = os.getenv("TENOR_API_KEY")
 CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
-# Railway Postgres
+# Railway/Supabase Postgres
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 SEARCH_TERM  = "bread"
 RESULT_LIMIT = 20
 REPLY_CHANCE = 0.10
+
+# Version/info (for !version)
+BOT_VERSION = os.getenv("BOT_VERSION", "v1.0-merged")
+BUILD_TAG   = os.getenv("BUILD_TAG", "")
 
 # Specific member IDs
 USER1_ID = 1028310674318839878
@@ -49,11 +53,12 @@ KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
 
 # ---------- Fit (Discord CDN images) ----------
 FIT_IMAGE_URLS = [
+    # original entries (unchanged)
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470866879414323/pinterest_681169512428877550.png?ex=689ef23f&is=689da0bf&hm=6333fbb250a112ecd271bf33cf4212687b8d01d8200a2e614af2851068a65f65&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867483525140/pinterest_681169512428917172.jpg?ex=689ef23f&is=689da0bf&hm=9f7e993b0c4391b27262f6bab9e7eba41af434f27d386ea0e3f7af1a2dcf62ef&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867810422854/pinterest_681169512428917179.jpg?ex=689ef23f&is=689da0bf&hm=738196039bf19fb99b72610d3a30641bb5a8cec28998919e92b3d7dc34c30c28&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470868087373895/pinterest_681169512428919577.jpg?ex=689ef23f&is=689da0bf&hm=f0921729a0c51ac94303ea123209689650e42ec6aebdf585b8609308a34ea7ec&",
-    # New links (deduped)
+    # appended new links (deduped)
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405608288053235845/Screenshot_14.png?ex=689f723a&is=689e20ba&hm=cdd8b626007dd4939c5337c58d194d2a9229d23ca15ac7a18492abafc5d913d8&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819860873278/pinterest_681169512428877548.jpg?ex=689f6969&is=689e17e9&hm=820df44a59d2c99fb8e496aed88ccc681843f2d75de830d669bbe26357d0f979&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819210756178/pinterest_681169512428836350.png?ex=689f6969&is=689e17e9&hm=43c908944d8f813a4b99f0aad4a672dc56e7f05854ee357630bbae8f633b1672&",
@@ -136,6 +141,7 @@ BRATTY_LINES = [
     "I want a pumpkin cream cold brewwwww",
     "update I want it to be fall already . need cold breeze, sweaters and flared leggings and a cute beanie and Halloween decor",
     "JONATHAN!","UGH!","MMMMM","was it tasty?","LMFAO I CANT","AAAAAAAAAAAAAAAA",
+    "no one pay's attention to me!!!!","I wanna take a trip so bad now"
 ]
 
 FERAL_LINES = [
@@ -251,7 +257,7 @@ async def _get_spotify_token():
         return _spotify_token["access_token"]
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
         return None
-    data = {"grant_type":"client_credentials","client_id":SPOTIFY_CLIENT_ID,"client_secret":SPOTIFY_CLIENT_SECRET}
+    data = {"grant_type":"client_credentials","client_id":SPOTIFY_CLIENT_ID,"client_secret":SPOTIFY_CLIENT_SECRET"}
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post("https://accounts.spotify.com/api/token", data=data, timeout=15) as r:
@@ -325,7 +331,6 @@ def _pick_three_times_today_pt():
     times = sorted({rand_dt() for _ in range(3)})
     while len(times) < 3:
         times.add(rand_dt())
-        times = sorted(times)
     return list(times)
 
 # ================== Events ==================
@@ -471,11 +476,11 @@ async def on_message(message: discord.Message):
         if random.random() < 0.35:
             phrase = random.choice(USER3_LINES)
             if random.random() < 0.20:
-                phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"
+                phrase = f"{phrase} {random.choice(REACTION_EMOSES)}"
             await message.reply(phrase, mention_author=False)
             return
 
-    # Mention → bratty only
+    # Mention → bratty only (existing behavior)
     mentioned = False
     if bot.user and (bot.user in message.mentions):
         mentioned = True
@@ -1153,6 +1158,23 @@ async def halp(ctx, *, command: str | None = None):
     )
 
     e.set_footer(text="Tip: try `!halp roll` or `!halp gift` for specific usage.")
+    await ctx.send(embed=e)
+
+# ================== Version Command ==================
+@bot.command(name="version", help="Show bot version and runtime status")
+async def version(ctx):
+    from discord import Embed, Colour
+    db_status = "connected ✅" if (DATABASE_URL and db_pool) else ("no DATABASE_URL ❌" if not DATABASE_URL else "not connected ❌")
+    fields = [
+        ("Version", BOT_VERSION + (f" ({BUILD_TAG})" if BUILD_TAG else "")),
+        ("DB", db_status),
+        ("Casino Channel", f"<#{GAMBLE_CHANNEL_ID}>"),
+        ("Fit Channel", f"<#{FIT_CHANNEL_ID}>"),
+        ("Kewchie Channel", f"<#{KEWCHIE_CHANNEL_ID}>"),
+    ]
+    e = Embed(title="Bot Version", colour=Colour.blurple())
+    for n, v in fields:
+        e.add_field(name=n, value=v, inline=False)
     await ctx.send(embed=e)
 
 # ---------- Placeholder: future Pinterest command ----------
