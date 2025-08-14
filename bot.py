@@ -43,7 +43,7 @@ GIFT_TAX_TIERS = [(1000,0.05),(3000,0.10),(6000,0.15)]
 GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))
 # Base coin win chance is not 50/50 anymore; we vary by bet size and jackpot path
 BASE_ROLL_WIN_PROB = float(os.getenv("BASE_ROLL_WIN_PROB", "0.46"))
-INACTIVE_WINDOW_HOURS = int(os.getenv("INACTIVE_WINDOW_HOURS", "24"))  # penalty window
+INACTIVE_WINDOW_DAYS = int(os.getenv("INACTIVE_WINDOW_DAYS", "7"))   # penalty window (days, default 7)
 PENALTY_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"  # replace with your direct image link if needed
 JACKPOT_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"  # used on roll all jackpot too
 # ==================================================================
@@ -293,6 +293,15 @@ async def on_message(message: discord.Message):
                 await message.channel.send("🥖🍑")
                 bot._reply_counts[uid] = 0
 
+    # Special: always reply to USER3_ID with a USER3_LINES phrase (100%),
+    # with a 20% chance to append one of the REACTION_EMOTES
+    if message.author.id == USER3_ID:
+        phrase = random.choice(USER3_LINES)
+        if random.random() < 0.20:
+            phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"
+        await message.reply(phrase, mention_author=False)
+        return
+
     # Mention → bratty only
     mentioned = False
     if bot.user and (bot.user in message.mentions):
@@ -306,7 +315,7 @@ async def on_message(message: discord.Message):
         await message.reply(random.choice(BRATTY_LINES), mention_author=False)
         return
 
-    # Random chat sass
+    # Random chat sass (global)
     if random.random() < REPLY_CHANCE:
         choice = random.choice([random.choice(BRATTY_LINES),
                                 random.choice(FERAL_LINES),
@@ -368,7 +377,7 @@ async def daily_auto_allowance():
         return
 
     utc_now = _now()
-    inactive_cutoff = utc_now - INACTIVE_WINDOW_HOURS * 3600
+    inactive_cutoff = utc_now - INACTIVE_WINDOW_DAYS * 86400  # 7-day window
     changed = False
 
     async with economy_lock:
@@ -386,7 +395,7 @@ async def daily_auto_allowance():
                 u["balance"] = final_bal
                 changed = True
 
-            # 2) Inactivity penalty (no gift/roll/putasos last 24h)
+            # 2) Inactivity penalty (no roll/putasos in the last N days)
             last_active = u.get("last_active", 0.0)
             if last_active == 0.0 or last_active < inactive_cutoff:
                 if u["balance"] > 0:
@@ -493,7 +502,7 @@ async def gift(ctx, member: discord.Member, amount: int):
         economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + tax + skim)
         recv["balance"] = recv_final
         giver["gifted_today"] += amount
-        _mark_active(ctx.author.id)
+        # NOTE: gifting no longer updates last_active (only roll/putasos do)
 
         _save_bank()
 
