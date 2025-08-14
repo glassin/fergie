@@ -1,4 +1,4 @@
-import os, random, aiohttp, discord, json, asyncio, time, math
+import os, random, aiohttp, discord, json, asyncio, time, math, re
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
@@ -30,16 +30,78 @@ def _is_gamble_channel(ch_id: int) -> bool:
 JUMPSCARE_TRIGGER = "concha"
 JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
-JUMPSCARE_EMOTE_TEXT = "<:monkagiga:1131711987794063511>"
 # ---------------------------------------
 
-# ---------- Kewchie (Kali Uchis) ----------
-SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
-SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
-SPOTIFY_PLAYLIST_ID = os.getenv("SPOTIFY_PLAYLIST_ID", "6l190qy5x9xY8Uk3bb2FYl")
-SPOTIFY_MARKET = os.getenv("SPOTIFY_MARKET", "US")  # helps avoid region-restricted tracks
-KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
-# -----------------------------------------
+# ---------- FIT command (Dropbox folder → random image) ----------
+FIT_CHANNEL_ID = 1273436116699058290
+FIT_DROPBOX_FOLDER = "https://www.dropbox.com/scl/fo/o2dal4mzff5hdw1zdi1b0/AJEUSZl1HdzEHYCSlhfZCxE?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&e=1&st=go6bavz6&dl=0"
+# Cache of discovered image links from the folder
+_fit_image_cache: list[str] = []
+_fit_cache_last_fetch: float = 0.0
+FIT_CACHE_TTL = 6 * 3600  # 6 hours
+IMAGE_EXTS = (".jpg", ".jpeg", ".png", ".gif", ".webp")
+
+async def _refresh_fit_cache_if_needed():
+    global _fit_image_cache, _fit_cache_last_fetch
+    now = time.time()
+    if _fit_image_cache and (now - _fit_cache_last_fetch) < FIT_CACHE_TTL:
+        return
+
+    # Try to scrape file links from the shared folder HTML and convert them to direct links
+    # NOTE: This is a best-effort scrape. For rock-solid behavior, a Dropbox API token would be ideal.
+    try:
+        url = FIT_DROPBOX_FOLDER
+        async with aiohttp.ClientSession() as s:
+            async with s.get(url, timeout=20) as r:
+                if r.status != 200:
+                    return
+                html = await r.text()
+
+        # Find candidate file links (shared-file links look like /s/<id>/<filename>)
+        # We'll accept links that look like https://www.dropbox.com/s/<id>/<name>? or /preview
+        # and then transform to a raw image link with ?raw=1
+        candidates = set()
+
+        # 1) Direct "/s/" links
+        for m in re.finditer(r'https://www\.dropbox\.com/s/[^"\'\s]+', html):
+            link = m.group(0)
+            candidates.add(link)
+
+        # 2) HREFs that might include /s/
+        for m in re.finditer(r'href="([^"]+)"', html):
+            href = m.group(1)
+            if "dropbox.com/s/" in href:
+                if href.startswith("//"):
+                    href = "https:" + href
+                elif href.startswith("/"):
+                    href = "https://www.dropbox.com" + href
+                candidates.add(href)
+
+        # Filter to image-looking links by extension in the URL (before params)
+        image_links = []
+        for c in candidates:
+            # strip query to check extension
+            base = c.split("?")[0]
+            if base.lower().endswith(IMAGE_EXTS):
+                # make it renderable directly in Discord
+                # dropbox tip: use ?raw=1 for direct-file serving
+                if "?raw=1" not in c and "?dl=1" not in c:
+                    c = c + ("&" if "?" in c else "?") + "raw=1"
+                image_links.append(c)
+
+        random.shuffle(image_links)
+        _fit_image_cache = image_links
+        _fit_cache_last_fetch = now
+    except Exception:
+        # swallow errors; command will fall back if empty
+        pass
+
+async def _pick_random_fit_image() -> str | None:
+    await _refresh_fit_cache_if_needed()
+    if not _fit_image_cache:
+        return None
+    return random.choice(_fit_image_cache)
+# -------------------------------------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -182,7 +244,7 @@ def _today_key() -> str:
 economy_lock = asyncio.Lock()
 economy = {
     "treasury": TREASURY_MAX,
-    "users": {}  # str(user_id): {balance, last_claim, last_gift_day, gifted_today, last_active, _lobo_date}
+    "users": {}
 }
 
 def _load_bank():
@@ -244,69 +306,12 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
 def _mark_active(uid: int):
     _user(uid)["last_active"] = _now()
 
-# ---- Spotify helpers ----
-_spotify_token = {"access_token": None, "expires_at": 0}
-
-async def _get_spotify_token():
-    # cached token
-    if _spotify_token["access_token"] and _now() < _spotify_token["expires_at"] - 30:
-        return _spotify_token["access_token"]
-
-    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
-        return None
-
-    data = {
-        "grant_type": "client_credentials",
-        "client_id": SPOTIFY_CLIENT_ID,
-        "client_secret": SPOTIFY_CLIENT_SECRET
-    }
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post("https://accounts.spotify.com/api/token", data=data, timeout=15) as r:
-                if r.status != 200:
-                    return None
-                js = await r.json()
-                _spotify_token["access_token"] = js.get("access_token")
-                _spotify_token["expires_at"] = _now() + int(js.get("expires_in", 3600))
-                return _spotify_token["access_token"]
-    except Exception:
-        return None
-
-async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
-    token = await _get_spotify_token()
-    if not token:
-        return []
-    headers = {"Authorization": f"Bearer {token}"}
-    params = {"market": SPOTIFY_MARKET, "limit": 100}
-    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks"
-    tracks = []
-    try:
-        async with aiohttp.ClientSession() as s:
-            while url:
-                async with s.get(url, headers=headers, params=params, timeout=15) as r:
-                    if r.status != 200:
-                        return tracks
-                    data = await r.json()
-                    for item in data.get("items", []):
-                        t = item.get("track") or {}
-                        if t and not t.get("is_local") and t.get("id"):
-                            tracks.append(f"https://open.spotify.com/track/{t['id']}")
-                    # pagination
-                    url = data.get("next")
-                    params = None  # next already includes query
-    except Exception:
-        pass
-    return tracks
-
 # ---- Events ----
 @bot.event
 async def on_ready():
     _load_bank()
     if not hasattr(bot, "_js_last"):
         bot._js_last = {}  # user_id -> last jumpscare trigger time (seconds)
-    if not hasattr(bot, "_kewchie_times"):
-        bot._kewchie_times = []
-        bot._kewchie_posted = set()
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
@@ -315,49 +320,6 @@ async def on_ready():
     user3_task.start()
     daily_scam_post.start()
     daily_auto_allowance.start()  # 8am PT allowance + penalties
-    kewchie_daily_scheduler.start()  # random twice-daily posts
-
-def _pick_two_random_times_today():
-    # pick 2 random times between 10:00 and 22:00 PT today, return as UTC-aware datetimes
-    tz = ZoneInfo("America/Los_Angeles")
-    today = datetime.now(tz=tz).date()
-    start = datetime.combine(today, dtime(hour=10, tzinfo=tz))
-    end   = datetime.combine(today, dtime(hour=22, tzinfo=tz))
-    # pick two distinct minutes
-    def rand_dt():
-        delta_minutes = int((end - start).total_seconds() // 60)
-        offset = random.randint(0, delta_minutes)
-        return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
-    t1 = rand_dt()
-    t2 = rand_dt()
-    while abs((t2 - t1).total_seconds()) < 300:  # ensure at least 5 min apart
-        t2 = rand_dt()
-    return sorted([t1, t2])
-
-@tasks.loop(minutes=1)
-async def kewchie_daily_scheduler():
-    # initialize times for today if missing or day changed
-    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    if (not bot._kewchie_times) or (bot._kewchie_times[0].date() != now_utc.date()):
-        bot._kewchie_times = _pick_two_random_times_today()
-        bot._kewchie_posted = set()
-
-    # if current minute matches a scheduled time and not posted yet, post
-    for t in bot._kewchie_times:
-        key = t.isoformat()
-        if now_utc == t and key not in bot._kewchie_posted:
-            channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
-            if channel:
-                links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
-                if links:
-                    await channel.send(random.choice(links))
-                else:
-                    await channel.send("Playlist isn't available right now 😭")
-            bot._kewchie_posted.add(key)
-
-@kewchie_daily_scheduler.before_loop
-async def _wait_bot_ready_kewchie():
-    await bot.wait_until_ready()
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -378,7 +340,7 @@ async def on_message(message: discord.Message):
         last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
         if now - last >= JUMPSCARE_COOLDOWN_SECONDS:
             await message.channel.send(JUMPSCARE_IMAGE_URL)
-            await message.channel.send(f"the parasites!!! {JUMPSCARE_EMOTE_TEXT}")
+            await message.channel.send("<:monkagiga:1131711987794063511> the parasites!!!")
             bot._js_last[message.author.id] = now
         return
 
@@ -687,7 +649,6 @@ async def roll(ctx, amount: str):
         if bet > u["balance"]:
             await ctx.send(f"{ctx.author.mention} you only have **{_fmt_bread(u['balance'])}**.")
             return
-        # cap and bank constraint
         max_affordable = min(GAMBLE_MAX_BET, u["balance"])
         if economy["treasury"] < bet:
             max_affordable = min(max_affordable, economy["treasury"])
@@ -695,21 +656,17 @@ async def roll(ctx, amount: str):
             await ctx.send(PHRASES["gamble_max"].format(maxb=_fmt_bread(max_affordable)))
             return
 
-        # Win probabilities by size (spicier but fair-ish)
-        # small bets slightly higher win chance; large bets slightly lower
         frac = bet / max(1, USER_WALLET_CAP)
         win_prob = BASE_ROLL_WIN_PROB
-        if frac <= 0.05:      # tiny bet
-            win_prob += 0.05   # ~51%
-        elif frac >= 0.5:     # very large bet
-            win_prob -= 0.06   # ~40%
+        if frac <= 0.05:
+            win_prob += 0.05
+        elif frac >= 0.5:
+            win_prob -= 0.06
 
         jackpot_hit = False
         jackpot_mult = 1
 
-        # JACKPOT path only on "all"
         if isinstance(amount, str) and amount.lower() == "all":
-            # ~0.5% to hit giga jackpot (x15), else ~2% mini-jackpot (x3)
             r = random.random()
             if r < 0.005:
                 jackpot_hit = True
@@ -719,12 +676,11 @@ async def roll(ctx, amount: str):
                 jackpot_mult = 3
 
         if jackpot_hit:
-            payout = bet * (jackpot_mult - 1)  # additional gain beyond original bet
-            # check bank/tighten to wallet cap
+            payout = bet * (jackpot_mult - 1)
             available_from_bank = min(economy["treasury"], payout)
             new_bal = u["balance"] + available_from_bank
             final_bal, skim = _cap_wallet(new_bal)
-            paid_from_bank = (final_bal - u["balance"]) + skim  # total removed incl skim return
+            paid_from_bank = (final_bal - u["balance"]) + skim
             economy["treasury"] -= max(0, paid_from_bank - skim)
             u["balance"] = final_bal
             _mark_active(ctx.author.id)
@@ -735,7 +691,6 @@ async def roll(ctx, amount: str):
             )
             return
 
-        # normal outcome
         win = (random.random() < win_prob)
         if win:
             new_bal = u["balance"] + bet
@@ -767,8 +722,8 @@ async def putasos(ctx, member: discord.Member):
         return
 
     SUCCESS_CHANCE = 0.15
-    STEAL_PCT_MIN, STEAL_PCT_MAX = 0.10, 0.25   # 10–25% of victim on success
-    FAIL_LOSE_PCT = 0.12                        # thief loses 12% of own balance to bank
+    STEAL_PCT_MIN, STEAL_PCT_MAX = 0.10, 0.25
+    FAIL_LOSE_PCT = 0.12
 
     async with economy_lock:
         thief = _user(ctx.author.id)
@@ -796,7 +751,7 @@ async def putasos(ctx, member: discord.Member):
                 msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
             await ctx.send(f"{ctx.author.mention} {msg}")
         else:
-            loss = max(1, int(thief["balance"] * 0.12))
+            loss = max(1, int(thief["balance"] * FAIL_LOSE_PCT))
             thief["balance"] -= loss
             economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + loss)
             _mark_active(ctx.author.id)
@@ -962,41 +917,46 @@ async def bbl(ctx):
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
 
-# ---- Kewchie commands ----
-@bot.command(name="kewchie", help="Post a random Kali Uchis song from the playlist (in the kewchie channel)")
-async def kewchie(ctx):
-    if ctx.channel.id != KEWCHIE_CHANNEL_ID:
-        await ctx.send(f"Use this in <#{KEWCHIE_CHANNEL_ID}>")
+# ---------- NEW: !fit command ----------
+@bot.command(name="fit", help="Post a random fit pic from the Dropbox folder (only in the fit channel)")
+async def fit(ctx):
+    if ctx.channel.id != FIT_CHANNEL_ID:
+        await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>, fashionista 💅")
         return
-    links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
-    if not links:
-        await ctx.send("Playlist isn't available right now 😭")
+
+    async with ctx.channel.typing():
+        img = await _pick_random_fit_image()
+
+    if not img:
+        await ctx.send("OMFG I can't load the fits rn 😭 — dropbox being stingy. Try again in a bit.")
         return
-    await ctx.send(random.choice(links))
 
-@bot.command(name="kewchie-debug", help="Debug Spotify playlist setup")
-async def kewchie_debug(ctx):
-    cid_set = bool(SPOTIFY_CLIENT_ID)
-    sec_set = bool(SPOTIFY_CLIENT_SECRET)
-    pid_set = bool(SPOTIFY_PLAYLIST_ID)
-    ch_ok = (bot.get_channel(KEWCHIE_CHANNEL_ID) is not None)
+    # Post image + caption
+    caption = "OMFG look at this one girlie!!! we neeeeeeeeed! 💗"
+    sent = await ctx.send(img)
+    await ctx.send(caption)
 
-    token = await _get_spotify_token()
-    token_ok = bool(token)
-    tracks = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID) if token_ok else []
-    msg = (
-        f"CID set: {cid_set}\n"
-        f"SECRET set: {sec_set}\n"
-        f"PLAYLIST set: {pid_set}\n"
-        f"Token: {'ok' if token_ok else 'failed'}\n"
-        f"Tracks fetched: {len(tracks)}\n"
-        f"Channel OK: {ch_ok} (<#{KEWCHIE_CHANNEL_ID}>)"
-    )
-    await ctx.send(f"```{msg}```")
+    # Wait up to 20s for USER3 to reply *to that exact image message*
+    def _check(m: discord.Message):
+        if m.author.id != USER3_ID:
+            return False
+        if m.channel.id != FIT_CHANNEL_ID:
+            return False
+        if not m.reference or not getattr(m.reference, "message_id", None):
+            return False
+        return m.reference.message_id == sent.id
 
-# ---------- Placeholder: future Pinterest command ----------
-# def <your future pinterest fetcher here>():
-#     pass
+    try:
+        await bot.wait_for("message", timeout=20.0, check=_check)
+        # Try to use custom :slappeach: if present
+        em = None
+        if ctx.guild:
+            em = discord.utils.get(ctx.guild.emojis, name="slappeach")
+        peach = str(em) if em else "🍑"
+        await ctx.send(f"{peach} you know you'd look good in this girlie! you go girl! ✂️")
+    except asyncio.TimeoutError:
+        pass
+# ---------------------------------------
 
 # ---- Start ----
 if __name__ == "__main__":
