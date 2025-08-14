@@ -32,6 +32,23 @@ JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
 # ---------------------------------------
 
+# ---------- Kali Uchis auto-post (two random times per day, PT) ----------
+KALI_CHANNEL_ID = 1131573379577675826
+KALI_PLAYLIST_URL = "https://open.spotify.com/playlist/6l190qy5x9xY8Uk3bb2FYl"
+KALI_TRACKS_FILE = Path("kali_tracks.json")
+# Reasonable daytime window; change if you want overnight posts:
+KALI_START_HOUR_PT = 10  # 10:00 PT
+KALI_END_HOUR_PT   = 22  # 22:00 PT
+
+DEFAULT_KALI_TRACKS = [
+    # Replace these with real track URLs from the playlist; these are placeholders/examples.
+    "https://open.spotify.com/track/0Fv7Kdlm6KpO4B9S3l7hJH",
+    "https://open.spotify.com/track/7G9D9gH7sQf1qz0V1zKZ4S",
+    "https://open.spotify.com/track/6ZFbXIJkuI1dVNWvzJzown",
+    "https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b",
+]
+# ------------------------------------------------------------------------
+
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True  # needed for daily member sweep
@@ -235,12 +252,80 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
 def _mark_active(uid: int):
     _user(uid)["last_active"] = _now()
 
+# ---------- Kali helpers ----------
+def _load_kali_tracks() -> list[str]:
+    try:
+        if KALI_TRACKS_FILE.exists():
+            data = json.loads(KALI_TRACKS_FILE.read_text())
+            if isinstance(data, list) and data:
+                return [str(x) for x in data]
+    except Exception:
+        pass
+    return list(DEFAULT_KALI_TRACKS)
+
+def _pt_now() -> datetime:
+    return datetime.now(ZoneInfo("America/Los_Angeles"))
+
+def _pick_random_times_pt(start_hour: int, end_hour: int, k: int) -> list[datetime]:
+    """Pick k random datetimes between today's [start_hour, end_hour] in PT.
+       If we're past end_hour, schedule for tomorrow."""
+    tz = ZoneInfo("America/Los_Angeles")
+    now = datetime.now(tz)
+    base_day = now.date()
+    start = datetime.combine(base_day, dtime(hour=start_hour, tzinfo=tz))
+    end   = datetime.combine(base_day, dtime(hour=end_hour, tzinfo=tz))
+    if now >= end:
+        # move to tomorrow
+        base_day = base_day + timedelta(days=1)
+        start = datetime.combine(base_day, dtime(hour=start_hour, tzinfo=tz))
+        end   = datetime.combine(base_day, dtime(hour=end_hour, tzinfo=tz))
+    # ensure we don't schedule in the past today
+    window_start = max(now + timedelta(minutes=1), start)
+    total_minutes = max(1, int((end - window_start).total_seconds() // 60))
+    if total_minutes <= k:
+        # small window; just space them out
+        times = [window_start + timedelta(minutes=i * max(1, total_minutes // k)) for i in range(k)]
+        return sorted(times)
+    picks = sorted(random.sample(range(total_minutes), k))
+    return [window_start + timedelta(minutes=m) for m in picks]
+
+async def _post_random_kali_track():
+    channel = bot.get_channel(KALI_CHANNEL_ID)
+    if not channel:
+        return
+    tracks = _load_kali_tracks()
+    if not tracks:
+        return
+    await channel.send(random.choice(tracks))
+
+async def _kali_random_two_daily_loop():
+    """Background loop: each cycle picks two random times in the PT window and posts one track at each time."""
+    await bot.wait_until_ready()
+    tz = ZoneInfo("America/Los_Angeles")
+    while not bot.is_closed():
+        targets = _pick_random_times_pt(KALI_START_HOUR_PT, KALI_END_HOUR_PT, 2)
+        for when in targets:
+            # sleep until 'when' (PT)
+            while True:
+                now = datetime.now(tz)
+                wait = (when - now).total_seconds()
+                if wait <= 0:
+                    break
+                # sleep in chunks so shutdowns don't get stuck
+                await asyncio.sleep(min(wait, 300))
+            await _post_random_kali_track()
+        # after finishing today's two posts, loop to pick new times again
+
 # ---- Events ----
 @bot.event
 async def on_ready():
     _load_bank()
     if not hasattr(bot, "_js_last"):
         bot._js_last = {}  # user_id -> last jumpscare trigger time (seconds)
+    # start Kali background loop (random two per day)
+    if not hasattr(bot, "_kali_task"):
+        bot._kali_task = asyncio.create_task(_kali_random_two_daily_loop())
+
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
@@ -693,6 +778,22 @@ async def putasos(ctx, member: discord.Member):
             _mark_active(ctx.author.id)
             _save_bank()
             await ctx.send(f"{ctx.author.mention} got caught 💀 lost **{_fmt_bread(loss)}** to the bank. new: **{_fmt_bread(thief['balance'])}**")
+
+# ============== Manual command to post a random Kali track ==============
+@bot.command(name="kewchie", help="Post a random Kali Uchis song link to the dedicated music channel")
+async def kewchie(ctx):
+    """Posts a random track to the configured KALI_CHANNEL_ID (even if invoked elsewhere)."""
+    channel = bot.get_channel(KALI_CHANNEL_ID)
+    if not channel:
+        await ctx.send("I can't find the Kali channel right now. 🤯")
+        return
+    tracks = _load_kali_tracks()
+    if not tracks:
+        await ctx.send("No tracks loaded yet. Add some to kali_tracks.json!")
+        return
+    await channel.send(random.choice(tracks))
+    if ctx.channel.id != KALI_CHANNEL_ID:
+        await ctx.send(f"Posted in <#{KALI_CHANNEL_ID}> ✅")
 
 # ================== Admin Commands ==================
 from discord.ext import commands as _admin
