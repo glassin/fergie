@@ -5,23 +5,22 @@ from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
+# ====================== ENV / CORE ======================
 TOKEN       = os.getenv("DISCORD_TOKEN")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
-CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
+CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))  # main chatter channel for periodic posts
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
 SEARCH_TERM  = "bread"
 RESULT_LIMIT = 20
-REPLY_CHANCE = 0.10
+REPLY_CHANCE = 0.10  # global random sass chance
 
 # Specific member IDs
-USER1_ID = 1028310674318839878
-USER2_ID = 534227493360762891
-USER3_ID = 661077262468382761
-LOBO_ID  = 919405253470871562
-
-# Airdrop manager (manual trigger)
-AIRDROP_MANAGER_ID = 939225086341296209
+USER1_ID  = 1028310674318839878  # "papo" for bonk messages
+USER2_ID  = 534227493360762891
+USER3_ID  = 661077262468382761   # special reply member (35%)
+LOBO_ID   = 919405253470871562
+AIRDROP_OWNER_ID = 939225086341296209  # ONLY this user can trigger the emergency airdrop
 
 # ---------- Casino channel restriction ----------
 GAMBLE_CHANNEL_ID = 1405320084028784753
@@ -46,22 +45,17 @@ KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
 
 # ---------- Fit (random Pinterest-like pics) ----------
 FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
-SLAP_PEACH_EMOTE = "<a:slap_peach:1227392416617730078>"
-SCISSORS_EMOJI = "✂️"
 FIT_IMAGE_URLS = [
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470866879414323/pinterest_681169512428877550.png",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867483525140/pinterest_681169512428917172.jpg",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867810422854/pinterest_681169512428917179.jpg",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470868087373895/pinterest_681169512428919577.jpg",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470866879414323/pinterest_681169512428877550.png?ex=689ef23f&is=689da0bf&hm=6333fbb250a112ecd271bf33cf4212687b8d01d8200a2e614af2851068a65f65&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867483525140/pinterest_681169512428917172.jpg?ex=689ef23f&is=689da0bf&hm=9f7e993b0c4391b27262f6bab9e7eba41af434f27d386ea0e3f7af1a2dcf62ef&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867810422854/pinterest_681169512428917179.jpg?ex=689ef23f&is=689da0bf&hm=738196039bf19fb99b72610d3a30641bb5a8cec28998919e92b3d7dc34c30c28&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470868087373895/pinterest_681169512428919577.jpg?ex=689ef23f&is=689da0bf&hm=f0921729a0c51ac94303ea123209689650e42ec6aebdf585b8609308a34ea7ec&",
 ]
-# -----------------------------------------------
+SLAP_PEACH_EMOTE = "<a:slap_peach:1227392416617730078>"
+# -------------------------------------------------------
 
-# ---------- Bonk Papo (3 random times/day at USER1) ----------
-BONK_MESSAGE = (
-    "stop being horny papo! bad papo! "
-    "<a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788>"
-)
-# -------------------------------------------------------------
+# Special reply chance for USER3
+USER3_REPLY_CHANCE = float(os.getenv("USER3_REPLY_CHANCE", "0.35"))  # 35%
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -78,9 +72,8 @@ CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))       # for manua
 DAILY_GIFT_CAP = int(os.getenv("DAILY_GIFT_CAP", "2000"))
 GIFT_TAX_TIERS = [(1000,0.05),(3000,0.10),(6000,0.15)]
 GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))
-# Base coin win chance is not 50/50 anymore; we vary by bet size and jackpot path
 BASE_ROLL_WIN_PROB = float(os.getenv("BASE_ROLL_WIN_PROB", "0.46"))
-INACTIVE_WINDOW_DAYS = int(os.getenv("INACTIVE_WINDOW_DAYS", "7"))   # penalty window (days, default 7)
+INACTIVE_WINDOW_DAYS = int(os.getenv("INACTIVE_WINDOW_DAYS", "7"))   # penalty window in days
 PENALTY_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
 JACKPOT_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
 # ==================================================================
@@ -204,8 +197,7 @@ def _today_key() -> str:
 economy_lock = asyncio.Lock()
 economy = {
     "treasury": TREASURY_MAX,
-    "users": {},  # str(user_id): {balance, last_claim, last_gift_day, gifted_today, last_active, _lobo_date}
-    "_last_airdrop_date": ""
+    "users": {},  # str(user_id): {...}
 }
 
 def _load_bank():
@@ -215,11 +207,10 @@ def _load_bank():
             economy = json.loads(BANK_FILE.read_text())
             economy.setdefault("treasury", TREASURY_MAX)
             economy.setdefault("users", {})
-            economy.setdefault("_last_airdrop_date", "")
         except Exception:
-            economy = {"treasury": TREASURY_MAX, "users": {}, "_last_airdrop_date": ""}
+            economy = {"treasury": TREASURY_MAX, "users": {}}
     else:
-        economy = {"treasury": TREASURY_MAX, "users": {}, "_last_airdrop_date": ""}
+        economy = {"treasury": TREASURY_MAX, "users": {}}
 
 def _save_bank():
     try:
@@ -272,13 +263,10 @@ def _mark_active(uid: int):
 _spotify_token = {"access_token": None, "expires_at": 0}
 
 async def _get_spotify_token():
-    # cached token
     if _spotify_token["access_token"] and _now() < _spotify_token["expires_at"] - 30:
         return _spotify_token["access_token"]
-
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
         return None
-
     data = {
         "grant_type": "client_credentials",
         "client_id": SPOTIFY_CLIENT_ID,
@@ -315,61 +303,14 @@ async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
                         t = item.get("track") or {}
                         if t and not t.get("is_local") and t.get("id"):
                             tracks.append(f"https://open.spotify.com/track/{t['id']}")
-                    # pagination
                     url = data.get("next")
-                    params = None  # next already includes query
+                    params = None
     except Exception:
         pass
     return tracks
 
-# ============ Daily Allowance Helper (used by task + manual cmd) ============
-async def _run_daily_allowance(channel: discord.TextChannel) -> bool:
-    """Runs the daily allowance + inactivity penalties, saves, and stamps today's date."""
-    if not channel or not channel.guild:
-        return False
-
-    guild = channel.guild
-    utc_now = _now()
-    inactive_cutoff = utc_now - INACTIVE_WINDOW_DAYS * 86400
-    changed = False
-
-    async with economy_lock:
-        for m in guild.members:
-            if m.bot:
-                continue
-            u = _user(m.id)
-
-            # 1) Daily allowance
-            if economy["treasury"] > 0:
-                pay = min(CLAIM_AMOUNT, economy["treasury"])
-                new_bal = u["balance"] + pay
-                final_bal, skim = _cap_wallet(new_bal)
-                economy["treasury"] -= max(0, (pay - skim))
-                u["balance"] = final_bal
-                changed = True
-
-            # 2) Inactivity penalty (no roll/putasos in the last N days)
-            last_active = u.get("last_active", 0.0)
-            if last_active == 0.0 or last_active < inactive_cutoff:
-                if u["balance"] > 0:
-                    taken = u["balance"] // 2
-                    if taken > 0:
-                        u["balance"] -= taken
-                        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + taken)
-                        changed = True
-                        try:
-                            await channel.send(f"{m.mention} {PHRASES['penalty']}\n{PENALTY_IMAGE}")
-                        except Exception:
-                            pass
-
-        economy["_last_airdrop_date"] = _today_key()
-        if changed:
-            _save_bank()
-
-    return True
-
-# ---- Random times helpers (PT-based) ----
-def _pick_two_random_times_today_10_to_22_PT():
+# ====== RANDOM TIME PICKERS (Kewchie + Bonk) ======
+def _pick_two_random_times_today():
     tz = ZoneInfo("America/Los_Angeles")
     today = datetime.now(tz=tz).date()
     start = datetime.combine(today, dtime(hour=10, tzinfo=tz))
@@ -380,55 +321,45 @@ def _pick_two_random_times_today_10_to_22_PT():
         return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
     t1 = rand_dt()
     t2 = rand_dt()
-    while abs((t2 - t1).total_seconds()) < 300:  # ensure at least 5 min apart
+    while abs((t2 - t1).total_seconds()) < 300:
         t2 = rand_dt()
     return sorted([t1, t2])
 
-def _pick_three_random_times_today_10_to_22_PT():
+def _pick_three_random_times_today_for_bonk():
     tz = ZoneInfo("America/Los_Angeles")
     today = datetime.now(tz=tz).date()
-    start = datetime.combine(today, dtime(hour=10, tzinfo=tz))
-    end   = datetime.combine(today, dtime(hour=22, tzinfo=tz))
-    def rand_dt():
-        delta_minutes = int((end - start).total_seconds() // 60)
-        offset = random.randint(0, delta_minutes)
-        return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
-    picks = sorted({rand_dt() for _ in range(3)})
+    start = datetime.combine(today, dtime(hour=9, tzinfo=tz))
+    end   = datetime.combine(today, dtime(hour=23, tzinfo=tz))
+    picks = set()
+    delta_minutes = int((end - start).total_seconds() // 60)
     while len(picks) < 3:
-        picks.add(rand_dt())
-        picks = sorted(picks)
-    # Make sure they aren't too close to each other
-    ok = False
-    while not ok:
-        ok = True
-        for i in range(1, len(picks)):
-            if abs((picks[i] - picks[i-1]).total_seconds()) < 600:
-                ok = False
-                picks[i] = rand_dt()
-        picks = sorted(picks)
-    return picks
+        offset = random.randint(0, delta_minutes)
+        dt = (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
+        # keep at least 10 minutes apart
+        if all(abs((dt - p).total_seconds()) >= 600 for p in picks):
+            picks.add(dt)
+    return sorted(picks)
+
+# ---- Runtime state for schedulers / fit-reply tracking ----
+if not hasattr(bot, "_state"):
+    bot._state = {}
+bot._state["kewchie_times"] = []
+bot._state["kewchie_posted"] = set()
+bot._state["bonk_times"] = []
+bot._state["bonk_posted"] = set()
+bot._state["last_fit_msg"] = {"channel_id": None, "message_id": None, "timestamp": 0.0}
 
 # ---- Events ----
 @bot.event
 async def on_ready():
     _load_bank()
     if not hasattr(bot, "_js_last"):
-        bot._js_last = {}  # user_id -> last jumpscare trigger time (seconds)
-
-    # Kewchie scheduling state
-    if not hasattr(bot, "_kewchie_times"):
-        bot._kewchie_times = []
-        bot._kewchie_posted = set()
-
-    # Fit daily scheduling state
-    if not hasattr(bot, "_fit_time"):
-        bot._fit_time = None
-        bot._fit_posted = False
-
-    # Bonk Papo scheduling state
-    if not hasattr(bot, "_bonk_times"):
-        bot._bonk_times = []
-        bot._bonk_posted = set()
+        bot._js_last = {}  # user_id -> last jumpscare time
+    # init schedules
+    bot._state["kewchie_times"] = _pick_two_random_times_today()
+    bot._state["kewchie_posted"] = set()
+    bot._state["bonk_times"] = _pick_three_random_times_today_for_bonk()
+    bot._state["bonk_posted"] = set()
 
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
@@ -437,22 +368,22 @@ async def on_ready():
     user2_twice_daily_fixed.start()
     user3_task.start()
     daily_scam_post.start()
-    daily_auto_allowance.start()  # 8am PT allowance + penalties
-    kewchie_daily_scheduler.start()  # random twice-daily songs
-    fit_daily_scheduler.start()      # one random fit pic daily
-    bonk_papo_scheduler.start()      # three random bonk posts daily
+    daily_auto_allowance.start()  # 8am PT allowance + weekly inactivity penalty
+    kewchie_daily_scheduler.start()  # random twice-daily posts
+    bonk_daily_scheduler.start()     # 3x/day random bonks
+    daily_fit_auto_post.start()      # once/day fit post
 
-# ---- Kewchie random twice daily scheduler ----
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
     now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    if (not bot._kewchie_times) or (bot._kewchie_times[0].date() != now_utc.date()):
-        bot._kewchie_times = _pick_two_random_times_today_10_to_22_PT()
-        bot._kewchie_posted = set()
+    # reset each day
+    if (not bot._state["kewchie_times"]) or (bot._state["kewchie_times"][0].date() != now_utc.date()):
+        bot._state["kewchie_times"] = _pick_two_random_times_today()
+        bot._state["kewchie_posted"] = set()
 
-    for t in bot._kewchie_times:
-        key = ("kewchie", t.isoformat())
-        if now_utc == t and key not in bot._kewchie_posted:
+    for t in bot._state["kewchie_times"]:
+        key = t.isoformat()
+        if now_utc == t and key not in bot._state["kewchie_posted"]:
             channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
             if channel:
                 links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
@@ -460,81 +391,34 @@ async def kewchie_daily_scheduler():
                     await channel.send(random.choice(links))
                 else:
                     await channel.send("Playlist isn't available right now 😭")
-            bot._kewchie_posted.add(key)
+            bot._state["kewchie_posted"].add(key)
 
 @kewchie_daily_scheduler.before_loop
-async def _wait_bot_ready_kewchie():
+async def _wait_kewchie_ready():
     await bot.wait_until_ready()
 
-# ---- Fit daily one-time scheduler ----
 @tasks.loop(minutes=1)
-async def fit_daily_scheduler():
+async def bonk_daily_scheduler():
     now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    # pick a random time once per day (between 10:00 and 22:00 PT)
-    tz = ZoneInfo("America/Los_Angeles")
-    today_pt = datetime.now(tz=tz).date()
-    if (bot._fit_time is None) or (bot._fit_time.astimezone(tz).date() != today_pt):
-        # pick a random time
-        start = datetime.combine(today_pt, dtime(hour=10, tzinfo=tz))
-        end   = datetime.combine(today_pt, dtime(hour=22, tzinfo=tz))
-        delta_minutes = int((end - start).total_seconds() // 60)
-        offset = random.randint(0, delta_minutes)
-        bot._fit_time = (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
-        bot._fit_posted = False
+    if (not bot._state["bonk_times"]) or (bot._state["bonk_times"][0].date() != now_utc.date()):
+        bot._state["bonk_times"] = _pick_three_random_times_today_for_bonk()
+        bot._state["bonk_posted"] = set()
 
-    if not bot._fit_posted and now_utc == bot._fit_time:
-        channel = bot.get_channel(FIT_CHANNEL_ID)
-        if channel and FIT_IMAGE_URLS:
-            url = random.choice(FIT_IMAGE_URLS)
-            msg = f"OMFG look at this one girlie!!! we neeeeeeeeed! 💗"
-            sent = await channel.send(url)
-            await channel.send(msg)
-
-            # listen for USER3 within 20s
-            def check(m: discord.Message):
-                return (
-                    m.author.id == USER3_ID and
-                    m.channel.id == channel.id and
-                    m.created_at > sent.created_at
-                )
-            try:
-                reply = await bot.wait_for("message", timeout=20, check=check)
-                # respond with slap peach + follow-up line
-                await channel.send(
-                    f"{SLAP_PEACH_EMOTE} you know you'd look good in this girlie! you go girl! {SCISSORS_EMOJI}"
-                )
-            except asyncio.TimeoutError:
-                pass
-
-        bot._fit_posted = True
-
-@fit_daily_scheduler.before_loop
-async def _wait_bot_ready_fit():
-    await bot.wait_until_ready()
-
-# ---- Bonk Papo 3× daily scheduler ----
-@tasks.loop(minutes=1)
-async def bonk_papo_scheduler():
-    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-    tz = ZoneInfo("America/Los_Angeles")
-    today_pt = datetime.now(tz=tz).date()
-    if (not bot._bonk_times) or (bot._bonk_times[0].astimezone(tz).date() != today_pt):
-        bot._bonk_times = _pick_three_random_times_today_10_to_22_PT()
-        bot._bonk_posted = set()
-
-    for t in bot._bonk_times:
-        key = ("bonk", t.isoformat())
-        if now_utc == t and key not in bot._bonk_posted:
+    for t in bot._state["bonk_times"]:
+        key = t.isoformat()
+        if now_utc == t and key not in bot._state["bonk_posted"]:
             channel = bot.get_channel(CHANNEL_ID)
             if channel:
-                await channel.send(f"<@{USER1_ID}> {BONK_MESSAGE}")
-            bot._bonk_posted.add(key)
+                await channel.send(
+                    f"<@{USER1_ID}> stop being horny papo! bad papo! "
+                    f"<a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788>"
+                )
+            bot._state["bonk_posted"].add(key)
 
-@bonk_papo_scheduler.before_loop
-async def _wait_bot_ready_bonk():
+@bonk_daily_scheduler.before_loop
+async def _wait_bonk_ready():
     await bot.wait_until_ready()
 
-# ---- Messages ----
 @bot.event
 async def on_message(message: discord.Message):
     if message.author.bot:
@@ -543,12 +427,12 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
-    # Process commands first
+    # Commands first
     if content.strip().startswith("!"):
         await bot.process_commands(message)
         return
 
-    # Global jump scare trigger (image only, then creepy line), per-user cooldown
+    # Jump scare
     if JUMPSCARE_TRIGGER in lower:
         now = _now()
         last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
@@ -584,7 +468,7 @@ async def on_message(message: discord.Message):
         await message.channel.send(str(em) if em else "🙄")
         return
 
-    # 🥖🍑 easter egg
+    # 🥖🍑 easter egg (respond twice to the bot)
     if message.reference and message.reference.resolved:
         replied_to_msg = message.reference.resolved
         if replied_to_msg.author.id == bot.user.id:
@@ -596,14 +480,26 @@ async def on_message(message: discord.Message):
                 await message.channel.send("🥖🍑")
                 bot._reply_counts[uid] = 0
 
-    # Special: always reply to USER3_ID with a USER3_LINES phrase (100%),
-    # with a 20% chance to append one of the REACTION_EMOTES
-    if message.author.id == USER3_ID:
+    # Special: reply to USER3_ID with 35% chance (plus 20% chance to add emote)
+    if message.author.id == USER3_ID and random.random() < USER3_REPLY_CHANCE:
         phrase = random.choice(USER3_LINES)
         if random.random() < 0.20:
             phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"
         await message.reply(phrase, mention_author=False)
         return
+
+    # Fit “within 20 sec reply” detection for USER3
+    last_fit = bot._state["last_fit_msg"]
+    if (
+        message.author.id == USER3_ID
+        and message.channel.id == FIT_CHANNEL_ID
+        and last_fit["message_id"] is not None
+        and _now() - last_fit["timestamp"] <= 20
+    ):
+        # If they replied to that message or posted in channel within the window, trigger
+        await message.channel.send(f"{SLAP_PEACH_EMOTE} you know you'd look good in this girlie! you go girl! ✂️")
+        # Prevent multiple triggers in the same window
+        bot._state["last_fit_msg"] = {"channel_id": None, "message_id": None, "timestamp": 0.0}
 
     # Mention → bratty only
     mentioned = False
@@ -675,11 +571,45 @@ async def daily_auto_allowance():
     channel = bot.get_channel(CHANNEL_ID)
     if not channel:
         return
-    # avoid double-run if already processed today (manually or via task)
-    today = _today_key()
-    if economy.get("_last_airdrop_date") == today:
+    guild = channel.guild
+    if not guild:
         return
-    await _run_daily_allowance(channel)
+
+    utc_now = _now()
+    inactive_cutoff = utc_now - INACTIVE_WINDOW_DAYS * 86400
+    changed = False
+
+    async with economy_lock:
+        for m in guild.members:
+            if m.bot:
+                continue
+            u = _user(m.id)
+
+            # 1) Daily allowance
+            if economy["treasury"] > 0:
+                pay = min(CLAIM_AMOUNT, economy["treasury"])
+                new_bal = u["balance"] + pay
+                final_bal, skim = _cap_wallet(new_bal)
+                economy["treasury"] -= max(0, (pay - skim))
+                u["balance"] = final_bal
+                changed = True
+
+            # 2) Inactivity penalty (no roll/putasos in the last N days)
+            last_active = u.get("last_active", 0.0)
+            if last_active == 0.0 or last_active < inactive_cutoff:
+                if u["balance"] > 0:
+                    taken = u["balance"] // 2
+                    if taken > 0:
+                        u["balance"] -= taken
+                        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + taken)
+                        changed = True
+                        try:
+                            await channel.send(f"{m.mention} {PHRASES['penalty']}\n{PENALTY_IMAGE}")
+                        except Exception:
+                            pass
+
+        if changed:
+            _save_bank()
 
 # ================== Economy Commands ==================
 def _cooldown_left(last_ts: float, hours: int) -> tuple[int, int]:
@@ -771,7 +701,7 @@ async def gift(ctx, member: discord.Member, amount: int):
         economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + tax + skim)
         recv["balance"] = recv_final
         giver["gifted_today"] += amount
-        # NOTE: gifting no longer updates last_active (only roll/putasos do)
+        # gifting does NOT mark active
 
         _save_bank()
 
@@ -800,7 +730,7 @@ async def lb(ctx):
 async def richlist(ctx):
     await lb(ctx)
 
-# ---------- Smarter roll (spicy odds) ----------
+# ---------- Smarter roll (variable odds + jackpot on ALL) ----------
 def _resolve_roll_amount(u_balance: int, arg: str | int) -> int:
     if isinstance(arg, int):
         return max(0, arg)
@@ -829,7 +759,6 @@ async def roll(ctx, amount: str):
         if bet > u["balance"]:
             await ctx.send(f"{ctx.author.mention} you only have **{_fmt_bread(u['balance'])}**.")
             return
-        # cap and bank constraint
         max_affordable = min(GAMBLE_MAX_BET, u["balance"])
         if economy["treasury"] < bet:
             max_affordable = min(max_affordable, economy["treasury"])
@@ -837,20 +766,18 @@ async def roll(ctx, amount: str):
             await ctx.send(PHRASES["gamble_max"].format(maxb=_fmt_bread(max_affordable)))
             return
 
-        # Win probabilities by size (spicy but fair-ish)
+        # Variable odds
         frac = bet / max(1, USER_WALLET_CAP)
         win_prob = BASE_ROLL_WIN_PROB
-        if frac <= 0.05:      # tiny bet
-            win_prob += 0.05   # ~51%
-        elif frac >= 0.5:     # very large bet
-            win_prob -= 0.06   # ~40%
+        if frac <= 0.05:
+            win_prob += 0.05
+        elif frac >= 0.5:
+            win_prob -= 0.06
 
         jackpot_hit = False
         jackpot_mult = 1
 
-        # JACKPOT path only on "all"
         if isinstance(amount, str) and amount.lower() == "all":
-            # ~0.5% giga jackpot (x15), else ~2% mini (x3)
             r = random.random()
             if r < 0.005:
                 jackpot_hit = True
@@ -860,7 +787,7 @@ async def roll(ctx, amount: str):
                 jackpot_mult = 3
 
         if jackpot_hit:
-            payout = bet * (jackpot_mult - 1)  # additional gain
+            payout = bet * (jackpot_mult - 1)
             available_from_bank = min(economy["treasury"], payout)
             new_bal = u["balance"] + available_from_bank
             final_bal, skim = _cap_wallet(new_bal)
@@ -875,7 +802,6 @@ async def roll(ctx, amount: str):
             )
             return
 
-        # normal outcome
         win = (random.random() < win_prob)
         if win:
             new_bal = u["balance"] + bet
@@ -907,8 +833,8 @@ async def putasos(ctx, member: discord.Member):
         return
 
     SUCCESS_CHANCE = 0.15
-    STEAL_PCT_MIN, STEAL_PCT_MAX = 0.10, 0.25   # 10–25% of victim on success
-    FAIL_LOSE_PCT = 0.12                        # thief loses 12% of own balance to bank
+    STEAL_PCT_MIN, STEAL_PCT_MAX = 0.10, 0.25
+    FAIL_LOSE_PCT = 0.12
 
     async with economy_lock:
         thief = _user(ctx.author.id)
@@ -943,7 +869,7 @@ async def putasos(ctx, member: discord.Member):
             _save_bank()
             await ctx.send(f"{ctx.author.mention} got caught 💀 lost **{_fmt_bread(loss)}** to the bank. new: **{_fmt_bread(thief['balance'])}**")
 
-# ================== Admin Commands ==================
+# ================== Admin / Owner Commands ==================
 from discord.ext import commands as _admin
 
 @bot.command(name="seed", help="ADMIN: Seed bread to a user or the bank. Usage: !seed @user 500  |  !seed bank 2000")
@@ -1006,7 +932,7 @@ async def take(ctx, target: str = None, amount: int = None):
     if target.lower() == "bank":
         async with economy_lock:
             amt = min(amount, economy["treasury"])
-            economy["treasury"] -= amt  # burn from bank
+            economy["treasury"] -= amt
             _save_bank()
         await ctx.send(PHRASES["take_bank"].format(amt=_fmt_bread(amt), vault=_fmt_bread(economy['treasury'])))
         return
@@ -1066,7 +992,27 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
         vault=_fmt_bread(economy["treasury"])
     ))
 
-# ---- Fun commands ----
+# ---- Emergency airdrop (owner-only) ----
+@bot.command(name="airdrop-today", help="OWNER ONLY: Trigger today's daily allowance + inactivity checks if the bot missed it (once/day).")
+async def airdrop_today(ctx):
+    if ctx.author.id != AIRDROP_OWNER_ID:
+        await ctx.send("Only the owner can use this command.")
+        return
+    today = _today_key()
+    async with economy_lock:
+        last = economy.get("_last_airdrop_date")
+        if last == today:
+            await ctx.send("Airdrop already run today.")
+            return
+        # Run the same logic as daily_auto_allowance once
+    # Call the task function body directly
+    await daily_auto_allowance()  # runs once via the task body
+    async with economy_lock:
+        economy["_last_airdrop_date"] = today
+        _save_bank()
+    await ctx.send("Manual airdrop executed for today ✅")
+
+# ---- Fun / misc commands ----
 @bot.command(name="cafe", help="Send a random coffee GIF ☕")
 async def cafe(ctx, *, term: str = "coffee"):
     query = term if term else "coffee"
@@ -1102,32 +1048,6 @@ async def bbl(ctx):
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
 
-# ---- Fit command ----
-@bot.command(name="fit", help="Post a random fit pic in the fit channel")
-async def fit(ctx):
-    if ctx.channel.id != FIT_CHANNEL_ID:
-        await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>")
-        return
-    if not FIT_IMAGE_URLS:
-        await ctx.send("No pics yet 😭")
-        return
-    url = random.choice(FIT_IMAGE_URLS)
-    msg1 = await ctx.send(url)
-    await ctx.send("OMFG look at this one girlie!!! we neeeeeeeeed! 💗")
-
-    # listen for USER3 within 20s
-    def check(m: discord.Message):
-        return (
-            m.author.id == USER3_ID and
-            m.channel.id == ctx.channel.id and
-            m.created_at > msg1.created_at
-        )
-    try:
-        await bot.wait_for("message", timeout=20, check=check)
-        await ctx.send(f"{SLAP_PEACH_EMOTE} you know you'd look good in this girlie! you go girl! {SCISSORS_EMOJI}")
-    except asyncio.TimeoutError:
-        pass
-
 # ---- Kewchie commands ----
 @bot.command(name="kewchie", help="Post a random Kali Uchis song from the playlist (in the kewchie channel)")
 async def kewchie(ctx):
@@ -1160,24 +1080,44 @@ async def kewchie_debug(ctx):
     )
     await ctx.send(f"```{msg}```")
 
-# ---- Manual AIRDROP (restricted + once per day) ----
-@bot.command(name="airdrop", help="OWNER: Trigger the daily allowance manually (once per day)", hidden=True)
-async def airdrop(ctx):
-    if ctx.author.id != AIRDROP_MANAGER_ID:
-        await ctx.send("Only my sugar manager can do that. 💅")
+# ---- Fit commands ----
+@bot.command(name="fit", help="Post a random fit pic in the fit channel")
+async def fit(ctx):
+    if ctx.channel.id != FIT_CHANNEL_ID:
+        await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>")
         return
+    url = random.choice(FIT_IMAGE_URLS)
+    msg = await ctx.send(url)
+    await ctx.send("OMFG look at this one girlie!!! we neeeeeeeeed! 💗")
+    # remember for 20s response window
+    bot._state["last_fit_msg"] = {
+        "channel_id": msg.channel.id,
+        "message_id": msg.id,
+        "timestamp": _now()
+    }
 
-    today = _today_key()
-    if economy.get("_last_airdrop_date") == today:
-        await ctx.send("Today's airdrop already processed. 🍞")
+# ---- Daily auto-fit (once/day at 3PM PT) ----
+@tasks.loop(time=dtime(hour=15, tzinfo=ZoneInfo("America/Los_Angeles")))
+async def daily_fit_auto_post():
+    channel = bot.get_channel(FIT_CHANNEL_ID)
+    if not channel:
         return
+    url = random.choice(FIT_IMAGE_URLS)
+    msg = await channel.send(url)
+    await channel.send("OMFG look at this one girlie!!! we neeeeeeeeed! 💗")
+    bot._state["last_fit_msg"] = {
+        "channel_id": msg.channel.id,
+        "message_id": msg.id,
+        "timestamp": _now()
+    }
 
-    channel = bot.get_channel(CHANNEL_ID) or ctx.channel
-    ok = await _run_daily_allowance(channel)
-    if ok:
-        await ctx.send("Manual daily airdrop processed. 🍞✨")
-    else:
-        await ctx.send("Couldn't process the airdrop (no channel/guild?).")
+@daily_fit_auto_post.before_loop
+async def _wait_fit_ready():
+    await bot.wait_until_ready()
+
+# ---------- Placeholder: future Pinterest command ----------
+# def <your future pinterest fetcher here>():
+#     pass
 
 # ---- Start ----
 if __name__ == "__main__":
