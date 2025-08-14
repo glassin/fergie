@@ -53,6 +53,12 @@ FIT_IMAGE_URLS = [
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867483525140/pinterest_681169512428917172.jpg?ex=689ef23f&is=689da0bf&hm=9f7e993b0c4391b27262f6bab9e7eba41af434f27d386ea0e3f7af1a2dcf62ef&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867810422854/pinterest_681169512428917179.jpg?ex=689ef23f&is=689da0bf&hm=738196039bf19fb99b72610d3a30641bb5a8cec28998919e92b3d7dc34c30c28&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470868087373895/pinterest_681169512428919577.jpg?ex=689ef23f&is=689da0bf&hm=f0921729a0c51ac94303ea123209689650e42ec6aebdf585b8609308a34ea7ec&",
+    # New links (deduped)
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405608288053235845/Screenshot_14.png?ex=689f723a&is=689e20ba&hm=cdd8b626007dd4939c5337c58d194d2a9229d23ca15ac7a18492abafc5d913d8&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819860873278/pinterest_681169512428877548.jpg?ex=689f6969&is=689e17e9&hm=820df44a59d2c99fb8e496aed88ccc681843f2d75de830d669bbe26357d0f979&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819210756178/pinterest_681169512428836350.png?ex=689f6969&is=689e17e9&hm=43c908944d8f813a4b99f0aad4a672dc56e7f05854ee357630bbae8f633b1672&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818728153148/pinterest_681169512428815368.jpg?ex=689f6969&is=689e17e9&hm=625f7aa45091f7deccd09185dd86d5db9682f0f149b40141112a3a9dc5ad292c&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818464170195/pinterest_681169512428788228.jpg?ex=689f6969&is=689e17e9&hm=86b1b23a623b8dbbf9789a9a002c8589dec91f139c39caad0a5ee6f470f26d6e&",
 ]
 FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
 FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
@@ -765,7 +771,7 @@ async def roll(ctx, amount: str):
         await _save_bank()
     await ctx.send(f"{ctx.author.mention} {text}")
 
-@bot.command(name="putasos", help="Try to rob someone: !putasos @user (low success, big fail penalty)")
+@bot.command(name="putasos", help="Try and rob someone kombat klubz style")
 async def putasos(ctx, member: discord.Member):
     if not _is_gamble_channel(ctx.channel.id):
         await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>."); return
@@ -888,7 +894,7 @@ async def take(ctx, target: str = None, amount: int = None):
         u["balance"] -= amt
         economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amt)
         await _save_bank()
-    await ctx.send(PHRASES["take_user"].format(amt=_fmt_bread(amt), user=member.mention, bal=_fmt_bread(u["balance"])))
+    await ctx.send(PHRASES["take_user"].format(amt=_fmt_bread(amt), user=member.mention, bal=_fmt_bread(u['balance'])))
 
 @take.error
 async def take_error(ctx, error):
@@ -925,7 +931,7 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
     ))
 
 # ================== Fun / Media Commands ==================
-@bot.command(name="cafe", help="Send a random coffee GIF ☕")
+@bot.command(name="cafe", help="owl y lark")
 async def cafe(ctx, *, term: str = "coffee"):
     query = term if term else "coffee"
     async with ctx.channel.typing():
@@ -958,12 +964,12 @@ async def scam(ctx):
     )
     await ctx.send(msg)
 
-@bot.command(name="bbl", help="Send the ultimate BBL GIF 💃")
+@bot.command(name="bbl", help="see fergies culo")
 async def bbl(ctx):
     gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
     await ctx.send(gif_url)
 
-@bot.command(name="hawaii", help="Send a random Hawaii pic or Eddie Murphy GIF 🌺")
+@bot.command(name="hawaii", help="see vivvy's vacation pix")
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
 
@@ -996,7 +1002,7 @@ async def kewchie_debug(ctx):
     await ctx.send(f"```{msg}```")
 
 # ---- FIT command & auto daily ----
-@bot.command(name="fit", help="Post a random fit pic in the fit channel")
+@bot.command(name="fit", help="fergie's fits")
 async def fit(ctx):
     if ctx.channel.id != FIT_CHANNEL_ID:
         await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>"); return
@@ -1018,13 +1024,136 @@ async def _fit_wait_ready():
     await bot.wait_until_ready()
 
 # ================== Custom Help: !halp ==================
-@bot.command(name="halp", help="Shows this message")
+from discord import Embed, Colour
+
+def _mention_channel(ch_id: int) -> str:
+    return f"<#{ch_id}>" if ch_id else "`(not set)`"
+
+@bot.command(name="halp", help="Shows an embedded help menu")
 async def halp(ctx, *, command: str | None = None):
-    # Send the default help formatter but under !halp
+    # If a specific command is requested: show its detailed help
     if command:
-        await ctx.send_help(command)
-    else:
-        await ctx.send_help()
+        cmd = bot.get_command(command)
+        if not cmd:
+            await ctx.send(f"Couldn't find a command named `{command}`.")
+            return
+
+        aliases = ", ".join(cmd.aliases) if getattr(cmd, "aliases", None) else "None"
+        usage = f"!{cmd.qualified_name} {cmd.signature}".strip()
+        e = Embed(
+            title=f"Command: !{cmd.qualified_name}",
+            description=(cmd.help or "No details provided."),
+            colour=Colour.blurple()
+        )
+        e.add_field(name="Usage", value=f"`{usage}`", inline=False)
+        e.add_field(name="Aliases", value=aliases, inline=False)
+        await ctx.send(embed=e)
+        return
+
+    # Main menu embed
+    e = Embed(
+        title="🍞 Bot Help",
+        description="Here’s everything I can do. Use `!halp <command>` for details on one command.",
+        colour=Colour.blurple()
+    )
+
+    # Quick tips/top notes
+    e.add_field(
+        name="Notes",
+        value=(
+            f"• Casino commands only work in {_mention_channel(GAMBLE_CHANNEL_ID)}\n"
+            f"• `!fit` only works in {_mention_channel(FIT_CHANNEL_ID)}\n"
+            f"• `!kewchie` only works in {_mention_channel(KEWCHIE_CHANNEL_ID)}"
+        ),
+        inline=False
+    )
+
+    # Economy
+    e.add_field(
+        name="💰 Economy",
+        value=(
+            "`!bank` — Show remaining bank vault\n"
+            "`!balance` / `!bal` / `!wallet` — See your (or someone else’s) balance\n"
+            "`!claim` — Claim daily allowance (24h cooldown, requires savings)\n"
+            "`!gift @user amount` — Gift bread (daily cap + tax tiers)\n"
+            "`!lb` / `!richlist` — Top 10 richest"
+        ),
+        inline=False
+    )
+
+    # Casino / Gambling (restricted channel)
+    e.add_field(
+        name="🎲 Casino (only in casino channel)",
+        value=(
+            "`!roll <amount|all|half>` — Bet vs bank (win prob scales; jackpot on `all`)\n"
+            "`!putasos @user` — Try to rob someone (low success, fail hurts)"
+        ),
+        inline=False
+    )
+
+    # Fun / Media
+    e.add_field(
+        name="🎉 Fun & Media",
+        value=(
+            "`!cafe [term]` — owl y lark\n"
+            "`!scam` — BTC/ETH prices (bratty style)\n"
+            "`!bbl` — see fergies culo\n"
+            "`!hawaii` — see vivvy's vacation pix"
+        ),
+        inline=False
+    )
+
+    # Fit
+    e.add_field(
+        name="👗 Fit (fashion)",
+        value=(
+            "`!fit` — fergie's fits (fit channel only). If a specific user replies within 20s, "
+            "I send a cheeky follow-up."
+        ),
+        inline=False
+    )
+
+    # Kewchie (Kali Uchis)
+    e.add_field(
+        name="🎵 Kewchie (Kali Uchis)",
+        value=(
+            "`!kewchie` — Post a random playlist track (kewchie channel only)\n"
+            "`!kewchie-debug` — Debug Spotify playlist setup"
+        ),
+        inline=False
+    )
+
+    # Admin
+    e.add_field(
+        name="🛠️ Admin (Manage Server required)",
+        value=(
+            "`!seed bank <amt>` — Refill bank (to cap)\n"
+            "`!seed @user <amt>` — Give bread (respects wallet cap)\n"
+            "`!take bank <amt>` — Burn from bank\n"
+            "`!take @user <amt>` — Take from user to bank\n"
+            "`!setbal @user <amt>` — Set a user’s exact balance (capped to wallet)"
+        ),
+        inline=False
+    )
+
+    # Hidden/automatic behaviors (useful to know)
+    e.add_field(
+        name="⏱️ Automated Behaviors (FYI)",
+        value=(
+            "• Bread GIF every 4h; bread emoji every 6h\n"
+            "• Daily scam post (70% chance)\n"
+            "• 8am PT: auto allowance for all members + inactivity penalties\n"
+            "• `USER1_ID`: pings twice daily; reacts to “pinche fergie”; random 3x/day “bonk papo”\n"
+            "• `USER2_ID`: pings twice daily with “shooo cornman!”\n"
+            "• `USER3_ID`: random replies (35% of their msgs) + ping every 8h\n"
+            "• `LOBO_ID`: once/day “send me money lobo.” when they post\n"
+            "• `!fit`: 20s follow-up if the target user replies to the fit post"
+        ),
+        inline=False
+    )
+
+    e.set_footer(text="Tip: try `!halp roll` or `!halp gift` for specific usage.")
+    await ctx.send(embed=e)
 
 # ---------- Placeholder: future Pinterest command ----------
 # def <your future pinterest fetcher here>():
