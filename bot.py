@@ -30,15 +30,16 @@ def _is_gamble_channel(ch_id: int) -> bool:
 JUMPSCARE_TRIGGER = "concha"
 JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
-JUMPSCARE_EMOJI = "<:monkagiga:1131711987794063511>"
+JUMPSCARE_EMOTE_TEXT = "<:monkagiga:1131711987794063511>"
 # ---------------------------------------
 
-# ---------- Spotify (Kali Uchis playlist) ----------
-SPOTIFY_CLIENT_ID     = os.getenv("SPOTIFY_CLIENT_ID")
-SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET")
-SPOTIFY_PLAYLIST_ID   = os.getenv("SPOTIFY_PLAYLIST_ID")  # "6l190qy5x9xY8Uk3bb2FYl"
-KEWCHIE_CHANNEL_ID    = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
-# ---------------------------------------------------
+# ---------- Kewchie (Kali Uchis) ----------
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+SPOTIFY_PLAYLIST_ID = os.getenv("SPOTIFY_PLAYLIST_ID", "6l190qy5x9xY8Uk3bb2FYl")
+SPOTIFY_MARKET = os.getenv("SPOTIFY_MARKET", "US")  # helps avoid region-restricted tracks
+KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
+# -----------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -127,73 +128,6 @@ async def fetch_crypto_prices():
             if r.status != 200:
                 return None
             return await r.json()
-
-# ---- Spotify helpers (Kali Uchis playlist) ----
-async def _spotify_token():
-    if not (SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET):
-        return None
-    token_url = "https://accounts.spotify.com/api/token"
-    auth = aiohttp.BasicAuth(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET)
-    data = {"grant_type": "client_credentials"}
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.post(token_url, data=data, auth=auth, timeout=15) as r:
-                if r.status != 200:
-                    print(f"[spotify] token error: {r.status} {await r.text()}")
-                    return None
-                js = await r.json()
-                return js.get("access_token")
-    except Exception as e:
-        print(f"[spotify] token exception: {e}")
-        return None
-
-async def _fetch_playlist_tracks():
-    """Return a list of Spotify track URLs from the playlist (handles pagination)."""
-    if not SPOTIFY_PLAYLIST_ID:
-        return []
-
-    token = await _spotify_token()
-    if not token:
-        return []
-
-    urls = []
-    endpoint = f"https://api.spotify.com/v1/playlists/{SPOTIFY_PLAYLIST_ID}/tracks"
-    params = {
-        "limit": 100,
-        "fields": "items(track(id,external_urls,is_local)),next"
-    }
-    headers = {"Authorization": f"Bearer {token}"}
-
-    try:
-        async with aiohttp.ClientSession() as s:
-            while endpoint:
-                async with s.get(endpoint, params=params, headers=headers, timeout=20) as r:
-                    if r.status != 200:
-                        print(f"[spotify] tracks error: {r.status} {await r.text()}")
-                        return urls
-                    js = await r.json()
-                    for it in js.get("items", []):
-                        tr = it.get("track")
-                        if not tr or tr.get("is_local"):
-                            continue
-                        ext = tr.get("external_urls", {})
-                        link = ext.get("spotify")
-                        if link:
-                            urls.append(link)
-                    endpoint = js.get("next")
-                    params = None  # next already includes params
-    except Exception as e:
-        print(f"[spotify] tracks exception: {e}")
-
-    return urls
-
-async def _refresh_kewchie_cache():
-    """Refresh cached track list; store on bot object."""
-    tracks = await _fetch_playlist_tracks()
-    if not hasattr(bot, "_kewchie_tracks"):
-        bot._kewchie_tracks = []
-    bot._kewchie_tracks = tracks or []
-    print(f"[kewchie] cached {len(bot._kewchie_tracks)} tracks")
 
 # ---- Chat lines ----
 BREAD_PUNS = [
@@ -310,19 +244,70 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
 def _mark_active(uid: int):
     _user(uid)["last_active"] = _now()
 
+# ---- Spotify helpers ----
+_spotify_token = {"access_token": None, "expires_at": 0}
+
+async def _get_spotify_token():
+    # cached token
+    if _spotify_token["access_token"] and _now() < _spotify_token["expires_at"] - 30:
+        return _spotify_token["access_token"]
+
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        return None
+
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": SPOTIFY_CLIENT_ID,
+        "client_secret": SPOTIFY_CLIENT_SECRET
+    }
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post("https://accounts.spotify.com/api/token", data=data, timeout=15) as r:
+                if r.status != 200:
+                    return None
+                js = await r.json()
+                _spotify_token["access_token"] = js.get("access_token")
+                _spotify_token["expires_at"] = _now() + int(js.get("expires_in", 3600))
+                return _spotify_token["access_token"]
+    except Exception:
+        return None
+
+async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
+    token = await _get_spotify_token()
+    if not token:
+        return []
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"market": SPOTIFY_MARKET, "limit": 100}
+    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks"
+    tracks = []
+    try:
+        async with aiohttp.ClientSession() as s:
+            while url:
+                async with s.get(url, headers=headers, params=params, timeout=15) as r:
+                    if r.status != 200:
+                        return tracks
+                    data = await r.json()
+                    for item in data.get("items", []):
+                        t = item.get("track") or {}
+                        if t and not t.get("is_local") and t.get("id"):
+                            tracks.append(f"https://open.spotify.com/track/{t['id']}")
+                    # pagination
+                    url = data.get("next")
+                    params = None  # next already includes query
+    except Exception:
+        pass
+    return tracks
+
 # ---- Events ----
 @bot.event
 async def on_ready():
     _load_bank()
     if not hasattr(bot, "_js_last"):
         bot._js_last = {}  # user_id -> last jumpscare trigger time (seconds)
-    if not hasattr(bot, "_kewchie_tracks"):
-        bot._kewchie_tracks = []
+    if not hasattr(bot, "_kewchie_times"):
+        bot._kewchie_times = []
+        bot._kewchie_posted = set()
     print(f"Logged in as {bot.user}")
-
-    # prefetch playlist cache
-    await _refresh_kewchie_cache()
-
     four_hour_post.start()
     six_hour_emoji.start()
     user1_twice_daily_fixed.start()
@@ -330,7 +315,49 @@ async def on_ready():
     user3_task.start()
     daily_scam_post.start()
     daily_auto_allowance.start()  # 8am PT allowance + penalties
-    kewchie_auto_drop.start()     # twice/day automatic playlist posts
+    kewchie_daily_scheduler.start()  # random twice-daily posts
+
+def _pick_two_random_times_today():
+    # pick 2 random times between 10:00 and 22:00 PT today, return as UTC-aware datetimes
+    tz = ZoneInfo("America/Los_Angeles")
+    today = datetime.now(tz=tz).date()
+    start = datetime.combine(today, dtime(hour=10, tzinfo=tz))
+    end   = datetime.combine(today, dtime(hour=22, tzinfo=tz))
+    # pick two distinct minutes
+    def rand_dt():
+        delta_minutes = int((end - start).total_seconds() // 60)
+        offset = random.randint(0, delta_minutes)
+        return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
+    t1 = rand_dt()
+    t2 = rand_dt()
+    while abs((t2 - t1).total_seconds()) < 300:  # ensure at least 5 min apart
+        t2 = rand_dt()
+    return sorted([t1, t2])
+
+@tasks.loop(minutes=1)
+async def kewchie_daily_scheduler():
+    # initialize times for today if missing or day changed
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if (not bot._kewchie_times) or (bot._kewchie_times[0].date() != now_utc.date()):
+        bot._kewchie_times = _pick_two_random_times_today()
+        bot._kewchie_posted = set()
+
+    # if current minute matches a scheduled time and not posted yet, post
+    for t in bot._kewchie_times:
+        key = t.isoformat()
+        if now_utc == t and key not in bot._kewchie_posted:
+            channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
+            if channel:
+                links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
+                if links:
+                    await channel.send(random.choice(links))
+                else:
+                    await channel.send("Playlist isn't available right now 😭")
+            bot._kewchie_posted.add(key)
+
+@kewchie_daily_scheduler.before_loop
+async def _wait_bot_ready_kewchie():
+    await bot.wait_until_ready()
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -351,7 +378,7 @@ async def on_message(message: discord.Message):
         last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
         if now - last >= JUMPSCARE_COOLDOWN_SECONDS:
             await message.channel.send(JUMPSCARE_IMAGE_URL)
-            await message.channel.send(f"the parasites!!! {JUMPSCARE_EMOJI}")
+            await message.channel.send(f"the parasites!!! {JUMPSCARE_EMOTE_TEXT}")
             bot._js_last[message.author.id] = now
         return
 
@@ -512,28 +539,6 @@ async def daily_auto_allowance():
         if changed:
             _save_bank()
 
-# --------- Kewchie: auto post twice a day at random times ---------
-@tasks.loop(hours=12)
-async def kewchie_auto_drop():
-    # random delay inside each 12h block to feel spontaneous (0–3h)
-    jitter = random.randint(0, 3 * 60 * 60)
-    await asyncio.sleep(jitter)
-
-    ch = bot.get_channel(KEWCHIE_CHANNEL_ID)
-    if not ch:
-        return
-
-    try:
-        if not getattr(bot, "_kewchie_tracks", []):
-            await _refresh_kewchie_cache()
-        if bot._kewchie_tracks:
-            link = random.choice(bot._kewchie_tracks)
-            await ch.send(link)
-        else:
-            print("[kewchie] no tracks available for auto post")
-    except Exception as e:
-        print(f"[kewchie] auto post error: {e}")
-
 # ================== Economy Commands ==================
 def _cooldown_left(last_ts: float, hours: int) -> tuple[int, int]:
     remaining = int(hours * 3600 - (_now() - last_ts))
@@ -691,6 +696,7 @@ async def roll(ctx, amount: str):
             return
 
         # Win probabilities by size (spicier but fair-ish)
+        # small bets slightly higher win chance; large bets slightly lower
         frac = bet / max(1, USER_WALLET_CAP)
         win_prob = BASE_ROLL_WIN_PROB
         if frac <= 0.05:      # tiny bet
@@ -703,7 +709,7 @@ async def roll(ctx, amount: str):
 
         # JACKPOT path only on "all"
         if isinstance(amount, str) and amount.lower() == "all":
-            # ~0.5% giga (x15), else ~2% mini (x3)
+            # ~0.5% to hit giga jackpot (x15), else ~2% mini-jackpot (x3)
             r = random.random()
             if r < 0.005:
                 jackpot_hit = True
@@ -714,10 +720,11 @@ async def roll(ctx, amount: str):
 
         if jackpot_hit:
             payout = bet * (jackpot_mult - 1)  # additional gain beyond original bet
+            # check bank/tighten to wallet cap
             available_from_bank = min(economy["treasury"], payout)
             new_bal = u["balance"] + available_from_bank
             final_bal, skim = _cap_wallet(new_bal)
-            paid_from_bank = (final_bal - u["balance"]) + skim
+            paid_from_bank = (final_bal - u["balance"]) + skim  # total removed incl skim return
             economy["treasury"] -= max(0, paid_from_bank - skim)
             u["balance"] = final_bal
             _mark_active(ctx.author.id)
@@ -955,21 +962,37 @@ async def bbl(ctx):
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
 
-# ---- Kewchie command (random track link from playlist, in the specific channel) ----
-@bot.command(name="kewchie", help="Post a random Kali Uchis song link from the playlist (channel-limited)")
+# ---- Kewchie commands ----
+@bot.command(name="kewchie", help="Post a random Kali Uchis song from the playlist (in the kewchie channel)")
 async def kewchie(ctx):
     if ctx.channel.id != KEWCHIE_CHANNEL_ID:
-        await ctx.send(f"Try this in <#{KEWCHIE_CHANNEL_ID}> so I don’t spam ✨")
+        await ctx.send(f"Use this in <#{KEWCHIE_CHANNEL_ID}>")
         return
-
-    if not getattr(bot, "_kewchie_tracks", []):
-        await _refresh_kewchie_cache()
-
-    if not bot._kewchie_tracks:
+    links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
+    if not links:
         await ctx.send("Playlist isn't available right now 😭")
         return
+    await ctx.send(random.choice(links))
 
-    await ctx.send(random.choice(bot._kewchie_tracks))
+@bot.command(name="kewchie-debug", help="Debug Spotify playlist setup")
+async def kewchie_debug(ctx):
+    cid_set = bool(SPOTIFY_CLIENT_ID)
+    sec_set = bool(SPOTIFY_CLIENT_SECRET)
+    pid_set = bool(SPOTIFY_PLAYLIST_ID)
+    ch_ok = (bot.get_channel(KEWCHIE_CHANNEL_ID) is not None)
+
+    token = await _get_spotify_token()
+    token_ok = bool(token)
+    tracks = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID) if token_ok else []
+    msg = (
+        f"CID set: {cid_set}\n"
+        f"SECRET set: {sec_set}\n"
+        f"PLAYLIST set: {pid_set}\n"
+        f"Token: {'ok' if token_ok else 'failed'}\n"
+        f"Tracks fetched: {len(tracks)}\n"
+        f"Channel OK: {ch_ok} (<#{KEWCHIE_CHANNEL_ID}>)"
+    )
+    await ctx.send(f"```{msg}```")
 
 # ---------- Placeholder: future Pinterest command ----------
 # def <your future pinterest fetcher here>():
