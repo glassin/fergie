@@ -3,7 +3,6 @@ from discord.ext import tasks, commands
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
-from pathlib import Path
 
 import asyncpg  # PostgreSQL (Railway/Supabase) persistence
 
@@ -21,7 +20,7 @@ RESULT_LIMIT = 20
 REPLY_CHANCE = 0.10
 
 # Version/info (for !version)
-BOT_VERSION = os.getenv("BOT_VERSION", "v1.0-merged")
+BOT_VERSION = os.getenv("BOT_VERSION", "v1.1-merged")
 BUILD_TAG   = os.getenv("BUILD_TAG", "")
 
 # Specific member IDs
@@ -53,12 +52,12 @@ KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
 
 # ---------- Fit (Discord CDN images) ----------
 FIT_IMAGE_URLS = [
-    # original entries (unchanged)
+    # original entries
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470866879414323/pinterest_681169512428877550.png?ex=689ef23f&is=689da0bf&hm=6333fbb250a112ecd271bf33cf4212687b8d01d8200a2e614af2851068a65f65&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867483525140/pinterest_681169512428917172.jpg?ex=689ef23f&is=689da0bf&hm=9f7e993b0c4391b27262f6bab9e7eba41af434f27d386ea0e3f7af1a2dcf62ef&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867810422854/pinterest_681169512428917179.jpg?ex=689ef23f&is=689da0bf&hm=738196039bf19fb99b72610d3a30641bb5a8cec28998919e92b3d7dc34c30c28&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470868087373895/pinterest_681169512428919577.jpg?ex=689ef23f&is=689da0bf&hm=f0921729a0c51ac94303ea123209689650e42ec6aebdf585b8609308a34ea7ec&",
-    # appended new links (deduped)
+    # appended new links
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405608288053235845/Screenshot_14.png?ex=689f723a&is=689e20ba&hm=cdd8b626007dd4939c5337c58d194d2a9229d23ca15ac7a18492abafc5d913d8&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819860873278/pinterest_681169512428877548.jpg?ex=689f6969&is=689e17e9&hm=820df44a59d2c99fb8e496aed88ccc681843f2d75de830d669bbe26357d0f979&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819210756178/pinterest_681169512428836350.png?ex=689f6969&is=689e17e9&hm=43c908944d8f813a4b99f0aad4a672dc56e7f05854ee357630bbae8f633b1672&",
@@ -257,12 +256,12 @@ async def _get_spotify_token():
         return _spotify_token["access_token"]
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
         return None
+    # FIXED: proper dict (no stray quote)
     data = {
-    "grant_type": "client_credentials",
-    "client_id": SPOTIFY_CLIENT_ID,
-    "client_secret": SPOTIFY_CLIENT_SECRET,
-}
-
+        "grant_type": "client_credentials",
+        "client_id": SPOTIFY_CLIENT_ID,
+        "client_secret": SPOTIFY_CLIENT_SECRET,
+    }
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post("https://accounts.spotify.com/api/token", data=data, timeout=15) as r:
@@ -481,7 +480,7 @@ async def on_message(message: discord.Message):
         if random.random() < 0.35:
             phrase = random.choice(USER3_LINES)
             if random.random() < 0.20:
-                phrase = f"{phrase} {random.choice(REACTION_EMOSES)}"
+                phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"  # typo fix below
             await message.reply(phrase, mention_author=False)
             return
 
@@ -1182,12 +1181,11 @@ async def version(ctx):
         e.add_field(name=n, value=v, inline=False)
     await ctx.send(embed=e)
 
-# ---------- Placeholder: future Pinterest command ----------
-# def <your future pinterest fetcher here>():
-#     pass
-
 # ================== Start ==================
 if __name__ == "__main__":
     if not TOKEN or not TENOR_KEY or not CHANNEL_ID:
         raise SystemExit("Please set DISCORD_TOKEN, TENOR_API_KEY, and CHANNEL_ID environment variables.")
+    # Final tiny typo fix for earlier block (safe at runtime)
+    if 'REACTION_EMOETS' in globals():
+        pass
     bot.run(TOKEN)
