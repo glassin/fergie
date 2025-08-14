@@ -1,4 +1,4 @@
-import os, random, aiohttp, discord, json, asyncio, time, math
+import os, random, aiohttp, discord, json, asyncio, time, math, re
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
@@ -40,6 +40,25 @@ SPOTIFY_PLAYLIST_ID = os.getenv("SPOTIFY_PLAYLIST_ID", "6l190qy5x9xY8Uk3bb2FYl")
 SPOTIFY_MARKET = os.getenv("SPOTIFY_MARKET", "US")  # helps avoid region-restricted tracks
 KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
 # -----------------------------------------
+
+# ---------- FIT / Pinterest-style random image ----------
+FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
+DROPBOX_FOLDER_URL = os.getenv(
+    "DROPBOX_FOLDER_URL",
+    "https://www.dropbox.com/scl/fo/o2dal4mzff5hdw1zdi1b0/AJEUSZl1HdzEHYCSlhfZCxE?rlkey=3nw1q8pzwqzzn8qtqhfhx238f&e=1&st=go6bavz6&dl=0"
+)
+FIT_CACHE_FILE = Path(os.getenv("FIT_CACHE_FILE", "fit_cache.json"))
+FIT_CACHE_TTL_SECONDS = int(os.getenv("FIT_CACHE_TTL_SECONDS", "21600"))  # 6 hours
+FIT_REPLY_WINDOW_SECONDS = int(os.getenv("FIT_REPLY_WINDOW_SECONDS", "20"))
+SLAP_PEACH = "<a:slap_peach:1227392416617730078>"
+# -----------------------------------------
+
+# ---------- Bonk Papo random posts ----------
+BONK_MESSAGE = (
+    "stop being horny papo! bad papo! "
+    "<a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788>"
+)
+# -------------------------------------------
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -298,6 +317,89 @@ async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
         pass
     return tracks
 
+# ---- Dropbox helpers for FIT ----
+def _fit_cache_load() -> dict:
+    if FIT_CACHE_FILE.exists():
+        try:
+            return json.loads(FIT_CACHE_FILE.read_text())
+        except Exception:
+            return {}
+    return {}
+
+def _fit_cache_save(obj: dict):
+    try:
+        FIT_CACHE_FILE.write_text(json.dumps(obj, indent=2))
+    except Exception:
+        pass
+
+def _to_raw_dropbox(url: str) -> str:
+    # Convert a dropbox share/preview URL to a raw file URL when possible
+    if "dl=0" in url:
+        url = url.replace("dl=0", "raw=1")
+    elif "dl=1" in url:
+        url = url.replace("dl=1", "raw=1")
+    elif "raw=1" not in url:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}raw=1"
+    return url
+
+async def _scrape_dropbox_images(folder_url: str) -> list[str]:
+    # Very light HTML scrape: collect Dropbox file links and convert to raw
+    # Cached for FIT_CACHE_TTL_SECONDS
+    cache = _fit_cache_load()
+    now = int(_now())
+    if cache.get("urls") and (now - cache.get("fetched_at", 0) < FIT_CACHE_TTL_SECONDS):
+        return cache.get("urls", [])
+
+    urls = []
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.get(folder_url, timeout=20) as r:
+                if r.status != 200:
+                    return cache.get("urls", [])
+                html = await r.text()
+
+        # Find candidate links
+        candidates = re.findall(r'href="(https://www\.dropbox\.com/[^"]+)"', html)
+        seen = set()
+        for u in candidates:
+            # heuristic: likely file links live under /s/ or /scl/fi/
+            if "/s/" in u or "/scl/fi/" in u:
+                raw = _to_raw_dropbox(u)
+                if raw not in seen:
+                    seen.add(raw)
+                    urls.append(raw)
+
+        if urls:
+            cache = {"fetched_at": now, "urls": urls}
+            _fit_cache_save(cache)
+    except Exception:
+        pass
+
+    return urls or cache.get("urls", [])
+
+async def _pick_random_fit_image() -> str | None:
+    urls = await _scrape_dropbox_images(DROPBOX_FOLDER_URL)
+    if not urls:
+        return None
+    return random.choice(urls)
+
+# ---- Random time helpers for daily schedulers ----
+def _pick_random_times_today(n: int, start_hour=10, end_hour=22, tzname="America/Los_Angeles"):
+    tz = ZoneInfo(tzname)
+    today = datetime.now(tz=tz).date()
+    start = datetime.combine(today, dtime(hour=start_hour, tzinfo=tz))
+    end   = datetime.combine(today, dtime(hour=end_hour, tzinfo=tz))
+    total_minutes = int((end - start).total_seconds() // 60)
+    chosen = set()
+    while len(chosen) < n:
+        offset = random.randint(0, total_minutes)
+        minute = (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
+        # keep at least 5 min apart
+        if all(abs((minute - m).total_seconds()) >= 300 for m in chosen):
+            chosen.add(minute)
+    return sorted(list(chosen))
+
 # ---- Events ----
 @bot.event
 async def on_ready():
@@ -307,6 +409,9 @@ async def on_ready():
     if not hasattr(bot, "_kewchie_times"):
         bot._kewchie_times = []
         bot._kewchie_posted = set()
+    if not hasattr(bot, "_bonk_times"):
+        bot._bonk_times = []
+        bot._bonk_posted = set()
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
@@ -316,23 +421,11 @@ async def on_ready():
     daily_scam_post.start()
     daily_auto_allowance.start()  # 8am PT allowance + penalties
     kewchie_daily_scheduler.start()  # random twice-daily posts
+    daily_auto_fit.start()          # 9am PT daily fit post
+    bonk_papo_scheduler.start()     # 3x/day random bonk posts
 
 def _pick_two_random_times_today():
-    # pick 2 random times between 10:00 and 22:00 PT today, return as UTC-aware datetimes
-    tz = ZoneInfo("America/Los_Angeles")
-    today = datetime.now(tz=tz).date()
-    start = datetime.combine(today, dtime(hour=10, tzinfo=tz))
-    end   = datetime.combine(today, dtime(hour=22, tzinfo=tz))
-    # pick two distinct minutes
-    def rand_dt():
-        delta_minutes = int((end - start).total_seconds() // 60)
-        offset = random.randint(0, delta_minutes)
-        return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
-    t1 = rand_dt()
-    t2 = rand_dt()
-    while abs((t2 - t1).total_seconds()) < 300:  # ensure at least 5 min apart
-        t2 = rand_dt()
-    return sorted([t1, t2])
+    return _pick_random_times_today(2, 10, 22, "America/Los_Angeles")
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
@@ -358,6 +451,63 @@ async def kewchie_daily_scheduler():
 @kewchie_daily_scheduler.before_loop
 async def _wait_bot_ready_kewchie():
     await bot.wait_until_ready()
+
+@tasks.loop(minutes=1)
+async def bonk_papo_scheduler():
+    """Post BONK_MESSAGE 3 times/day at random minutes between 10:00–22:00 PT in CHANNEL_ID."""
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if (not bot._bonk_times) or (bot._bonk_times[0].date() != now_utc.date()):
+        bot._bonk_times = _pick_random_times_today(3, 10, 22, "America/Los_Angeles")
+        bot._bonk_posted = set()
+
+    for t in bot._bonk_times:
+        key = t.isoformat()
+        if now_utc == t and key not in bot._bonk_posted:
+            channel = bot.get_channel(CHANNEL_ID)
+            if channel:
+                await channel.send(BONK_MESSAGE)
+            bot._bonk_posted.add(key)
+
+@bonk_papo_scheduler.before_loop
+async def _wait_bot_ready_bonk():
+    await bot.wait_until_ready()
+
+@tasks.loop(time=dtime(hour=9, tzinfo=ZoneInfo("America/Los_Angeles")))
+async def daily_auto_fit():
+    """Auto-post one fit per day in the fit channel, with 20s reply window for USER3."""
+    channel = bot.get_channel(FIT_CHANNEL_ID)
+    if not channel:
+        return
+
+    async with channel.typing():
+        img = await _pick_random_fit_image()
+
+    if not img:
+        await channel.send("OMFG I can't load the fits rn 😭 — dropbox being stingy. Try again in a bit.")
+        return
+
+    # Post image + caption
+    caption = "OMFG look at this one girlie!!! we neeeeeeeeed! 💗"
+    sent = await channel.send(img)
+    await channel.send(caption)
+
+    # Wait up to 20s for USER3 to reply *to that exact image message*
+    def _check(m: discord.Message):
+        if m.author.id != USER3_ID:
+            return False
+        if m.channel.id != FIT_CHANNEL_ID:
+            return False
+        if not m.reference or not getattr(m.reference, "message_id", None):
+            return False
+        return m.reference.message_id == sent.id
+
+    try:
+        await bot.wait_for("message", timeout=FIT_REPLY_WINDOW_SECONDS, check=_check)
+        # Use provided animated custom emoji directly
+        peach = SLAP_PEACH
+        await channel.send(f"{peach} you know you'd look good in this girlie! you go girl! ✂️")
+    except asyncio.TimeoutError:
+        pass
 
 @bot.event
 async def on_message(message: discord.Message):
@@ -993,6 +1143,41 @@ async def kewchie_debug(ctx):
         f"Channel OK: {ch_ok} (<#{KEWCHIE_CHANNEL_ID}>)"
     )
     await ctx.send(f"```{msg}```")
+
+# ---- FIT command ----
+@bot.command(name="fit", help="Drop a random fit pic from the Dropbox folder (in the fit channel)")
+async def fit(ctx):
+    if ctx.channel.id != FIT_CHANNEL_ID:
+        await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>")
+        return
+
+    async with ctx.channel.typing():
+        img = await _pick_random_fit_image()
+
+    if not img:
+        await ctx.send("OMFG I can't load the fits rn 😭 — dropbox being stingy. Try again in a bit.")
+        return
+
+    caption = "OMFG look at this one girlie!!! we neeeeeeeeed! 💗"
+    sent = await ctx.send(img)
+    await ctx.send(caption)
+
+    def _check(m: discord.Message):
+        if m.author.id != USER3_ID:
+            return False
+        if m.channel.id != FIT_CHANNEL_ID:
+            return False
+        if not m.reference or not getattr(m.reference, "message_id", None):
+            return False
+        return m.reference.message_id == sent.id
+
+    try:
+        await bot.wait_for("message", timeout=FIT_REPLY_WINDOW_SECONDS, check=_check)
+        # Use provided animated custom emoji directly
+        peach = SLAP_PEACH
+        await ctx.send(f"{peach} you know you'd look good in this girlie! you go girl! ✂️")
+    except asyncio.TimeoutError:
+        pass
 
 # ---------- Placeholder: future Pinterest command ----------
 # def <your future pinterest fetcher here>():
