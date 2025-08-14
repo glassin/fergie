@@ -765,7 +765,7 @@ async def roll(ctx, amount: str):
         await _save_bank()
     await ctx.send(f"{ctx.author.mention} {text}")
 
-@bot.command(name="putasos", help="Try to rob someone kombat klubz style: !putasos @user (low success, big fail penalty)")
+@bot.command(name="putasos", help="Try to rob someone: !putasos @user (low success, big fail penalty)")
 async def putasos(ctx, member: discord.Member):
     if not _is_gamble_channel(ctx.channel.id):
         await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>."); return
@@ -925,7 +925,7 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
     ))
 
 # ================== Fun / Media Commands ==================
-@bot.command(name="cafe", help="owl y lark ☕")
+@bot.command(name="cafe", help="Send a random coffee GIF ☕")
 async def cafe(ctx, *, term: str = "coffee"):
     query = term if term else "coffee"
     async with ctx.channel.typing():
@@ -958,12 +958,12 @@ async def scam(ctx):
     )
     await ctx.send(msg)
 
-@bot.command(name="bbl", help="see fergies ass 💃")
+@bot.command(name="bbl", help="Send the ultimate BBL GIF 💃")
 async def bbl(ctx):
     gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
     await ctx.send(gif_url)
 
-@bot.command(name="hawaii", help="see pix from vivvy's trip 🌺")
+@bot.command(name="hawaii", help="Send a random Hawaii pic or Eddie Murphy GIF 🌺")
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
 
@@ -996,7 +996,7 @@ async def kewchie_debug(ctx):
     await ctx.send(f"```{msg}```")
 
 # ---- FIT command & auto daily ----
-@bot.command(name="fit", help="see fergies fits")
+@bot.command(name="fit", help="Post a random fit pic in the fit channel")
 async def fit(ctx):
     if ctx.channel.id != FIT_CHANNEL_ID:
         await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>"); return
