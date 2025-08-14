@@ -50,11 +50,6 @@ FIT_IMAGE_URLS = [
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867483525140/pinterest_681169512428917172.jpg?ex=689ef23f&is=689da0bf&hm=9f7e993b0c4391b27262f6bab9e7eba41af434f27d386ea0e3f7af1a2dcf62ef&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867810422854/pinterest_681169512428917179.jpg?ex=689ef23f&is=689da0bf&hm=738196039bf19fb99b72610d3a30641bb5a8cec28998919e92b3d7dc34c30c28&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405470868087373895/pinterest_681169512428919577.jpg?ex=689ef23f&is=689da0bf&hm=f0921729a0c51ac94303ea123209689650e42ec6aebdf585b8609308a34ea7ec&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818464170195/pinterest_681169512428788228.jpg?ex=689f6969&is=689e17e9&hm=86b1b23a623b8dbbf9789a9a002c8589dec91f139c39caad0a5ee6f470f26d6e&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818728153148/pinterest_681169512428815368.jpg?ex=689f6969&is=689e17e9&hm=625f7aa45091f7deccd09185dd86d5db9682f0f149b40141112a3a9dc5ad292c&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819210756178/pinterest_681169512428836350.png?ex=689f6969&is=689e17e9&hm=43c908944d8f813a4b99f0aad4a672dc56e7f05854ee357630bbae8f633b1672&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819860873278/pinterest_681169512428877548.jpg?ex=689f6969&is=689e17e9&hm=820df44a59d2c99fb8e496aed88ccc681843f2d75de830d669bbe26357d0f979&".
-
 ]
 SLAP_PEACH_EMOTE = "<a:slap_peach:1227392416617730078>"
 # -------------------------------------------------------
@@ -1044,12 +1039,12 @@ async def scam(ctx):
     )
     await ctx.send(msg)
 
-@bot.command(name="bbl", help="Send the ultimate BBL GIF 💃")
+@bot.command(name="bbl", help="see fergies culo 💃")
 async def bbl(ctx):
     gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
     await ctx.send(gif_url)
 
-@bot.command(name="hawaii", help="Send a random Hawaii pic or Eddie Murphy GIF 🌺")
+@bot.command(name="hawaii", help="pix from vivvy's trip 🌺")
 async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
 
@@ -1086,7 +1081,7 @@ async def kewchie_debug(ctx):
     await ctx.send(f"```{msg}```")
 
 # ---- Fit commands ----
-@bot.command(name="fit", help="Post a random fit pic in the fit channel")
+@bot.command(name="fit", help="fergies fits")
 async def fit(ctx):
     if ctx.channel.id != FIT_CHANNEL_ID:
         await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>")
