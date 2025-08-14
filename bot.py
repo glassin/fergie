@@ -257,7 +257,12 @@ async def _get_spotify_token():
         return _spotify_token["access_token"]
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
         return None
-    data = {"grant_type":"client_credentials","client_id":SPOTIFY_CLIENT_ID,"client_secret":SPOTIFY_CLIENT_SECRET"}
+    data = {
+    "grant_type": "client_credentials",
+    "client_id": SPOTIFY_CLIENT_ID,
+    "client_secret": SPOTIFY_CLIENT_SECRET,
+}
+
     try:
         async with aiohttp.ClientSession() as s:
             async with s.post("https://accounts.spotify.com/api/token", data=data, timeout=15) as r:
