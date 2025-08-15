@@ -167,10 +167,10 @@ economy = {
 }
 
 # ---------- Postgres KV (JSON) helpers ----------
+# ---------- Postgres KV (JSON) helpers ----------
 db_pool: asyncpg.Pool | None = None
 
 def _sanitize_dsn(raw: str | None) -> str | None:
-    """Trim quotes/whitespace/newlines that sometimes sneak into env editor."""
     if not raw:
         return None
     dsn = raw.strip().strip('"').strip("'")
@@ -178,10 +178,9 @@ def _sanitize_dsn(raw: str | None) -> str | None:
     return dsn
 
 async def _db_init():
-    """Connect to Postgres (Supabase), ensure kv table exists, with loud logs."""
+    """Connect to Postgres (Neon), force schema=public, and ensure table exists."""
     global db_pool
     dsn = _sanitize_dsn(os.getenv("DATABASE_URL", ""))
-
     if not dsn:
         print("DB init: no DATABASE_URL set → running without persistence.")
         return
@@ -189,16 +188,20 @@ async def _db_init():
     try:
         db_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=20)
         async with db_pool.acquire() as con:
+            # Force everything into the public schema to avoid search_path surprises
+            await con.execute("CREATE SCHEMA IF NOT EXISTS public;")
+            await con.execute("SET search_path TO public;")
             await con.execute("""
-                CREATE TABLE IF NOT EXISTS kv (
+                CREATE TABLE IF NOT EXISTS public.kv (
                   key   TEXT PRIMARY KEY,
                   value JSONB NOT NULL
                 )
             """)
             row = await con.fetchrow(
-                "SELECT current_database() AS db, inet_server_addr()::text AS host, inet_server_port() AS port"
+                "SELECT current_database() AS db, current_schema() AS schema, "
+                "inet_server_addr()::text AS host, inet_server_port() AS port"
             )
-            print(f"DB init: connected ✅ db={row['db']} host={row['host']} port={row['port']}")
+            print(f"DB init: connected ✅ db={row['db']} schema={row['schema']} host={row['host']} port={row['port']}")
     except Exception as e:
         db_pool = None
         print(f"DB init failed ❌ {type(e).__name__}: {e!s}")
@@ -208,17 +211,20 @@ async def _db_get(key: str):
     if not db_pool:
         return None
     async with db_pool.acquire() as con:
-        row = await con.fetchrow("SELECT value FROM kv WHERE key=$1", key)
+        # Always hit the same table/schema
+        row = await con.fetchrow("SELECT value FROM public.kv WHERE key=$1", key)
         return None if not row else row["value"]
 
 async def _db_set(key: str, value: dict):
     if not db_pool:
         return
     async with db_pool.acquire() as con:
+        # Cast explicitly to jsonb so we never get a text type mismatch
         await con.execute("""
-            INSERT INTO kv (key, value) VALUES ($1, $2)
+            INSERT INTO public.kv (key, value) VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
+
 
 # ---------- Load/Save economy to Postgres JSON ----------
 async def _load_bank():
