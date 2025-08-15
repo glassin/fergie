@@ -4,7 +4,7 @@ from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
 
-import asyncpg  # PostgreSQL (Railway/Supabase) persistence
+import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
@@ -12,7 +12,7 @@ TENOR_KEY   = os.getenv("TENOR_API_KEY")
 CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
-# Railway/Supabase Postgres
+# Postgres (Neon/Supabase/Railway)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 # DB SSL behavior: "require" (default) or "insecure" to skip certificate verification
 DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
@@ -167,7 +167,6 @@ economy = {
 }
 
 # ---------- Postgres KV (JSON) helpers ----------
-# ---------- Postgres KV (JSON) helpers ----------
 db_pool: asyncpg.Pool | None = None
 
 def _sanitize_dsn(raw: str | None) -> str | None:
@@ -178,53 +177,67 @@ def _sanitize_dsn(raw: str | None) -> str | None:
     return dsn
 
 async def _db_init():
-    """Connect to Postgres (Neon), force schema=public, and ensure table exists."""
+    """Connect to Postgres (Neon), force schema=public, and ensure table exists. Retries on cold starts."""
     global db_pool
     dsn = _sanitize_dsn(os.getenv("DATABASE_URL", ""))
     if not dsn:
         print("DB init: no DATABASE_URL set → running without persistence.")
         return
 
-    try:
-        db_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=20)
-        async with db_pool.acquire() as con:
-            # Force everything into the public schema to avoid search_path surprises
-            await con.execute("CREATE SCHEMA IF NOT EXISTS public;")
-            await con.execute("SET search_path TO public;")
-            await con.execute("""
-                CREATE TABLE IF NOT EXISTS public.kv (
-                  key   TEXT PRIMARY KEY,
-                  value JSONB NOT NULL
+    last_err = None
+    for attempt in range(1, 8):  # retry ~7 times over ~45s
+        try:
+            db_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=20)
+            async with db_pool.acquire() as con:
+                await con.execute("CREATE SCHEMA IF NOT EXISTS public;")
+                await con.execute("SET search_path TO public;")
+                await con.execute("""
+                    CREATE TABLE IF NOT EXISTS public.kv (
+                      key   TEXT PRIMARY KEY,
+                      value JSONB NOT NULL
+                    )
+                """)
+                row = await con.fetchrow(
+                    "SELECT current_database() AS db, current_schema() AS schema, "
+                    "inet_server_addr()::text AS host, inet_server_port() AS port"
                 )
-            """)
-            row = await con.fetchrow(
-                "SELECT current_database() AS db, current_schema() AS schema, "
-                "inet_server_addr()::text AS host, inet_server_port() AS port"
-            )
-            print(f"DB init: connected ✅ db={row['db']} schema={row['schema']} host={row['host']} port={row['port']}")
-    except Exception as e:
-        db_pool = None
-        print(f"DB init failed ❌ {type(e).__name__}: {e!s}")
-        print("Running without persistence.")
+                print(f"DB init: connected ✅ db={row['db']} schema={row['schema']} host={row['host']} port={row['port']}")
+            return
+        except Exception as e:
+            last_err = e
+            print(f"DB init attempt {attempt} failed: {type(e).__name__}: {e!s}")
+            await asyncio.sleep(6)
+
+    db_pool = None
+    print(f"DB init failed ❌ after retries: {type(last_err).__name__}: {last_err!s}")
+    print("Running without persistence.")
 
 async def _db_get(key: str):
+    """Fetch a key from public.kv and return a Python dict, even if DB gave us text."""
     if not db_pool:
         return None
     async with db_pool.acquire() as con:
-        # Always hit the same table/schema
         row = await con.fetchrow("SELECT value FROM public.kv WHERE key=$1", key)
-        return None if not row else row["value"]
+        if not row:
+            return None
+        val = row["value"]
+        if isinstance(val, str):
+            try:
+                val = json.loads(val)
+            except Exception:
+                pass
+        return val
 
 async def _db_set(key: str, value: dict):
+    """Upsert a JSON document into public.kv as proper JSONB (not text)."""
     if not db_pool:
         return
     async with db_pool.acquire() as con:
-        # Cast explicitly to jsonb so we never get a text type mismatch
         await con.execute("""
-            INSERT INTO public.kv (key, value) VALUES ($1, $2::jsonb)
+            INSERT INTO public.kv (key, value)
+            VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
-
 
 # ---------- Load/Save economy to Postgres JSON ----------
 async def _load_bank():
@@ -232,15 +245,22 @@ async def _load_bank():
     global economy
     if not db_pool:
         return
+
     data = await _db_get("economy")
-    if data:
+
+    # If the row is present but came back as text, parse it.
+    if isinstance(data, str):
         try:
-            data.setdefault("treasury", TREASURY_MAX)
-            data.setdefault("users", {})
-            economy = data
+            data = json.loads(data)
         except Exception:
-            economy = {"treasury": TREASURY_MAX, "users": {}}
+            data = None
+
+    if isinstance(data, dict) and data:
+        data.setdefault("treasury", TREASURY_MAX)
+        data.setdefault("users", {})
+        economy = data
     else:
+        # First run (or corrupted/missing row)
         economy = {"treasury": TREASURY_MAX, "users": {}}
         await _db_set("economy", economy)
 
@@ -287,7 +307,6 @@ async def _get_spotify_token():
         return _spotify_token["access_token"]
     if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
         return None
-    # FIXED: proper dict (no stray quote)
     data = {
         "grant_type": "client_credentials",
         "client_id": SPOTIFY_CLIENT_ID,
@@ -969,6 +988,47 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
         user=member.mention, bal=_fmt_bread(u["balance"]),
         delta=_fmt_bread(delta_applied), vault=_fmt_bread(economy["treasury"])
     ))
+
+# ================== DB Debug Commands (admin) ==================
+@bot.command(name="dbstatus", help="ADMIN: Show DB status + economy row info")
+@_admin.has_permissions(manage_guild=True)
+async def dbstatus(ctx):
+    if not db_pool:
+        await ctx.send("DB: not connected ❌"); return
+    async with db_pool.acquire() as con:
+        await con.execute("SET search_path TO public")
+        row = await con.fetchrow("SELECT value FROM public.kv WHERE key='economy'")
+        if not row:
+            await ctx.send("DB: connected ✅ · economy row: (missing)"); return
+        val = row["value"]
+        if isinstance(val, str):
+            try: val = json.loads(val)
+            except Exception: val = {}
+        users = val.get("users", {}) if isinstance(val, dict) else {}
+        treasury = val.get("treasury") if isinstance(val, dict) else None
+        await ctx.send(f"DB: connected ✅ · economy row: present · users={len(users)} · treasury={treasury}")
+
+@bot.command(name="dbreload", help="ADMIN: Force reload economy from DB")
+@_admin.has_permissions(manage_guild=True)
+async def dbreload(ctx):
+    await _load_bank()
+    await ctx.send("Reloaded economy from DB.")
+
+@bot.command(name="dbdump", help="ADMIN: Show first 600 chars of economy JSON")
+@_admin.has_permissions(manage_guild=True)
+async def dbdump(ctx):
+    if not db_pool:
+        await ctx.send("DB: not connected ❌"); return
+    async with db_pool.acquire() as con:
+        row = await con.fetchrow("SELECT value FROM public.kv WHERE key='economy'")
+        if not row:
+            await ctx.send("No 'economy' row in DB."); return
+        val = row["value"]
+        if isinstance(val, str):
+            try: val = json.loads(val)
+            except Exception: pass
+        txt = json.dumps(val)[:600] if isinstance(val, (dict, list)) else str(val)[:600]
+        await ctx.send(f"```json\n{txt}\n...```")
 
 # ================== Fun / Media Commands ==================
 @bot.command(name="cafe", help="owl y lark")
