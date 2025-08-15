@@ -216,8 +216,8 @@ FERAL_LINES = [
 REACTION_EMOTES = ["🤭","😏","😢","😊","🙄","💗","🫶"]
 
 USER3_LINES = [
-    "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
-    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!",
+    "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!","matcha or latte?","you're my favorite girly!","ewwww sancho ewwww",
+    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!","don't take me to storms basement again girlie!",
 ]
 
 # ================== In-memory economy (backed by Postgres JSON) ==================
