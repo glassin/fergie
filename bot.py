@@ -33,6 +33,11 @@ USER2_ID = 534227493360762891
 USER3_ID = 661077262468382761
 LOBO_ID  = 919405253470871562
 
+# ---------- Gym wake-up ----------
+GYM_CHANNEL_ID = 1272237309521170434
+GYM_MESSAGE_1 = "wake up gorditos! it's time for gymmies! 💪🏋️💗"
+GYM_MESSAGE_2 = "andale! ya! despierta pinches gaymers! 💪🏋️💗"
+
 # ---------- Casino channel restriction ----------
 GAMBLE_CHANNEL_ID = 1405320084028784753
 def _is_gamble_channel(ch_id: int) -> bool:
@@ -649,6 +654,10 @@ async def on_ready():
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
     rebuild_mimic.start()           # build mimic model hourly
     raffle_watcher.start()          # raffle auto-draw watcher
+        # start gym wake-ups
+    daily_gym_wakeup1.start()
+    daily_gym_wakeup2.start()
+
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
@@ -837,6 +846,27 @@ async def _fit_reply_watch(message: discord.Message):
         ch = message.channel
         await ch.send(f"{FIT_FOLLOWUP_EMOTE} {FIT_FOLLOWUP_TEXT}")
         bot._fit_waiting.pop(replied_to.id, None)
+        
+# ---------- Gym wake-up schedulers ----------
+@tasks.loop(time=dtime(hour=4, tzinfo=ZoneInfo("America/Los_Angeles")))
+async def daily_gym_wakeup1():
+    ch = bot.get_channel(GYM_CHANNEL_ID)
+    if ch:
+        await ch.send(GYM_MESSAGE_1)
+
+@daily_gym_wakeup1.before_loop
+async def _gym_wait_ready1():
+    await bot.wait_until_ready()
+
+@tasks.loop(time=dtime(hour=5, tzinfo=ZoneInfo("America/Los_Angeles")))
+async def daily_gym_wakeup2():
+    ch = bot.get_channel(GYM_CHANNEL_ID)
+    if ch:
+        await ch.send(GYM_MESSAGE_2)
+
+@daily_gym_wakeup2.before_loop
+async def _gym_wait_ready2():
+    await bot.wait_until_ready()
 
 # ================== Bread posts & schedules ==================
 @tasks.loop(hours=4)
