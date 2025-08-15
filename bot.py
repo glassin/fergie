@@ -84,7 +84,10 @@ intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
 # ===================== Bread Economy Settings =====================
-TREASURY_MAX = int(os.getenv("TREASURY_MAX", "500000"))
+# Global hard cap on TOTAL currency in existence (bank + all users).
+# You can override via env TOTAL_MAX_CURRENCY, but default is 1,000,000.
+TOTAL_MAX_CURRENCY = int(os.getenv("TOTAL_MAX_CURRENCY", "1000000"))
+TREASURY_MAX = int(os.getenv("TREASURY_MAX", str(TOTAL_MAX_CURRENCY)))
 USER_WALLET_CAP = int(os.getenv("USER_WALLET_CAP", str(TREASURY_MAX // 10)))
 CLAIM_AMOUNT = int(os.getenv("CLAIM_AMOUNT", "250"))
 CLAIM_COOLDOWN_HOURS = int(os.getenv("CLAIM_COOLDOWN_HOURS", "24"))
@@ -279,6 +282,16 @@ async def _load_bank():
 async def _save_bank():
     if db_pool:
         await _db_set("economy", economy)
+
+# ================== Supply helpers (global 1M cap) ==================
+def _total_supply() -> int:
+    """Total currency in existence: bank (treasury) + all user balances."""
+    return int(economy.get("treasury", 0)) + sum(int(u.get("balance", 0)) for u in economy.get("users", {}).values())
+
+def _remaining_mint_room() -> int:
+    """How much new currency could be created without breaking the global cap."""
+    rem = TOTAL_MAX_CURRENCY - _total_supply()
+    return max(0, rem)
 
 # ================== Common economy helpers ==================
 def _user(uid: int):
@@ -1059,7 +1072,7 @@ from discord.ext import commands as _admin
 
 AIR_DROP_ADMIN_ID = 939225086341296209
 
-@bot.command(name="seed", help="ADMIN: Seed bread to a user or the bank. Usage: !seed @user 500  |  !seed bank 2000")
+@bot.command(name="seed", help="ADMIN: Seed bread to the bank or a user. Usage: !seed @user 500  |  !seed bank 2000")
 @_admin.has_permissions(manage_guild=True)
 async def seed(ctx, target: str = None, amount: int = None):
     if target is None or amount is None or amount <= 0:
@@ -1067,9 +1080,16 @@ async def seed(ctx, target: str = None, amount: int = None):
 
     if target.lower() == "bank":
         async with economy_lock:
-            before = economy["treasury"]
-            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amount)
-            added = economy["treasury"] - before
+            before_treasury = economy["treasury"]
+            # Hard limits: cannot exceed bank capacity (TREASURY_MAX) or global supply cap (TOTAL_MAX_CURRENCY).
+            bank_room = max(0, TREASURY_MAX - economy["treasury"])
+            mint_room = _remaining_mint_room()
+            allow = min(amount, bank_room, mint_room)
+            if allow <= 0:
+                await ctx.send(f"❌ Cannot add to bank — global cap reached ({TOTAL_MAX_CURRENCY:,}).")
+                return
+            economy["treasury"] += allow
+            added = economy["treasury"] - before_treasury
             await _save_bank()
         await ctx.send(PHRASES["seed_bank"].format(added=_fmt_bread(added), vault=_fmt_bread(economy['treasury'])))
         return
@@ -1105,20 +1125,13 @@ async def seed_error(ctx, error):
     else:
         await ctx.send("Seed failed. Usage: `!seed @user 500` or `!seed bank 2000`")
 
-@bot.command(name="take", help="ADMIN: Take bread from a user or the bank. Usage: !take @user 100 | !take bank 1000")
+@bot.command(name="take", help="ADMIN: Take bread from a user into the bank. Usage: !take @user 100")
 @_admin.has_permissions(manage_guild=True)
 async def take(ctx, target: str = None, amount: int = None):
     if target is None or amount is None or amount <= 0:
-        await ctx.send("Usage: `!take @user 100` or `!take bank 1000`"); return
+        await ctx.send("Usage: `!take @user 100`"); return
 
-    if target.lower() == "bank":
-        async with economy_lock:
-            amt = min(amount, economy["treasury"])
-            economy["treasury"] -= amt  # burn
-            await _save_bank()
-        await ctx.send(PHRASES["take_bank"].format(amt=_fmt_bread(amt), vault=_fmt_bread(economy['treasury'])))
-        return
-
+    # Removed '!take bank' burn path — burning disabled.
     member = ctx.message.mentions[0] if ctx.message.mentions else None
     if not member:
         try:
@@ -1134,14 +1147,14 @@ async def take(ctx, target: str = None, amount: int = None):
         u["balance"] -= amt
         economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amt)
         await _save_bank()
-    await ctx.send(PHRASES["take_user"].format(amt=_fmt_bread(amt), user=member.mention, bal=_fmt_bread(u['balance']))
+    await ctx.send(PHRASES["take_user"].format(amt=_fmt_bread(amt), user=member.mention, bal=_fmt_bread(u['balance'])))
 
 @take.error
 async def take_error(ctx, error):
     if isinstance(error, _admin.MissingPermissions):
         await ctx.send("You need **Manage Server** to use this, babe. 💅")
     else:
-        await ctx.send("Take failed. Usage: `!take @user 100` or `!take bank 1000`")
+        await ctx.send("Take failed. Usage: `!take @user 100`")
 
 @bot.command(name="setbal", help="ADMIN: Set a user's exact balance. Usage: !setbal @user 5000")
 @_admin.has_permissions(manage_guild=True)
@@ -1234,7 +1247,7 @@ async def scam(ctx):
         await ctx.send("Ugh 🙄 can't even get the prices rn... this is SO scammy 💅"); return
     def _fmt_price(p: float) -> str: return f"${p:,.2f}"
     def _fmt_change(ch: float) -> str:
-        arrow = "📈" if ch >= 0 else "📉"; return f"{ch:+.2f}% {arrow}"
+        arrow = "📈" if ch >= 0 else "📉"; return f"{ch:+.2f}%"
     btc = data["bitcoin"]["usd"]; btc_ch = data["bitcoin"].get("usd_24h_change", 0.0)
     eth = data["ethereum"]["usd"]; eth_ch = data["ethereum"].get("usd_24h_change", 0.0)
     msg = (
@@ -1408,10 +1421,9 @@ async def halp(ctx, *, command: str | None = None):
     e.add_field(
         name="🛠️ Admin (Manage Server required)",
         value=(
-            "`!seed bank <amt>` — Refill bank (to cap)\n"
+            "`!seed bank <amt>` — Refill bank (respects global cap)\n"
             "`!seed @user <amt>` — Give bread (respects wallet cap)\n"
-            "`!take bank <amt>` — Burn from bank\n"
-            "`!take @user <amt>` — Take from user to bank\n"
+            "`!take @user <amt>` — Take from user to bank (no burning)\n"
             "`!setbal @user <amt>` — Set a user’s exact balance (capped to wallet)"
         ),
         inline=False
