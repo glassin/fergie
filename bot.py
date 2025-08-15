@@ -3,6 +3,8 @@ from discord.ext import tasks, commands
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
+import re
+from collections import defaultdict, Counter
 
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
@@ -197,6 +199,16 @@ async def _db_init():
                       value JSONB NOT NULL
                     )
                 """)
+                # === NEW: corpus table for mimic feature ===
+                await con.execute("""
+                    CREATE TABLE IF NOT EXISTS public.mimic_msgs (
+                      id SERIAL PRIMARY KEY,
+                      user_id BIGINT NOT NULL,
+                      channel_id BIGINT NOT NULL,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      content TEXT NOT NULL
+                    )
+                """)
                 row = await con.fetchrow(
                     "SELECT current_database() AS db, current_schema() AS schema, "
                     "inet_server_addr()::text AS host, inet_server_port() AS port"
@@ -345,6 +357,143 @@ async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
         pass
     return tracks
 
+# ================== Mimic (USER3 style) ==================
+# NOTE: This block is additive and does not modify any existing behavior.
+TARGET_MIMIC_ID = USER3_ID  # 661077262468382761
+MIMIC_REPLY_CHANCE = 0.28        # chance to reply when USER3 speaks
+MIMIC_COOLDOWN_SEC = 75          # cooldown to prevent spam
+MIMIC_CONTEXT_WINDOW_SEC = 120   # window to chime in after USER3 last spoke in channel
+
+_mimic_model = {
+    "ngrams": {},          # {(w1,w2): Counter({w3:count})}
+    "starts": [],          # recent sentence starts for seeding
+    "emoji_dist": Counter(),
+    "avg_len": 18.0,
+}
+
+def _mimic_is_emoji(tok: str):
+    return bool(re.match(r"(<a?:\w+:\d+>|[\U00010000-\U0010ffff])", tok))
+
+def _mimic_tok(s: str):
+    # keeps emojis/custom emotes and punctuation as tokens
+    return re.findall(r"[A-Za-z0-9]+|[:;][)(DPp]|<a?:\w+:\d+>|[\U00010000-\U0010ffff]|[^\s\w]", s)
+
+async def _mimic_store_message(msg: discord.Message):
+    # save USER3's organic messages to DB (skip links/commands/very short/very long)
+    if not db_pool: return
+    txt = (msg.content or "").strip()
+    if not (6 <= len(txt) <= 200): return
+    if txt.startswith("!") or "http://" in txt or "https://" in txt: return
+    try:
+        async with db_pool.acquire() as con:
+            await con.execute(
+                "INSERT INTO public.mimic_msgs(user_id, channel_id, content) VALUES($1,$2,$3)",
+                msg.author.id, msg.channel.id, txt
+            )
+    except Exception:
+        pass
+
+async def _mimic_load_corpus(limit=1200):
+    if not db_pool: return []
+    async with db_pool.acquire() as con:
+        rows = await con.fetch(
+            "SELECT content FROM public.mimic_msgs WHERE user_id=$1 ORDER BY id DESC LIMIT $2",
+            TARGET_MIMIC_ID, limit
+        )
+    return [r["content"] for r in rows]
+
+def _mimic_build_markov(corpus: list[str]):
+    if not corpus: return
+    ngrams = defaultdict(Counter)
+    starts = []
+    emojis = Counter()
+    lengths = []
+
+    for line in corpus:
+        toks = _mimic_tok(line)
+        if len(toks) < 4:
+            continue
+        lengths.append(len(toks))
+        for t in toks:
+            if _mimic_is_emoji(t): emojis[t] += 1
+        starts.append(tuple(toks[:2]))
+        for i in range(len(toks)-2):
+            key = (toks[i], toks[i+1])
+            ngrams[key][toks[i+2]] += 1
+
+    _mimic_model["ngrams"] = dict(ngrams)
+    _mimic_model["starts"] = starts[-200:]  # bias to fresher starts
+    _mimic_model["emoji_dist"] = emojis
+    _mimic_model["avg_len"] = (sum(lengths)/len(lengths)) if lengths else 18.0
+
+def _mimic_sample_next(counter: Counter, temperature=0.9):
+    if not counter: return None
+    items = list(counter.items())
+    toks, counts = zip(*items)
+    weights = [c**(1.0/temperature) for c in counts]
+    total = sum(weights)
+    r = random.random() * total
+    acc = 0.0
+    for tok, w in zip(toks, weights):
+        acc += w
+        if acc >= r:
+            return tok
+    return toks[-1]
+
+def _mimic_join_tokens(toks):
+    out = []
+    for i,t in enumerate(toks):
+        if i>0 and re.match(r"[A-Za-z0-9<\U00010000-\U0010ffff]", t) and out[-1] not in ["(", "[", "{", "“", "\"", "'", "/"]:
+            out.append(" ")
+        out.append(t)
+    return "".join(out).strip()
+
+def _mimic_jaccard(a: str, b: str):
+    A = set(_mimic_tok(a.lower())); B = set(_mimic_tok(b.lower()))
+    if not A or not B: return 0.0
+    return len(A & B) / len(A | B)
+
+async def _mimic_generate():
+    model = _mimic_model["ngrams"]
+    starts = _mimic_model["starts"]
+    if not model or not starts:
+        return None
+
+    target_len = max(6, min(40, int(random.gauss(_mimic_model["avg_len"], 4))))
+    cur = list(random.choice(starts))
+    # trigram walk
+    while len(cur) < target_len:
+        key = (cur[-2], cur[-1])
+        nxt = _mimic_sample_next(model.get(key, Counter()))
+        if not nxt: break
+        cur.append(nxt)
+
+    # occasional emoji from their distribution
+    if _mimic_model["emoji_dist"] and random.random() < 0.25:
+        emo, _ = _mimic_model["emoji_dist"].most_common(1)[0]
+        cur.append(emo)
+
+    if not any(str(cur[-1]).endswith(x) for x in [".","!","?","…"]):
+        cur.append(random.choice([".", "!", "…"]))
+
+    text = _mimic_join_tokens(cur)
+
+    # novelty check vs last ~200 lines
+    corpus = await _mimic_load_corpus(limit=200)
+    for line in corpus[:80]:
+        if _mimic_jaccard(text, line) > 0.6:
+            return None
+    return text
+
+@tasks.loop(hours=1)
+async def rebuild_mimic():
+    corpus = await _mimic_load_corpus()
+    _mimic_build_markov(corpus)
+
+@rebuild_mimic.before_loop
+async def _wait_mimic_ready():
+    await bot.wait_until_ready()
+
 # ================== Tenor helpers ==================
 async def fetch_gif(query: str, limit: int = 20):
     if not TENOR_KEY: return None
@@ -413,6 +562,7 @@ async def on_ready():
     kewchie_daily_scheduler.start()  # random twice-daily posts
     fit_auto_daily.start()          # auto-fit once a day
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
+    rebuild_mimic.start()           # build mimic model hourly
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
@@ -468,6 +618,13 @@ async def _bonk_wait():
 async def on_message(message: discord.Message):
     if message.author.bot:
         return
+
+    # --- Mimic: capture USER3 messages + mark "last seen" per channel ---
+    if message.author.id == USER3_ID:
+        await _mimic_store_message(message)
+        if not hasattr(bot, "_last_user3_in_ch"):
+            bot._last_user3_in_ch = {}
+        bot._last_user3_in_ch[message.channel.id] = _now()
 
     content = (message.content or "")
     lower = content.lower().strip()
@@ -533,6 +690,30 @@ async def on_message(message: discord.Message):
                 phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"
             await message.reply(phrase, mention_author=False)
             return
+
+    # --- Natural mimic (non-invasive): only runs if the canned USER3 block didn't return above ---
+    if not hasattr(bot, "_mimic_last_ts"):
+        bot._mimic_last_ts = 0
+    nowts = _now()
+
+    # If USER3 speaks, maybe reply in their style
+    if message.author.id == USER3_ID:
+        if nowts - bot._mimic_last_ts >= MIMIC_COOLDOWN_SEC and random.random() < MIMIC_REPLY_CHANCE:
+            gen = await _mimic_generate()
+            if gen:
+                await message.reply(gen, mention_author=False)
+                bot._mimic_last_ts = nowts
+                return
+
+    # If someone else speaks shortly after USER3 in this channel, a small chance to chime in
+    last_here = getattr(bot, "_last_user3_in_ch", {}).get(message.channel.id, 0)
+    if last_here and 0 < (nowts - last_here) <= MIMIC_CONTEXT_WINDOW_SEC:
+        if nowts - bot._mimic_last_ts >= MIMIC_COOLDOWN_SEC and random.random() < 0.12:
+            gen = await _mimic_generate()
+            if gen:
+                await message.reply(gen, mention_author=False)
+                bot._mimic_last_ts = nowts
+                return
 
     # Mention → bratty only (existing behavior)
     mentioned = False
@@ -953,7 +1134,7 @@ async def take(ctx, target: str = None, amount: int = None):
         u["balance"] -= amt
         economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amt)
         await _save_bank()
-    await ctx.send(PHRASES["take_user"].format(amt=_fmt_bread(amt), user=member.mention, bal=_fmt_bread(u['balance'])))
+    await ctx.send(PHRASES["take_user"].format(amt=_fmt_bread(amt), user=member.mention, bal=_fmt_bread(u['balance']))
 
 @take.error
 async def take_error(ctx, error):
@@ -1053,7 +1234,7 @@ async def scam(ctx):
         await ctx.send("Ugh 🙄 can't even get the prices rn... this is SO scammy 💅"); return
     def _fmt_price(p: float) -> str: return f"${p:,.2f}"
     def _fmt_change(ch: float) -> str:
-        arrow = "📈" if ch >= 0 else "📉"; return f"{arrow} {ch:+.2f}%"
+        arrow = "📈" if ch >= 0 else "📉"; return f"{ch:+.2f}% {arrow}"
     btc = data["bitcoin"]["usd"]; btc_ch = data["bitcoin"].get("usd_24h_change", 0.0)
     eth = data["ethereum"]["usd"]; eth_ch = data["ethereum"].get("usd_24h_change", 0.0)
     msg = (
