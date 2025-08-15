@@ -4,7 +4,7 @@ from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
 
-import asyncpg  # PostgreSQL (Neon/Railway/Supabase) persistence
+import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
@@ -12,7 +12,7 @@ TENOR_KEY   = os.getenv("TENOR_API_KEY")
 CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
-# Postgres (Neon/Railway/Supabase)
+# Postgres (Neon/Supabase/Railway)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 # DB SSL behavior: "require" (default) or "insecure" to skip certificate verification
 DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
@@ -176,44 +176,8 @@ def _sanitize_dsn(raw: str | None) -> str | None:
     dsn = dsn.replace("\n", "").replace("\r", "").strip()
     return dsn
 
-async def _migrate_legacy_kv(con) -> bool:
-    """
-    If economy row is missing in public.kv, try to copy it from any other schema
-    that already has a kv table (e.g., role-named schema on Neon).
-    Returns True if a copy was performed.
-    """
-    # already present in public → nothing to do
-    row = await con.fetchrow("SELECT value FROM public.kv WHERE key='economy'")
-    if row:
-        return False
-
-    # find any other schema that has a table named 'kv'
-    schemas = await con.fetch("""
-        SELECT nspname
-        FROM pg_namespace
-        WHERE nspname NOT IN ('pg_catalog','information_schema','public')
-        ORDER BY CASE WHEN nspname = current_user THEN 0 ELSE 1 END, nspname
-    """)
-    for rec in schemas:
-        s = rec["nspname"]
-        exists = await con.fetchval("SELECT to_regclass($1)", f'{s}.kv')
-        if not exists:
-            continue
-        try:
-            src = await con.fetchrow(f'SELECT value FROM "{s}".kv WHERE key=$1', 'economy')
-        except Exception:
-            continue
-        if src:
-            await con.execute("""
-                INSERT INTO public.kv (key, value) VALUES ($1, $2::jsonb)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            """, 'economy', src['value'])
-            print(f"DB migrate: copied economy from {s}.kv → public.kv")
-            return True
-    return False
-
 async def _db_init():
-    """Connect to Postgres (Neon), force schema=public, ensure table exists, and migrate legacy data."""
+    """Connect to Postgres (Neon), force schema=public, and ensure table exists. Retries on cold starts."""
     global db_pool
     dsn = _sanitize_dsn(os.getenv("DATABASE_URL", ""))
     if not dsn:
@@ -233,9 +197,6 @@ async def _db_init():
                       value JSONB NOT NULL
                     )
                 """)
-                # one-time migration from any non-public schema if needed
-                await _migrate_legacy_kv(con)
-
                 row = await con.fetchrow(
                     "SELECT current_database() AS db, current_schema() AS schema, "
                     "inet_server_addr()::text AS host, inet_server_port() AS port"
@@ -252,18 +213,29 @@ async def _db_init():
     print("Running without persistence.")
 
 async def _db_get(key: str):
+    """Fetch a key from public.kv and return a Python dict, even if DB gave us text."""
     if not db_pool:
         return None
     async with db_pool.acquire() as con:
         row = await con.fetchrow("SELECT value FROM public.kv WHERE key=$1", key)
-        return None if not row else row["value"]
+        if not row:
+            return None
+        val = row["value"]
+        if isinstance(val, str):
+            try:
+                val = json.loads(val)
+            except Exception:
+                pass
+        return val
 
 async def _db_set(key: str, value: dict):
+    """Upsert a JSON document into public.kv as proper JSONB (not text)."""
     if not db_pool:
         return
     async with db_pool.acquire() as con:
         await con.execute("""
-            INSERT INTO public.kv (key, value) VALUES ($1, $2::jsonb)
+            INSERT INTO public.kv (key, value)
+            VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
 
@@ -273,15 +245,22 @@ async def _load_bank():
     global economy
     if not db_pool:
         return
+
     data = await _db_get("economy")
-    if data:
+
+    # If the row is present but came back as text, parse it.
+    if isinstance(data, str):
         try:
-            data.setdefault("treasury", TREASURY_MAX)
-            data.setdefault("users", {})
-            economy = data
+            data = json.loads(data)
         except Exception:
-            economy = {"treasury": TREASURY_MAX, "users": {}}
+            data = None
+
+    if isinstance(data, dict) and data:
+        data.setdefault("treasury", TREASURY_MAX)
+        data.setdefault("users", {})
+        economy = data
     else:
+        # First run (or corrupted/missing row)
         economy = {"treasury": TREASURY_MAX, "users": {}}
         await _db_set("economy", economy)
 
@@ -1010,7 +989,7 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
         delta=_fmt_bread(delta_applied), vault=_fmt_bread(economy["treasury"])
     ))
 
-# ================== DB Debug / Maintenance Commands (admin) ==================
+# ================== DB Debug Commands (admin) ==================
 @bot.command(name="dbstatus", help="ADMIN: Show DB status + economy row info")
 @_admin.has_permissions(manage_guild=True)
 async def dbstatus(ctx):
@@ -1022,8 +1001,12 @@ async def dbstatus(ctx):
         if not row:
             await ctx.send("DB: connected ✅ · economy row: (missing)"); return
         val = row["value"]
+        if isinstance(val, str):
+            try: val = json.loads(val)
+            except Exception: val = {}
         users = val.get("users", {}) if isinstance(val, dict) else {}
-        await ctx.send(f"DB: connected ✅ · economy row: present · users={len(users)} · treasury={val.get('treasury')}")
+        treasury = val.get("treasury") if isinstance(val, dict) else None
+        await ctx.send(f"DB: connected ✅ · economy row: present · users={len(users)} · treasury={treasury}")
 
 @bot.command(name="dbreload", help="ADMIN: Force reload economy from DB")
 @_admin.has_permissions(manage_guild=True)
@@ -1040,17 +1023,12 @@ async def dbdump(ctx):
         row = await con.fetchrow("SELECT value FROM public.kv WHERE key='economy'")
         if not row:
             await ctx.send("No 'economy' row in DB."); return
-        txt = json.dumps(row["value"])[:600]
+        val = row["value"]
+        if isinstance(val, str):
+            try: val = json.loads(val)
+            except Exception: pass
+        txt = json.dumps(val)[:600] if isinstance(val, (dict, list)) else str(val)[:600]
         await ctx.send(f"```json\n{txt}\n...```")
-
-@bot.command(name="dbmigrate", help="ADMIN: migrate economy from any legacy schema to public (one-time)")
-@_admin.has_permissions(manage_guild=True)
-async def dbmigrate(ctx):
-    if not db_pool:
-        await ctx.send("DB: not connected ❌"); return
-    async with db_pool.acquire() as con:
-        moved = await _migrate_legacy_kv(con)
-    await ctx.send("Migration: " + ("copied ✔️ to public.kv" if moved else "nothing to do"))
 
 # ================== Fun / Media Commands ==================
 @bot.command(name="cafe", help="owl y lark")
