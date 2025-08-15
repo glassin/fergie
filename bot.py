@@ -12,11 +12,10 @@ TENOR_KEY   = os.getenv("TENOR_API_KEY")
 CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
-# Prefer explicit Supabase var if present; otherwise DATABASE_URL.
-DATABASE_URL = (os.getenv("SUPABASE_DATABASE_URL") or os.getenv("DATABASE_URL") or "").strip()
-# Ensure asyncpg doesn't reject pooled/proxied hosts.
-if DATABASE_URL and "target_session_attrs=" not in DATABASE_URL:
-    DATABASE_URL += ("&" if "?" in DATABASE_URL else "?") + "target_session_attrs=any"
+# Railway/Supabase Postgres
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+# DB SSL behavior: "require" (default) or "insecure" to skip certificate verification
+DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
 
 SEARCH_TERM  = "bread"
 RESULT_LIMIT = 20
@@ -171,20 +170,28 @@ economy = {
 db_pool: asyncpg.Pool | None = None
 
 async def _db_init():
-    """
-    Create a small asyncpg pool. Uses SSL for Supabase (or when DB_SSL=1).
-    If connect fails, do not crash; run without DB (balances won't persist).
-    """
+    """Create the asyncpg pool to Supabase. Falls back to encrypted-but-insecure SSL
+    if the container can't verify the server certificate."""
     global db_pool
     if not DATABASE_URL:
-        print("DB init: no DATABASE_URL; running without persistence.")
+        print("WARNING: DATABASE_URL not set; balances will NOT persist.")
         db_pool = None
         return
+
+    # Choose SSL behavior
+    ssl_param: ssl.SSLContext | str | None
+    if DB_SSL in ("0", "off", "false", "insecure", "skip", "noverify"):
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        ssl_param = ctx
+    else:
+        ssl_param = "require"
+
     try:
-        ssl_ctx = None
-        if "supabase.co" in DATABASE_URL or os.getenv("DB_SSL", "1") == "1":
-            ssl_ctx = ssl.create_default_context()
-        db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3, ssl=ssl_ctx)
+        db_pool = await asyncpg.create_pool(
+            DATABASE_URL, min_size=1, max_size=3, ssl=ssl_param
+        )
         async with db_pool.acquire() as con:
             await con.execute("""
                 CREATE TABLE IF NOT EXISTS kv (
@@ -194,47 +201,59 @@ async def _db_init():
             """)
         print("DB init: connected ✅")
     except Exception as e:
-        print(f"DB init failed ({type(e).__name__}): {e}\nRunning without persistence.")
+        # One-time fallback if verification failed and user didn't explicitly disable it
+        if ("CERTIFICATE_VERIFY_FAILED" in str(e)) and DB_SSL not in ("0","off","false","insecure","skip","noverify"):
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3, ssl=ctx)
+                async with db_pool.acquire() as con:
+                    await con.execute("""
+                        CREATE TABLE IF NOT EXISTS kv (
+                          key   TEXT PRIMARY KEY,
+                          value JSONB NOT NULL
+                        )
+                    """)
+                print("DB init: connected ✅ (SSL verify disabled fallback)")
+                return
+            except Exception as e2:
+                print(f"DB init failed after fallback ({type(e2).__name__}): {e2}")
+                db_pool = None
+                return
+        print(f"DB init failed ({type(e).__name__}): {e}")
         db_pool = None
 
 async def _db_get(key: str):
     if not db_pool: return None
-    try:
-        async with db_pool.acquire() as con:
-            row = await con.fetchrow("SELECT value FROM kv WHERE key=$1", key)
-            return None if not row else row["value"]
-    except Exception as e:
-        print(f"_db_get('{key}') failed: {e}")
-        return None
+    async with db_pool.acquire() as con:
+        row = await con.fetchrow("SELECT value FROM kv WHERE key=$1", key)
+        return None if not row else row["value"]
 
-async def _db_set(key: str, value):
+async def _db_set(key: str, value: dict):
     if not db_pool: return
-    try:
-        async with db_pool.acquire() as con:
-            await con.execute("""
-                INSERT INTO kv (key, value) VALUES ($1, $2)
-                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-            """, key, json.dumps(value))
-    except Exception as e:
-        print(f"_db_set('{key}') failed: {e}")
+    async with db_pool.acquire() as con:
+        await con.execute("""
+            INSERT INTO kv (key, value) VALUES ($1, $2)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """, key, json.dumps(value))
 
 # ---------- Load/Save economy to Postgres JSON ----------
 async def _load_bank():
     """Load the whole economy JSON from Postgres; create default if missing."""
     global economy
-    data = await _db_get("economy") if db_pool else None
-    if isinstance(data, dict):
+    if not db_pool:
+        return
+    data = await _db_get("economy")
+    if data:
         try:
             data.setdefault("treasury", TREASURY_MAX)
             data.setdefault("users", {})
             economy = data
-            return
         except Exception:
-            pass
-    # default if nothing loaded
-    economy = {"treasury": TREASURY_MAX, "users": {}}
-    # write initial record if DB available
-    if db_pool:
+            economy = {"treasury": TREASURY_MAX, "users": {}}
+    else:
+        economy = {"treasury": TREASURY_MAX, "users": {}}
         await _db_set("economy", economy)
 
 async def _save_bank():
@@ -387,16 +406,6 @@ async def on_ready():
     kewchie_daily_scheduler.start()  # random twice-daily posts
     fit_auto_daily.start()          # auto-fit once a day
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
-    autosave_bank.start()           # periodic persistence
-
-@tasks.loop(minutes=10)
-async def autosave_bank():
-    async with economy_lock:
-        await _save_bank()
-
-@autosave_bank.before_loop
-async def _autosave_wait_ready():
-    await bot.wait_until_ready()
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
