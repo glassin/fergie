@@ -169,29 +169,25 @@ economy = {
 # ---------- Postgres KV (JSON) helpers ----------
 db_pool: asyncpg.Pool | None = None
 
+def _sanitize_dsn(raw: str | None) -> str | None:
+    """Trim quotes/whitespace/newlines that sometimes sneak into env editor."""
+    if not raw:
+        return None
+    dsn = raw.strip().strip('"').strip("'")
+    dsn = dsn.replace("\n", "").replace("\r", "").strip()
+    return dsn
+
 async def _db_init():
-    """Create the asyncpg pool to Supabase. Falls back to encrypted-but-insecure SSL
-    if the container can't verify the server certificate."""
+    """Connect to Postgres (Supabase), ensure kv table exists, with loud logs."""
     global db_pool
-    if not DATABASE_URL:
-        print("WARNING: DATABASE_URL not set; balances will NOT persist.")
-        db_pool = None
+    dsn = _sanitize_dsn(os.getenv("DATABASE_URL", ""))
+
+    if not dsn:
+        print("DB init: no DATABASE_URL set → running without persistence.")
         return
 
-    # Choose SSL behavior
-    ssl_param: ssl.SSLContext | str | None
-    if DB_SSL in ("0", "off", "false", "insecure", "skip", "noverify"):
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        ssl_param = ctx
-    else:
-        ssl_param = "require"
-
     try:
-        db_pool = await asyncpg.create_pool(
-            DATABASE_URL, min_size=1, max_size=3, ssl=ssl_param
-        )
+        db_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=20)
         async with db_pool.acquire() as con:
             await con.execute("""
                 CREATE TABLE IF NOT EXISTS kv (
@@ -199,39 +195,25 @@ async def _db_init():
                   value JSONB NOT NULL
                 )
             """)
-        print("DB init: connected ✅")
+            row = await con.fetchrow(
+                "SELECT current_database() AS db, inet_server_addr()::text AS host, inet_server_port() AS port"
+            )
+            print(f"DB init: connected ✅ db={row['db']} host={row['host']} port={row['port']}")
     except Exception as e:
-        # One-time fallback if verification failed and user didn't explicitly disable it
-        if ("CERTIFICATE_VERIFY_FAILED" in str(e)) and DB_SSL not in ("0","off","false","insecure","skip","noverify"):
-            try:
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                db_pool = await asyncpg.create_pool(DATABASE_URL, min_size=1, max_size=3, ssl=ctx)
-                async with db_pool.acquire() as con:
-                    await con.execute("""
-                        CREATE TABLE IF NOT EXISTS kv (
-                          key   TEXT PRIMARY KEY,
-                          value JSONB NOT NULL
-                        )
-                    """)
-                print("DB init: connected ✅ (SSL verify disabled fallback)")
-                return
-            except Exception as e2:
-                print(f"DB init failed after fallback ({type(e2).__name__}): {e2}")
-                db_pool = None
-                return
-        print(f"DB init failed ({type(e).__name__}): {e}")
         db_pool = None
+        print(f"DB init failed ❌ {type(e).__name__}: {e!s}")
+        print("Running without persistence.")
 
 async def _db_get(key: str):
-    if not db_pool: return None
+    if not db_pool:
+        return None
     async with db_pool.acquire() as con:
         row = await con.fetchrow("SELECT value FROM kv WHERE key=$1", key)
         return None if not row else row["value"]
 
 async def _db_set(key: str, value: dict):
-    if not db_pool: return
+    if not db_pool:
+        return
     async with db_pool.acquire() as con:
         await con.execute("""
             INSERT INTO kv (key, value) VALUES ($1, $2)
