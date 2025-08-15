@@ -444,6 +444,8 @@ TARGET_MIMIC_ID = USER3_ID  # 661077262468382761
 MIMIC_REPLY_CHANCE = 0.28        # chance to reply when USER3 speaks
 MIMIC_COOLDOWN_SEC = 75          # cooldown to prevent spam
 MIMIC_CONTEXT_WINDOW_SEC = 120   # window to chime in after USER3 last spoke in channel
+MIMIC_MAX_RETRIES = int(os.getenv("MIMIC_MAX_RETRIES", "4"))
+MIMIC_SIM_THRESHOLD = float(os.getenv("MIMIC_SIM_THRESHOLD", "0.60"))
 
 _mimic_model = {
     "ngrams": {},          # {(w1,w2): Counter({w3:count})}
@@ -540,33 +542,47 @@ async def _mimic_generate():
     if not model or not starts:
         return None
 
-    target_len = max(6, min(40, int(random.gauss(_mimic_model["avg_len"], 4))))
-    cur = list(random.choice(starts))
-    # trigram walk
-    while len(cur) < target_len:
-        key = (cur[-2], cur[-1])
-        nxt = _mimic_sample_next(model.get(key, Counter()))
-        if not nxt: break
-        cur.append(nxt)
+    # Load once for all attempts
+    recent = await _mimic_load_corpus(limit=200)
+    recent_subset = recent[:80]  # novelty window
 
-    # occasional emoji from their distribution
-    if _mimic_model["emoji_dist"] and random.random() < 0.25:
-        emo, _ = _mimic_model["emoji_dist"].most_common(1)[0]
-        cur.append(emo)
+    def _gen_once():
+        target_len = max(6, min(40, int(random.gauss(_mimic_model["avg_len"], 4))))
+        cur = list(random.choice(starts))
+        # trigram walk
+        while len(cur) < target_len:
+            key = (cur[-2], cur[-1])
+            nxt = _mimic_sample_next(model.get(key, Counter()))
+            if not nxt:
+                break
+            cur.append(nxt)
 
-    if not any(str(cur[-1]).endswith(x) for x in [".","!","?","…"]):
-        cur.append(random.choice([".", "!", "…"]))
+        # occasional emoji from their distribution
+        if _mimic_model["emoji_dist"] and random.random() < 0.25:
+            emo, _ = _mimic_model["emoji_dist"].most_common(1)[0]
+            cur.append(emo)
 
-    text = _mimic_join_tokens(cur)
+        if not any(str(cur[-1]).endswith(x) for x in [".", "!", "?", "…"]):
+            cur.append(random.choice([".", "!", "…"]))
 
-    # novelty check vs last ~200 lines
-    corpus = await _mimic_load_corpus(limit=200)
-    for line in corpus[:80]:
-        if _mimic_jaccard(text, line) > 0.6:
-            return None
-    return text
+        return _mimic_join_tokens(cur)
 
-@tasks.loop(hours=1)
+    # Try multiple times to find a novel-enough line
+    attempts = MIMIC_MAX_RETRIES + 1
+    for _ in range(attempts):
+        text = _gen_once()
+        if not text:
+            continue
+        too_similar = False
+        for line in recent_subset:
+            if _mimic_jaccard(text, line) > MIMIC_SIM_THRESHOLD:
+                too_similar = True
+                break
+        if not too_similar:
+            return text
+
+    # All attempts were too close
+    return None
 async def rebuild_mimic():
     corpus = await _mimic_load_corpus()
     _mimic_build_markov(corpus)
