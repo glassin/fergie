@@ -12,10 +12,14 @@ TENOR_KEY   = os.getenv("TENOR_API_KEY")
 CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
-# Postgres (Neon/Supabase/Railway)
+# Railway/Supabase/Neon Postgres
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-# DB SSL behavior: "require" (default) or "insecure" to skip certificate verification
+# DB SSL behavior: "require" (default) or "insecure" to skip certificate verification (unused but kept for compatibility)
 DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
+
+# ---- Economy backup knobs ----
+ECON_BACKUP_KEEP = int(os.getenv("ECON_BACKUP_KEEP", "7"))   # keep last N snapshots
+ECON_BACKUP_HOUR_UTC = int(os.getenv("ECON_BACKUP_HOUR_UTC", "9"))  # daily snapshot UTC hour
 
 SEARCH_TERM  = "bread"
 RESULT_LIMIT = 20
@@ -213,29 +217,18 @@ async def _db_init():
     print("Running without persistence.")
 
 async def _db_get(key: str):
-    """Fetch a key from public.kv and return a Python dict, even if DB gave us text."""
     if not db_pool:
         return None
     async with db_pool.acquire() as con:
         row = await con.fetchrow("SELECT value FROM public.kv WHERE key=$1", key)
-        if not row:
-            return None
-        val = row["value"]
-        if isinstance(val, str):
-            try:
-                val = json.loads(val)
-            except Exception:
-                pass
-        return val
+        return None if not row else row["value"]
 
 async def _db_set(key: str, value: dict):
-    """Upsert a JSON document into public.kv as proper JSONB (not text)."""
     if not db_pool:
         return
     async with db_pool.acquire() as con:
         await con.execute("""
-            INSERT INTO public.kv (key, value)
-            VALUES ($1, $2::jsonb)
+            INSERT INTO public.kv (key, value) VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
 
@@ -245,28 +238,46 @@ async def _load_bank():
     global economy
     if not db_pool:
         return
-
     data = await _db_get("economy")
-
-    # If the row is present but came back as text, parse it.
-    if isinstance(data, str):
+    if data:
         try:
-            data = json.loads(data)
+            data.setdefault("treasury", TREASURY_MAX)
+            data.setdefault("users", {})
+            economy = data
         except Exception:
-            data = None
-
-    if isinstance(data, dict) and data:
-        data.setdefault("treasury", TREASURY_MAX)
-        data.setdefault("users", {})
-        economy = data
+            economy = {"treasury": TREASURY_MAX, "users": {}}
     else:
-        # First run (or corrupted/missing row)
         economy = {"treasury": TREASURY_MAX, "users": {}}
         await _db_set("economy", economy)
 
 async def _save_bank():
     if db_pool:
         await _db_set("economy", economy)
+
+# ================== Economy Snapshots (daily + manual) ==================
+async def _snapshot_save(tag: str):
+    """Append a point-in-time snapshot of the economy; keep last N."""
+    if not db_pool:
+        return
+    snap = {
+        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "tag": tag,
+        "data": economy
+    }
+    snaps = await _db_get("economy_snapshots") or []
+    snaps.append(snap)
+    snaps = snaps[-ECON_BACKUP_KEEP:]  # keep last N
+    await _db_set("economy_snapshots", snaps)
+
+@tasks.loop(time=dtime(hour=ECON_BACKUP_HOUR_UTC, tzinfo=timezone.utc))
+async def daily_snapshot():
+    if not db_pool:
+        return
+    await _snapshot_save("auto-daily")
+
+@daily_snapshot.before_loop
+async def _daily_snapshot_wait():
+    await bot.wait_until_ready()
 
 # ================== Common economy helpers ==================
 def _user(uid: int):
@@ -413,6 +424,7 @@ async def on_ready():
     kewchie_daily_scheduler.start()  # random twice-daily posts
     fit_auto_daily.start()          # auto-fit once a day
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
+    daily_snapshot.start()          # daily economy snapshot
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
@@ -1001,12 +1013,8 @@ async def dbstatus(ctx):
         if not row:
             await ctx.send("DB: connected ✅ · economy row: (missing)"); return
         val = row["value"]
-        if isinstance(val, str):
-            try: val = json.loads(val)
-            except Exception: val = {}
         users = val.get("users", {}) if isinstance(val, dict) else {}
-        treasury = val.get("treasury") if isinstance(val, dict) else None
-        await ctx.send(f"DB: connected ✅ · economy row: present · users={len(users)} · treasury={treasury}")
+        await ctx.send(f"DB: connected ✅ · economy row: present · users={len(users)} · treasury={val.get('treasury')}")
 
 @bot.command(name="dbreload", help="ADMIN: Force reload economy from DB")
 @_admin.has_permissions(manage_guild=True)
@@ -1023,12 +1031,50 @@ async def dbdump(ctx):
         row = await con.fetchrow("SELECT value FROM public.kv WHERE key='economy'")
         if not row:
             await ctx.send("No 'economy' row in DB."); return
-        val = row["value"]
-        if isinstance(val, str):
-            try: val = json.loads(val)
-            except Exception: pass
-        txt = json.dumps(val)[:600] if isinstance(val, (dict, list)) else str(val)[:600]
+        txt = json.dumps(row["value"])[:600]
         await ctx.send(f"```json\n{txt}\n...```")
+
+# ================== Backup Admin Commands ==================
+@bot.command(name="backup-now", help="ADMIN: Take a snapshot of the current economy")
+@_admin.has_permissions(manage_guild=True)
+async def backup_now(ctx):
+    if not db_pool:
+        await ctx.send("DB: not connected ❌"); return
+    await _snapshot_save("manual")
+    await ctx.send("Snapshot saved ✅ (use `!backup-list` to view)")
+
+@bot.command(name="backup-list", help="ADMIN: List available economy snapshots")
+@_admin.has_permissions(manage_guild=True)
+async def backup_list(ctx):
+    if not db_pool:
+        await ctx.send("DB: not connected ❌"); return
+    snaps = await _db_get("economy_snapshots") or []
+    if not snaps:
+        await ctx.send("No snapshots yet."); return
+    lines = []
+    for i, s in enumerate(snaps):
+        lines.append(f"{i}: {s.get('ts','?')} — {s.get('tag','')}")
+    txt = "\n".join(lines[:30])  # avoid overlong messages
+    await ctx.send(f"```\n{txt}\n```")
+
+@bot.command(name="backup-restore", help="ADMIN: Restore economy from a snapshot by index (see !backup-list). Default = latest.")
+@_admin.has_permissions(manage_guild=True)
+async def backup_restore(ctx, index: int = -1):
+    if not db_pool:
+        await ctx.send("DB: not connected ❌"); return
+    snaps = await _db_get("economy_snapshots") or []
+    if not snaps:
+        await ctx.send("No snapshots to restore."); return
+    try:
+        snap = snaps[index]
+    except Exception:
+        await ctx.send("Invalid index. Use `!backup-list` to see available snapshots."); return
+
+    # Overwrite in-memory and DB
+    global economy
+    economy = snap.get("data") or {"treasury": TREASURY_MAX, "users": {}}
+    await _db_set("economy", economy)
+    await ctx.send(f"Restored economy from snapshot {index} ({snap.get('ts')}, tag='{snap.get('tag','')}') ✅")
 
 # ================== Fun / Media Commands ==================
 @bot.command(name="cafe", help="owl y lark")
