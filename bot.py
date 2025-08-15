@@ -4,7 +4,7 @@ from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
 
-import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
+import asyncpg  # PostgreSQL (Neon/Railway/Supabase) persistence
 
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
@@ -12,14 +12,10 @@ TENOR_KEY   = os.getenv("TENOR_API_KEY")
 CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
-# Railway/Supabase/Neon Postgres
+# Postgres (Neon/Railway/Supabase)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
-# DB SSL behavior: "require" (default) or "insecure" to skip certificate verification (unused but kept for compatibility)
+# DB SSL behavior: "require" (default) or "insecure" to skip certificate verification
 DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
-
-# ---- Economy backup knobs ----
-ECON_BACKUP_KEEP = int(os.getenv("ECON_BACKUP_KEEP", "7"))   # keep last N snapshots
-ECON_BACKUP_HOUR_UTC = int(os.getenv("ECON_BACKUP_HOUR_UTC", "9"))  # daily snapshot UTC hour
 
 SEARCH_TERM  = "bread"
 RESULT_LIMIT = 20
@@ -180,8 +176,44 @@ def _sanitize_dsn(raw: str | None) -> str | None:
     dsn = dsn.replace("\n", "").replace("\r", "").strip()
     return dsn
 
+async def _migrate_legacy_kv(con) -> bool:
+    """
+    If economy row is missing in public.kv, try to copy it from any other schema
+    that already has a kv table (e.g., role-named schema on Neon).
+    Returns True if a copy was performed.
+    """
+    # already present in public → nothing to do
+    row = await con.fetchrow("SELECT value FROM public.kv WHERE key='economy'")
+    if row:
+        return False
+
+    # find any other schema that has a table named 'kv'
+    schemas = await con.fetch("""
+        SELECT nspname
+        FROM pg_namespace
+        WHERE nspname NOT IN ('pg_catalog','information_schema','public')
+        ORDER BY CASE WHEN nspname = current_user THEN 0 ELSE 1 END, nspname
+    """)
+    for rec in schemas:
+        s = rec["nspname"]
+        exists = await con.fetchval("SELECT to_regclass($1)", f'{s}.kv')
+        if not exists:
+            continue
+        try:
+            src = await con.fetchrow(f'SELECT value FROM "{s}".kv WHERE key=$1', 'economy')
+        except Exception:
+            continue
+        if src:
+            await con.execute("""
+                INSERT INTO public.kv (key, value) VALUES ($1, $2::jsonb)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+            """, 'economy', src['value'])
+            print(f"DB migrate: copied economy from {s}.kv → public.kv")
+            return True
+    return False
+
 async def _db_init():
-    """Connect to Postgres (Neon), force schema=public, and ensure table exists. Retries on cold starts."""
+    """Connect to Postgres (Neon), force schema=public, ensure table exists, and migrate legacy data."""
     global db_pool
     dsn = _sanitize_dsn(os.getenv("DATABASE_URL", ""))
     if not dsn:
@@ -201,6 +233,9 @@ async def _db_init():
                       value JSONB NOT NULL
                     )
                 """)
+                # one-time migration from any non-public schema if needed
+                await _migrate_legacy_kv(con)
+
                 row = await con.fetchrow(
                     "SELECT current_database() AS db, current_schema() AS schema, "
                     "inet_server_addr()::text AS host, inet_server_port() AS port"
@@ -253,31 +288,6 @@ async def _load_bank():
 async def _save_bank():
     if db_pool:
         await _db_set("economy", economy)
-
-# ================== Economy Snapshots (daily + manual) ==================
-async def _snapshot_save(tag: str):
-    """Append a point-in-time snapshot of the economy; keep last N."""
-    if not db_pool:
-        return
-    snap = {
-        "ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "tag": tag,
-        "data": economy
-    }
-    snaps = await _db_get("economy_snapshots") or []
-    snaps.append(snap)
-    snaps = snaps[-ECON_BACKUP_KEEP:]  # keep last N
-    await _db_set("economy_snapshots", snaps)
-
-@tasks.loop(time=dtime(hour=ECON_BACKUP_HOUR_UTC, tzinfo=timezone.utc))
-async def daily_snapshot():
-    if not db_pool:
-        return
-    await _snapshot_save("auto-daily")
-
-@daily_snapshot.before_loop
-async def _daily_snapshot_wait():
-    await bot.wait_until_ready()
 
 # ================== Common economy helpers ==================
 def _user(uid: int):
@@ -424,7 +434,6 @@ async def on_ready():
     kewchie_daily_scheduler.start()  # random twice-daily posts
     fit_auto_daily.start()          # auto-fit once a day
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
-    daily_snapshot.start()          # daily economy snapshot
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
@@ -1001,7 +1010,7 @@ async def setbal(ctx, member: discord.Member = None, amount: int = None):
         delta=_fmt_bread(delta_applied), vault=_fmt_bread(economy["treasury"])
     ))
 
-# ================== DB Debug Commands (admin) ==================
+# ================== DB Debug / Maintenance Commands (admin) ==================
 @bot.command(name="dbstatus", help="ADMIN: Show DB status + economy row info")
 @_admin.has_permissions(manage_guild=True)
 async def dbstatus(ctx):
@@ -1034,47 +1043,14 @@ async def dbdump(ctx):
         txt = json.dumps(row["value"])[:600]
         await ctx.send(f"```json\n{txt}\n...```")
 
-# ================== Backup Admin Commands ==================
-@bot.command(name="backup-now", help="ADMIN: Take a snapshot of the current economy")
+@bot.command(name="dbmigrate", help="ADMIN: migrate economy from any legacy schema to public (one-time)")
 @_admin.has_permissions(manage_guild=True)
-async def backup_now(ctx):
+async def dbmigrate(ctx):
     if not db_pool:
         await ctx.send("DB: not connected ❌"); return
-    await _snapshot_save("manual")
-    await ctx.send("Snapshot saved ✅ (use `!backup-list` to view)")
-
-@bot.command(name="backup-list", help="ADMIN: List available economy snapshots")
-@_admin.has_permissions(manage_guild=True)
-async def backup_list(ctx):
-    if not db_pool:
-        await ctx.send("DB: not connected ❌"); return
-    snaps = await _db_get("economy_snapshots") or []
-    if not snaps:
-        await ctx.send("No snapshots yet."); return
-    lines = []
-    for i, s in enumerate(snaps):
-        lines.append(f"{i}: {s.get('ts','?')} — {s.get('tag','')}")
-    txt = "\n".join(lines[:30])  # avoid overlong messages
-    await ctx.send(f"```\n{txt}\n```")
-
-@bot.command(name="backup-restore", help="ADMIN: Restore economy from a snapshot by index (see !backup-list). Default = latest.")
-@_admin.has_permissions(manage_guild=True)
-async def backup_restore(ctx, index: int = -1):
-    if not db_pool:
-        await ctx.send("DB: not connected ❌"); return
-    snaps = await _db_get("economy_snapshots") or []
-    if not snaps:
-        await ctx.send("No snapshots to restore."); return
-    try:
-        snap = snaps[index]
-    except Exception:
-        await ctx.send("Invalid index. Use `!backup-list` to see available snapshots."); return
-
-    # Overwrite in-memory and DB
-    global economy
-    economy = snap.get("data") or {"treasury": TREASURY_MAX, "users": {}}
-    await _db_set("economy", economy)
-    await ctx.send(f"Restored economy from snapshot {index} ({snap.get('ts')}, tag='{snap.get('tag','')}') ✅")
+    async with db_pool.acquire() as con:
+        moved = await _migrate_legacy_kv(con)
+    await ctx.send("Migration: " + ("copied ✔️ to public.kv" if moved else "nothing to do"))
 
 # ================== Fun / Media Commands ==================
 @bot.command(name="cafe", help="owl y lark")
