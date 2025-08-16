@@ -33,11 +33,6 @@ USER2_ID = 534227493360762891
 USER3_ID = 661077262468382761
 LOBO_ID  = 919405253470871562
 
-# ---------- Gym wake-up ----------
-GYM_CHANNEL_ID = 1272237309521170434
-GYM_MESSAGE_1 = "wake up gorditos! it's time for gymmies! 💪🏋️💗"
-GYM_MESSAGE_2 = "andale! ya! despierta pinches gaymers! 💪🏋️💗"
-
 # ---------- Casino channel restriction ----------
 GAMBLE_CHANNEL_ID = 1405320084028784753
 def _is_gamble_channel(ch_id: int) -> bool:
@@ -72,19 +67,7 @@ FIT_IMAGE_URLS = [
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819210756178/pinterest_681169512428836350.png?ex=689f6969&is=689e17e9&hm=43c908944d8f813a4b99f0aad4a672dc56e7f05854ee357630bbae8f633b1672&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818728153148/pinterest_681169512428815368.jpg?ex=689f6969&is=689e17e9&hm=625f7aa45091f7deccd09185dd86d5db9682f0f149b40141112a3a9dc5ad292c&",
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818464170195/pinterest_681169512428788228.jpg?ex=689f6969&is=689e17e9&hm=86b1b23a623b8dbbf9789a9a002c8589dec91f139c39caad0a5ee6f470f26d6e&",
-    # extra new ones
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801420946407457/pinterest_681169512428720213.jpg?ex=68a02619&is=689ed499&hm=f55be5c46db2f300317cea0418f1c0af38b7240475fd446f8235dc8ecd73200a&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801420732633128/pinterest_681169512428720200.jpg?ex=68a02619&is=689ed499&hm=dddd1ea7a349e2d9c1f4c01ff7a9cd1d596724f1f9907cf84dbd016add746e99&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801391926149150/pinterest_681169512428740286.jpg?ex=68a02612&is=689ed492&hm=e55d8f155d4e6e9505959bd187399a76dd1bd340e35e641c9e604784c619891a&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801391535951893/pinterest_681169512428720227.jpg?ex=68a02612&is=689ed492&hm=98e2249f0cf4d943d60941746630bcb133094a48027e80bae31234f4eb93fde7&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801391254929440/pinterest_681169512428720223.jpg?ex=68a02612&is=689ed492&hm=5f3b80c165a070c244637aee5f6a33ccb343e07f54f4c98932b8128cd95cdc1a&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801390928035840/pinterest_681169512428720221.jpg?ex=68a02612&is=689ed492&hm=0f4fd0c843b0f38ab31dfcee3299a30e88e06e74bbab1a72eb3e1dd4b3400d07&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801323177443409/pinterest_681169512428787714.jpg?ex=68a02601&is=689ed481&hm=bfe219da5e1846541c961a58da512799c92bc8b1879eb2710e6ac5cb785710a4&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801322887905290/pinterest_681169512428750739.jpg?ex=68a02601&is=689ed481&hm=8192ee68e15baf1d732245d23915b889bbc722e3b0938bc6ed24440727644f95&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801322522873886/pinterest_681169512428750735.jpg?ex=68a02601&is=689ed481&hm=ad14f45b817cb6e50c5ee454948cd13af4ccd661bc29321d54f8b2700dabfd5c&",
-    "https://cdn.discordapp.com/attachments/1405470635844435968/1405801322183393331/pinterest_681169512428787718.webp?ex=68a02601&is=689ed481&hm=d2100fc8ccc539da1003f78d67d377c556e1ec95c08855f6ae0b3df2c9ebafe9&",
 ]
-
 FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
 FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
 FIT_FOLLOWUP_EMOTE = "<a:slap_peach:1227392416617730078>"
@@ -216,8 +199,8 @@ FERAL_LINES = [
 REACTION_EMOTES = ["🤭","😏","😢","😊","🙄","💗","🫶"]
 
 USER3_LINES = [
-    "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!","matcha or latte?","you're my favorite girly!","ewwww sancho ewwww",
-    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!","don't take me to storms basement again girlie!",
+    "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
+    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!",
 ]
 
 # ================== In-memory economy (backed by Postgres JSON) ==================
@@ -652,15 +635,6 @@ async def on_ready():
         bot._duels = {}  # channel_id -> duel state
     if not hasattr(bot, "_raffles"):
         bot._raffles = {}  # guild_id -> raffle state
-    # ---- Chat Drop state (activity + drops + cooldowns) ----
-    if not hasattr(bot, "_chan_activity"):
-        bot._chan_activity = defaultdict(list)  # channel_id -> [timestamps]
-    if not hasattr(bot, "_drops"):
-        bot._drops = {}  # channel_id -> {"amount": int, "expires": ts, "msg_id": int, "claimed": bool}
-    if not hasattr(bot, "_drop_last_ts"):
-        bot._drop_last_ts = defaultdict(float)  # channel_id -> last spawn ts
-    if not hasattr(bot, "_get_last"):
-        bot._get_last = defaultdict(float)      # user_id -> last successful get ts
 
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
@@ -675,179 +649,194 @@ async def on_ready():
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
     rebuild_mimic.start()           # build mimic model hourly
     raffle_watcher.start()          # raffle auto-draw watcher
-        # start gym wake-ups
-    daily_gym_wakeup1.start()
-    daily_gym_wakeup2.start()
 
+@tasks.loop(minutes=1)
+async def kewchie_daily_scheduler():
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if (not bot._kewchie_times) or (bot._kewchie_times[0].date() != now_utc.date()):
+        bot._kewchie_times = _pick_two_random_times_today()
+        bot._kewchie_posted = set()
 
-# ---------- Chat Drop (active chat rewards) ----------
-DROP_AMOUNTS = [2, 5, 10, 20]                     # reward sizes
-DROP_EMOJI = os.getenv("DROP_EMOJI", "🪙")
-DROP_EXPIRE_SEC = int(os.getenv("DROP_EXPIRE_SEC", "20"))     # claim window
-DROP_CHAN_COOLDOWN_SEC = int(os.getenv("DROP_CHAN_CD", "90")) # per-channel cooldown between drops
-DROP_USER_COOLDOWN_SEC = int(os.getenv("DROP_USER_CD", "15")) # per-user cooldown between successful grabs
-ACTIVITY_WINDOW_SEC = int(os.getenv("ACTIVITY_WINDOW_SEC", "45"))  # lookback window (sec)
-ACTIVITY_MIN_MSGS = int(os.getenv("ACTIVITY_MIN_MSGS", "6"))       # need at least this many msgs in window
-DROP_TRIGGER_CHANCE = float(os.getenv("DROP_TRIGGER_CHANCE", "0.06"))  # chance to spawn when activity threshold hit
+    for t in bot._kewchie_times:
+        key = t.isoformat()
+        if now_utc == t and key not in bot._kewchie_posted:
+            channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
+            if channel:
+                links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
+                if links:
+                    await channel.send(random.choice(links))
+                else:
+                    await channel.send("Playlist isn't available right now 😭")
+            bot._kewchie_posted.add(key)
 
-# Claim-by-reaction emote (custom): <:autistic_hug:1131707829611413524>
-DROP_REACT_EMOJI_NAME = "autistic_hug"
-DROP_REACT_EMOJI_ID = 1131707829611413524
-DROP_REACT_DISPLAY = f"<:{DROP_REACT_EMOJI_NAME}:{DROP_REACT_EMOJI_ID}>"
+@kewchie_daily_scheduler.before_loop
+async def _wait_bot_ready_kewchie():
+    await bot.wait_until_ready()
 
-def _prune_activity(ts_list: list, now_ts: float):
-    cutoff = now_ts - ACTIVITY_WINDOW_SEC
-    while ts_list and ts_list[0] < cutoff:
-        ts_list.pop(0)
+# ---- BONK PAPO random 3x/day ----
+@tasks.loop(minutes=1)
+async def bonk_papo_scheduler():
+    if not hasattr(bot, "_bonk_times") or not bot._bonk_times:
+        bot._bonk_times = _pick_three_times_today_pt()
+        bot._bonked = set()
+        bot._bonk_day = _today_key()
 
-def _eligible_drop_amount(vault: int) -> int | None:
-    options = [a for a in DROP_AMOUNTS if a <= vault]
-    return random.choice(options) if options else None
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    for t in bot._bonk_times:
+        key = t.isoformat()
+        if now_utc == t and key not in getattr(bot, "_bonked", set()):
+            ch = bot.get_channel(CHANNEL_ID)
+            if ch:
+                await ch.send(f"<@{BONK_PAPO_USER_ID}> {BONK_PAPO_TEXT}")
+            bot._bonked.add(key)
 
-async def _claim_drop_core(user_id: int, channel: discord.abc.Messageable, method: str):
-    """Core payout logic. `method` is 'get' or 'react' (for messaging)."""
-    ch_id = channel.id
-    now = _now()
+    # reset per new day
+    if _today_key() != getattr(bot, "_bonk_day", None):
+        bot._bonk_times = _pick_three_times_today_pt()
+        bot._bonked = set()
+        bot._bonk_day = _today_key()
 
-    # per-user cooldown (successful grabs only)
-    last_get = bot._get_last.get(user_id, 0.0)
-    if now - last_get < DROP_USER_COOLDOWN_SEC:
-        await channel.send(f"<@{user_id}> let others cook — try again in **{int(DROP_USER_COOLDOWN_SEC - (now - last_get))}s**.")
-        return
+@bonk_papo_scheduler.before_loop
+async def _bonk_wait():
+    await bot.wait_until_ready()
 
-    cur = bot._drops.get(ch_id)
-    if not cur or cur.get("claimed", False):
-        await channel.send("No active drop right now. Keep chatting 👀")
-        return
-
-    if now >= cur["expires"]:
-        bot._drops.pop(ch_id, None)
-        await channel.send("Too slow — that drop just expired!")
-        return
-
-    amt = int(cur["amount"])
-    async with economy_lock:
-        u = _user(user_id)
-        if economy["treasury"] <= 0:
-            bot._drops.pop(ch_id, None)
-            await channel.send("The bank ran dry — drop canceled 💀")
-            return
-
-        pay = min(amt, economy["treasury"])
-        new_bal = u["balance"] + pay
-        final_bal, skim = _cap_wallet(new_bal)
-        economy["treasury"] -= max(0, pay - skim)
-        u["balance"] = final_bal
-        _mark_active(user_id)
-        await _save_bank()
-
-    bot._drops[ch_id]["claimed"] = True
-    bot._drops.pop(ch_id, None)
-    bot._get_last[user_id] = now
-
-    msg = (f"<@{user_id}> scooped **{_fmt_bread(pay)}** via **{method}**! "
-           f"new: **{_fmt_bread(final_bal)}**")
-    if skim:
-        msg += f" (cap skim **{_fmt_bread(skim)}** back to bank)"
-    await channel.send(msg)
-
-@bot.listen("on_message")
-async def _track_chat_and_maybe_drop(message: discord.Message):
+@bot.event
+async def on_message(message: discord.Message):
     if message.author.bot:
         return
-    ch = message.channel
-    now = _now()
 
-    # track activity for this channel
-    ts_list = bot._chan_activity[ch.id]
-    ts_list.append(now)
-    _prune_activity(ts_list, now)
+    # --- Mimic: capture USER3 messages + mark "last seen" per channel ---
+    if message.author.id == USER3_ID:
+        await _mimic_store_message(message)
+        if not hasattr(bot, "_last_user3_in_ch"):
+            bot._last_user3_in_ch = {}
+        bot._last_user3_in_ch[message.channel.id] = _now()
 
-    # already have an active drop? expire if needed
-    cur = bot._drops.get(ch.id)
-    if cur:
-        if now >= cur.get("expires", 0) and not cur.get("claimed", False):
-            bot._drops.pop(ch.id, None)
+    content = (message.content or "")
+    lower = content.lower().strip()
+
+    # Process commands first
+    if content.strip().startswith("!"):
+        await bot.process_commands(message)
         return
 
-    # channel cooldown
-    if now - bot._drop_last_ts[ch.id] < DROP_CHAN_COOLDOWN_SEC:
+    # Global jump scare trigger (image only, then creepy line), per-user cooldown
+    if JUMPSCARE_TRIGGER in lower:
+        now = _now()
+        last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
+        if now - last >= JUMPSCARE_COOLDOWN_SECONDS:
+            await message.channel.send(JUMPSCARE_IMAGE_URL)
+            await message.channel.send(f"the parasites!!! {JUMPSCARE_EMOTE_TEXT}")
+            bot._js_last[message.author.id] = now
         return
 
-    # activity threshold
-    if len(ts_list) < ACTIVITY_MIN_MSGS:
+    # Auto BBL trigger
+    if lower == "bbl":
+        gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
+        await message.channel.send(gif_url)
         return
 
-    # chance gate
-    if random.random() >= DROP_TRIGGER_CHANCE:
+    # Once/day when LOBO_ID posts
+    if message.author.id == LOBO_ID:
+        u = _user(LOBO_ID)
+        today = _today_key()
+        if u.get("_lobo_date") != today:
+            await message.channel.send(f"<@{LOBO_ID}> send me money lobo.")
+            u["_lobo_date"] = today
+            await _save_bank()
+
+    # Phrase trigger → :ppeyeroll:
+    if "pinche fergie" in lower:
+        if message.author.id == USER1_ID:
+            reply_options = ["pinche sancho", "wtf do you want now mfer!!!!"]
+            await message.reply(random.choice(reply_options), mention_author=False)
+        em = None
+        if message.guild:
+            em = discord.utils.get(message.guild.emojis, name="ppeyeroll")
+        await message.channel.send(str(em) if em else "🙄")
         return
 
-    # affordability
-    async with economy_lock:
-        vault = int(economy.get("treasury", 0))
-        amt = _eligible_drop_amount(vault)
-        if not amt:
-            return  # too broke
+    # 🥖🍑 easter egg
+    if message.reference and message.reference.resolved:
+        replied_to_msg = message.reference.resolved
+        if replied_to_msg.author.id == bot.user.id:
+            if not hasattr(bot, "_reply_counts"):
+                bot._reply_counts = {}
+            uid = message.author.id
+            bot._reply_counts[uid] = bot._reply_counts.get(uid, 0) + 1
+            if bot._reply_counts[uid] >= 2:
+                await message.channel.send("🥖🍑")
+                bot._reply_counts[uid] = 0
 
-    try:
-        msg = await ch.send(
-            f"{DROP_EMOJI} **Chat drop!** Type `!get` **or react with {DROP_REACT_DISPLAY}** within **{DROP_EXPIRE_SEC}s** "
-            f"to grab **{amt} {BREAD_EMOJI}**!"
-        )
-        bot._drops[ch.id] = {"amount": amt, "expires": now + DROP_EXPIRE_SEC, "msg_id": msg.id, "claimed": False}
-        bot._drop_last_ts[ch.id] = now
-    except Exception:
-        pass
+    # Special: reply to USER3_ID with USER3_LINES (throttled to 35% of their msgs; 20% add emote)
+    if message.author.id == USER3_ID:
+        if random.random() < 0.35:
+            phrase = random.choice(USER3_LINES)
+            if random.random() < 0.20:
+                phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"
+            await message.reply(phrase, mention_author=False)
+            return
 
-# Command claim
-@bot.command(name="get", help="Grab the current chat drop in this channel (if any) within the time window")
-async def get_drop(ctx):
-    await _claim_drop_core(ctx.author.id, ctx.channel, "command")
+    # --- Natural mimic (non-invasive): only runs if the canned USER3 block didn't return above ---
+    if not hasattr(bot, "_mimic_last_ts"):
+        bot._mimic_last_ts = 0
+    nowts = _now()
 
-# Reaction claim (custom emoji)
-@bot.event
-async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
-    # ignore bot reactions
-    if payload.user_id == (bot.user.id if bot.user else None):
+    # If USER3 speaks, maybe reply in their style
+    if message.author.id == USER3_ID:
+        if nowts - bot._mimic_last_ts >= MIMIC_COOLDOWN_SEC and random.random() < MIMIC_REPLY_CHANCE:
+            gen = await _mimic_generate()
+            if gen:
+                await message.reply(gen, mention_author=False)
+                bot._mimic_last_ts = nowts
+                return
+
+    # If someone else speaks shortly after USER3 in this channel, a small chance to chime in
+    last_here = getattr(bot, "_last_user3_in_ch", {}).get(message.channel.id, 0)
+    if last_here and 0 < (nowts - last_here) <= MIMIC_CONTEXT_WINDOW_SEC:
+        if nowts - bot._mimic_last_ts >= MIMIC_COOLDOWN_SEC and random.random() < 0.12:
+            gen = await _mimic_generate()
+            if gen:
+                await message.reply(gen, mention_author=False)
+                bot._mimic_last_ts = nowts
+                return
+
+    # Mention → bratty only (existing behavior)
+    mentioned = False
+    if bot.user and (bot.user in message.mentions):
+        mentioned = True
+    elif bot.user:
+        bid = bot.user.id
+        if f"<@{bid}>" in content or f"<@!{bid}>" in content:
+            mentioned = True
+
+    if mentioned:
+        await message.reply(random.choice(BRATTY_LINES), mention_author=False)
         return
 
-    # confirm emoji is the right custom emoji
-    if not payload.emoji.is_custom_emoji():
+    # Random chat sass (global)
+    if random.random() < REPLY_CHANCE:
+        choice = random.choice([random.choice(BRATTY_LINES),
+                                random.choice(FERAL_LINES),
+                                random.choice(REACTION_EMOTES)])
+        await message.reply(choice, mention_author=False)
+
+# ---- Reply watcher for FIT follow-up (20s window) ----
+@bot.listen("on_message")
+async def _fit_reply_watch(message: discord.Message):
+    if message.author.bot: return
+    if not message.reference or not message.reference.resolved: return
+    replied_to = message.reference.resolved
+    if replied_to.author.id != bot.user.id: return
+    expiry = getattr(bot, "_fit_waiting", {}).get(replied_to.id)
+    if not expiry: return
+    if _now() > expiry:
+        bot._fit_waiting.pop(replied_to.id, None)
         return
-    if payload.emoji.id != DROP_REACT_EMOJI_ID:
-        return
-
-    ch_id = payload.channel_id
-    cur = bot._drops.get(ch_id)
-    if not cur or payload.message_id != cur.get("msg_id"):
-        return
-
-    channel = bot.get_channel(ch_id)
-    if not channel:
-        return
-
-    await _claim_drop_core(payload.user_id, channel, "reaction")
-
-# ---------- Gym wake-up schedulers ----------
-@tasks.loop(time=dtime(hour=4, tzinfo=ZoneInfo("America/Los_Angeles")))
-async def daily_gym_wakeup1():
-    ch = bot.get_channel(GYM_CHANNEL_ID)
-    if ch:
-        await ch.send(GYM_MESSAGE_1)
-
-@daily_gym_wakeup1.before_loop
-async def _gym_wait_ready1():
-    await bot.wait_until_ready()
-
-@tasks.loop(time=dtime(hour=5, tzinfo=ZoneInfo("America/Los_Angeles")))
-async def daily_gym_wakeup2():
-    ch = bot.get_channel(GYM_CHANNEL_ID)
-    if ch:
-        await ch.send(GYM_MESSAGE_2)
-
-@daily_gym_wakeup2.before_loop
-async def _gym_wait_ready2():
-    await bot.wait_until_ready()
+    if message.author.id == FIT_REPLY_TARGET_ID:
+        ch = message.channel
+        await ch.send(f"{FIT_FOLLOWUP_EMOTE} {FIT_FOLLOWUP_TEXT}")
+        bot._fit_waiting.pop(replied_to.id, None)
 
 # ================== Bread posts & schedules ==================
 @tasks.loop(hours=4)
@@ -1196,7 +1185,7 @@ async def putasos(ctx, member: discord.Member):
             economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + skim)
             _mark_active(ctx.author.id)
             msg = f"successful heist 😈 you stole **{_fmt_bread(take)}** from {member.mention} → new: **{_fmt_bread(thief['balance'])}**"
-            if skim: msg += f" (cap skim **{_fmt_bread(skim)}** back to bank)"
+            if skim: msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
         else:
             loss = max(1, int(thief["balance"] * FAIL_LOSE_PCT))
             thief["balance"] -= loss
@@ -1950,9 +1939,7 @@ async def halp(ctx, *, command: str | None = None):
             "• `USER2_ID`: pings twice daily with “shooo cornman!”\n"
             "• `USER3_ID`: random replies (35% of their msgs) + ping every 8h\n"
             "• `LOBO_ID`: once/day “send me money lobo.” when they post\n"
-            "• `!fit`: 20s follow-up if the target user replies to the fit post\n"
-            "• **Chat Drops**: while chat is active, random **2/5/10/20** appear — claim with `!get` or react with "
-            f"{DROP_REACT_DISPLAY} within {DROP_EXPIRE_SEC}s"
+            "• `!fit`: 20s follow-up if the target user replies to the fit post"
         ),
         inline=False
     )
