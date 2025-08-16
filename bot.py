@@ -1,5 +1,3 @@
-from chat_drop import ChatDropCog         # if your file is named chat_drop.py
-# from chat_drop_cog import ChatDropCog   # (use this if you named it chat_drop_cog.py)
 import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
@@ -622,6 +620,7 @@ def _pick_three_times_today_pt():
 # ================== Events ==================
 @bot.event
 async def on_ready():
+
     # DB init & load economy
     await _db_init()
     await _load_bank()
@@ -638,7 +637,8 @@ async def on_ready():
     if not hasattr(bot, "_raffles"):
         bot._raffles = {}  # guild_id -> raffle state
 
-        # --- ChatDrop: safe plug-in ---
+
+    # --- ChatDrop: safe plug-in ---
     try:
         helpers = {
             "now": _now,
@@ -650,11 +650,10 @@ async def on_ready():
             "economy_lock": economy_lock,
         }
         if not hasattr(bot, "_chatdrop_loaded"):
-            bot.add_cog(ChatDropCog(bot, helpers))  # NOTE: no 'await' here
+            bot.add_cog(ChatDropCog(bot, helpers))
             bot._chatdrop_loaded = True
     except Exception as e:
         print("ChatDropCog load error:", e)
-
 
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
