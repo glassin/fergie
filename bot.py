@@ -660,10 +660,10 @@ async def on_ready():
             "economy_lock": economy_lock,
         }
         if not hasattr(bot, "_chatdrop_loaded"):
-            bot.add_cog(ChatDropCog(bot, helpers))
+#             bot.add_cog(ChatDropCog(bot, helpers))  # disabled: chat-drops listener handles drops now
             bot._chatdrop_loaded = True
     except Exception as e:
-        print("ChatDropCog load error:", e)
+#         print("ChatDropCog load error:", e)  # disabled: chat-drops listener handles drops now
 
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
@@ -2050,6 +2050,7 @@ _CHAT_DROPS = {
 }
 
 def _drops_init():
+    print('[chatdrops] init helpers')
     # Wire helpers from existing globals if present.
     g = globals()
     req = ["now", "fmt_bread", "_cap_wallet", "_user", "_save_bank", "economy", "economy_lock", "bot"]
@@ -2095,6 +2096,8 @@ def _drops_claim_window_active(channel_id: int) -> bool:
     return bool(win) and (_CHAT_DROPS["now"]() - win["opened"] <= cfg.claim_window_sec)
 
 async def _drops_on_message(msg):
+    # debug hook
+    # print('[chatdrops] on_message seen:', getattr(msg, 'content', '')[:50])
     if not _CHAT_DROPS["initialized"]:
         _drops_init()
     if not _CHAT_DROPS["initialized"]:
@@ -2273,7 +2276,7 @@ async def _chatdrops_post_ready_install():
             b.remove_listener(_drops_on_message, "on_message")
         except Exception:
             pass
-        b.add_listener(_drops_on_message, "on_message")
+        b.add_listener(_drops_on_message, "on_message"); print("[chatdrops] listener installed")
     except Exception as _e:
         # swallow install errors; better to fail silently than crash bot startup
         pass
