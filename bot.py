@@ -2001,114 +2001,165 @@ if __name__ == "__main__":
     if 'REACTION_EMOETS' in globals():
         pass
     
+# ================= Reaction Drops (simple, reaction-based, no buttons) ================
+# Owner-only test command: !testrx
+# To customize: change DEFAULT_EMOJI, base/step/cap below or in setup call.
 
+from __future__ import annotations
+import asyncio as _rx_asyncio
+from dataclasses import dataclass as _rx_dataclass
+from typing import Dict as _rxDict
 
-# ======= ultra-simple owner-only drop command (no timers, no listeners) =======
-# Requirements: helpers exist: now, fmt_bread, _user, _cap_wallet, _save_bank, economy, economy_lock
-# Usage: owner types `!testdrop` in any channel -> button appears -> first click wins
+import discord as _rx_discord
+from discord.ext import commands as _rx_commands
 
-from discord.ext import commands as _usd_commands
-import discord as _usd_discord
-import asyncio as _usd_asyncio
+DEFAULT_EMOJI_RX = "🍞"
 
-_DROP_OWNER_ID = 939225086341296209        # <- your ID
+@_rx_dataclass
+class _RxState:
+    base: int = 5
+    step: int = 5
+    cap: int = 50
+    chan: _rxDict[int, int] = None  # channel_id -> current progressive amt
+    def __post_init__(self):
+        if self.chan is None:
+            self.chan = {}
 
-# per-channel progressive state (simple, in-memory)
-_PROG_SIMPLE = {"base": 5, "step": 5, "cap": 50, "chan": {}}  # chan_id -> current_amt
+def setup_reaction_drops(
+    bot: _rx_commands.Bot,
+    helpers: dict,
+    *,
+    owner_id: int,
+    emoji: str = DEFAULT_EMOJI_RX,
+    base: int = 5,
+    step: int = 5,
+    cap: int = 50,
+    enable_scheduler: bool = False,   # keep OFF by default
+    interval_sec: int = 120,
+) -> None:
+    state = _RxState(base=base, step=step, cap=cap)
+    setattr(bot, "_rxdrop_state", state)
+    setattr(bot, "_rxdrop_helpers", helpers)
+    setattr(bot, "_rxdrop_emoji", emoji)
 
-async def _usd_safe_delete_message(_msg: _usd_discord.Message, delay: int = 6):
+    @bot.command(name="testrx")
+    async def _rx_testrx(ctx: _rx_commands.Context):
+        if ctx.author.id != owner_id:
+            return
+        await _rx_spawn(bot, ctx.channel)
+
+    if enable_scheduler:
+        async def _tick():
+            await bot.wait_until_ready()
+            while not bot.is_closed():
+                try:
+                    ch = None
+                    for g in bot.guilds:
+                        candidates = sorted(
+                            [c for c in g.text_channels if _rx_can_send(c)],
+                            key=lambda c: (c.last_message_id or 0),
+                            reverse=True,
+                        )
+                        if candidates:
+                            ch = candidates[0]; break
+                    if ch is not None:
+                        await _rx_spawn(bot, ch)
+                except Exception:
+                    pass
+                await _rx_asyncio.sleep(interval_sec)
+        try:
+            bot.loop.create_task(_tick())
+        except Exception:
+            _rx_asyncio.get_event_loop().create_task(_tick())
+
+async def _rx_spawn(bot: _rx_commands.Bot, channel: _rx_discord.TextChannel) -> None:
+    emoji = getattr(bot, "_rxdrop_emoji", DEFAULT_EMOJI_RX)
+    helpers = getattr(bot, "_rxdrop_helpers", None)
+    state: _RxState = getattr(bot, "_rxdrop_state", None)
+    if helpers is None or state is None:
+        return
+
+    perms = channel.permissions_for(channel.guild.me)
+    missing = []
+    if not perms.send_messages: missing.append("Send Messages")
+    if not perms.add_reactions: missing.append("Add Reactions")
+    if not perms.read_message_history: missing.append("Read Message History")
+    if missing:
+        try: await channel.send(f"⚠️ Missing permission(s): {', '.join(missing)}")
+        except Exception: pass
+        return
+
+    amt = state.chan.get(channel.id, state.base)
+    amt = max(state.base, min(amt, state.cap))
+    state.chan[channel.id] = amt
+
+    msg = await channel.send(f"💰 React with {emoji} on **this message** to claim **{helpers['fmt_bread'](amt)}**!")
     try:
-        await _usd_asyncio.sleep(delay)
-        await _msg.delete()
+        await msg.add_reaction(emoji)
+    except _rx_discord.Forbidden:
+        try: await channel.send("⚠️ I’m missing **Add Reactions** here.")
+        except Exception: pass
+        return
+
+    def _check(payload: _rx_discord.RawReactionActionEvent):
+        return (payload.message_id == msg.id and str(payload.emoji) == emoji
+                and payload.guild_id == channel.guild.id and payload.user_id != bot.user.id)
+
+    try:
+        payload = await bot.wait_for("raw_reaction_add", timeout=45.0, check=_check)
+        uid = payload.user_id
+    except _rx_asyncio.TimeoutError:
+        state.chan[channel.id] = min(amt + state.step, state.cap)
+        try: await channel.send(f"⏳ Nobody claimed. Next grows to **{helpers['fmt_bread'](state.chan[channel.id])}**.")
+        except Exception: pass
+        return
+
+    try:
+        async with helpers["economy_lock"]:
+            bank = int(helpers["economy"].get("treasury", 0))
+            paying = min(amt, bank)
+            if paying <= 0:
+                await channel.send("💀 Bank is empty."); return
+            u = helpers["_user"](uid)
+            before = u["balance"]
+            final, skim = helpers["_cap_wallet"](before + paying)
+            delta = final - before
+            if delta <= 0:
+                await channel.send(f"<@{uid}> is at wallet cap."); return
+            u["balance"] = final
+            helpers["economy"]["treasury"] = bank - delta + skim
+            await helpers["_save_bank"]()
+        state.chan[channel.id] = state.base
+        await channel.send(f"🎉 <@{uid}> claimed **{helpers['fmt_bread'](delta)}**!")
     except Exception:
         pass
 
-@bot.command(name="testdrop")
-async def _usd_testdrop(ctx: _usd_commands.Context):
-    # owner-only
-    if ctx.author.id != _DROP_OWNER_ID:
-        return
-
-    ch = ctx.channel
-    cid = ch.id
-    # current progressive amount for this channel
-    amt = _PROG_SIMPLE["chan"].get(cid, _PROG_SIMPLE["base"])
-    amt = max(_PROG_SIMPLE["base"], min(amt, _PROG_SIMPLE["cap"]))
-    _PROG_SIMPLE["chan"][cid] = amt  # ensure present
-
-    # treasury check for useful feedback (no inflation)
+def _rx_can_send(channel: _rx_discord.TextChannel) -> bool:
     try:
-        bank = int(economy.get("treasury", 0))
+        p = channel.permissions_for(channel.guild.me)
+        return p.send_messages and p.read_message_history and p.add_reactions
     except Exception:
-        await ctx.send("⚠️ economy not ready"); return
-    if bank <= 0:
-        await ctx.send("💀 Bank is empty (debug). Seed treasury and try again.")
-        return
+        return False
+# ================= end Reaction Drops ============================================
 
-    class _USD_ClaimView(_usd_discord.ui.View):
-        def __init__(self, *, timeout: float = 45):
-            super().__init__(timeout=timeout)
-            self.claimed = False
 
-        @_usd_discord.ui.button(label="Claim", style=_usd_discord.ButtonStyle.success)
-        async def claim(self, interaction: _usd_discord.Interaction, button: _usd_discord.ui.Button):
-            if self.claimed:
-                await interaction.response.send_message("Already claimed.", ephemeral=True); return
+# ---- install reaction-based drops (no buttons) ----
+try:
+    from __main__ import economy, economy_lock, _user, _cap_wallet, _save_bank, fmt_bread
+except Exception:
+    pass  # helpers should already exist in this file
 
-            # payout under lock with wallet cap + save
-            async with economy_lock:
-                b = int(economy.get("treasury", 0))
-                paying = min(amt, b)
-                if paying <= 0:
-                    await interaction.response.send_message("💀 Bank is empty.", ephemeral=True); return
+helpers = dict(
+    economy=economy,
+    economy_lock=economy_lock,
+    _user=_user,
+    _cap_wallet=_cap_wallet,
+    _save_bank=_save_bank,
+    fmt_bread=fmt_bread,
+)
 
-                u = _user(interaction.user.id)
-                before = u["balance"]
-                final, skim = _cap_wallet(before + paying)
-                delta = final - before
-                if delta <= 0:
-                    await interaction.response.send_message("You’re at wallet cap.", ephemeral=True); return
-
-                u["balance"] = final
-                economy["treasury"] = b - delta + skim
-                await _save_bank()
-
-            self.claimed = True
-            # reset progressive for this channel
-            _PROG_SIMPLE["chan"][cid] = _PROG_SIMPLE["base"]
-
-            try:
-                await interaction.response.edit_message(
-                    content=f"🎉 {interaction.user.mention} grabbed **{fmt_bread(delta)}**!",
-                    view=None
-                )
-                _usd_asyncio.create_task(_usd_safe_delete_message(interaction.message, delay=5))
-            except Exception:
-                pass
-            self.stop()
-
-    view = _USD_ClaimView(timeout=45)
-    try:
-        msg = await ch.send(f"💰 Get that bred degens! {fmt_bread(amt)}", view=view)
-    except Exception:
-        await ctx.send("⚠️ I can’t send messages here."); return
-
-    # wait for claim; if none, bump progressive and tidy up
-    async def _usd_watch_and_bump():
-        try:
-            await view.wait()
-        except Exception:
-            pass
-        if not view.claimed:
-            _PROG_SIMPLE["chan"][cid] = min(_PROG_SIMPLE["chan"][cid] + _PROG_SIMPLE["step"], _PROG_SIMPLE["cap"])
-            try:
-                await msg.edit(content=f"⏳ Drop expired. Next grows to **{fmt_bread(_PROG_SIMPLE['chan'][cid])}**.", view=None)
-                _usd_asyncio.create_task(_usd_safe_delete_message(msg, delay=8))
-            except Exception:
-                pass
-
-    _usd_asyncio.create_task(_usd_watch_and_bump())
-# ================= end ultra-simple drop command =================
-
+# Owner-only test command: !testrx
+setup_reaction_drops(bot, helpers, owner_id=939225086341296209)
+# ---------------------------------------------------
 
 bot.run(TOKEN)
