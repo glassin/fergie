@@ -2254,3 +2254,33 @@ except Exception as _e:
     # Soft fail; listener may be added later or manually.
     pass
 # ======================================================================================
+
+
+
+# --- Robust post-ready installer for chat-drops listener ---
+import asyncio as _asyncio
+
+async def _chatdrops_post_ready_install():
+    # wait for bot, then add listener safely
+    try:
+        b = globals().get("bot")
+        if not b:
+            return
+        await b.wait_until_ready()
+        _drops_init()
+        # avoid double-registration
+        try:
+            b.remove_listener(_drops_on_message, "on_message")
+        except Exception:
+            pass
+        b.add_listener(_drops_on_message, "on_message")
+    except Exception as _e:
+        # swallow install errors; better to fail silently than crash bot startup
+        pass
+
+try:
+    if "bot" in globals():
+        _asyncio.get_event_loop().create_task(_chatdrops_post_ready_install())
+except Exception:
+    pass
+# -----------------------------------------------------------------------------
