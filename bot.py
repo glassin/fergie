@@ -2134,8 +2134,8 @@ class _ProgState:
                 self.current[cid] = min(self.current.get(cid, self.cfg.base) + self.cfg.step, self.cfg.cap)
                 try:
                     await msg.edit(content=f"⏳ Drop expired. Next grows to **{self.fmt(self.current[cid])}**.", view=None)
-                _asyncio.create_task(_safe_delete_message(msg, delay=8))
-                except Exception:
+                    _asyncio.create_task(_safe_delete_message(msg, delay=8))
+            except Exception:
                     pass
             self.active_msgs.pop(mid, None)
 
