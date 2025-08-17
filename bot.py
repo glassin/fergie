@@ -11,7 +11,7 @@ import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
-CHANNEL_ID  = int(os.getenv("CHANNEL_ID", "0"))
+CHANNEL_ID  = 1273436116699058290
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
 # Postgres (Neon/Supabase/Railway)
@@ -193,7 +193,7 @@ BRATTY_LINES = [
 ]
 
 FERAL_LINES = [
-    "I’m about to throw bread crumbs EVERYWHERE","LET ME SCREAM INTO A LOAF"
+    "I’m about to throw bread crumbs EVERYWHERE","LET ME SCREAM INTO A LOAF","JONATHAN DILE!", "I'm so tired", "WHY are people so retarded!!!", "LISTEN", "I WANT BIG",
 ]
 
 REACTION_EMOTES = ["🤭","😏","😢","😊","🙄","💗","🫶"]
