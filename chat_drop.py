@@ -108,13 +108,16 @@ class ChatDropCog(commands.Cog):
 
     @commands.command()
     @commands.has_permissions(manage_guild=True)
-    async def chatdrop_debug(self, ctx):
-        drop = self.drops.get(ctx.channel.id)
-        status = f"Drop: {drop}" if drop else "No active drop."
-        await ctx.send(
-            f"ChatDrop loaded ✅ Chance={self.chance}, MinInterval={self.min_interval}s, Window={self.window}s, ClaimWindow={self.claim_window}s
-{status}"
-        )
+async def setup(bot):
+    await bot.add_cog(ChatDropCog(bot))
+    print(
+        f"✅ ChatDrop loaded | Chance={ChatDropCog.CHATDROP_CHANCE} | "
+        f"MinInterval={ChatDropCog.CHATDROP_MIN_INTERVAL_SEC}s | "
+        f"Window={ChatDropCog.CHATDROP_WINDOW_SEC}s | "
+        f"ClaimWindow={ChatDropCog.CHATDROP_CLAIM_WINDOW_SEC}s"
+    )
+
+
 
     @commands.command()
     @commands.has_permissions(manage_guild=True)
