@@ -2277,7 +2277,7 @@ async def _chatdrops_post_ready_install():
             b.remove_listener(_drops_on_message, "on_message")
         except Exception:
             pass
-        b.add_listener(_drops_on_message, "on_message"); print("[chatdrops] listener installed")
+        b.add_listener(_drops_on_message, "on_message"); print("[chatdrops] listener installed (post-ready)")
     except Exception as _e:
         # swallow install errors; better to fail silently than crash bot startup
         pass
@@ -2288,3 +2288,23 @@ try:
 except Exception:
     pass
 # -----------------------------------------------------------------------------
+print("[chatdrops] v5 module patch loaded")
+
+
+# ---- on_ready hook to ensure chatdrops installs ----
+async def _chatdrops_on_ready():
+    print("[chatdrops] on_ready hook firing")
+    _drops_init()
+    try:
+        bot.remove_listener(_drops_on_message, "on_message")
+    except Exception:
+        pass
+    bot.add_listener(_drops_on_message, "on_message")
+    print("[chatdrops] listener installed via on_ready")
+
+try:
+    if "bot" in globals():
+        bot.add_listener(_chatdrops_on_ready, "on_ready")
+except Exception as _e:
+    print("[chatdrops] failed to add on_ready listener:", _e)
+# ----------------------------------------------------
