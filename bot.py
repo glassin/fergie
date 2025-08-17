@@ -2258,8 +2258,8 @@ def start_progressive_drops(bot):
                     pass
 
         try:
-            bot.add_listener(_progdrops_debug_on_message, "on_message")
-            print("[progdrops] debug command installed (!testdrop, owner-only)")
+            # (debug on_message listener removed; using decorator command instead)
+            print("[progdrops] debug command (decorator) ready")
         except Exception as _e:
             print("[progdrops] failed to install debug command:", _e)
 
@@ -2267,3 +2267,40 @@ def start_progressive_drops(bot):
         print("[progdrops] failed to start:", _e)
 
 # =================== end Progressive Timed Drops (Button-based) ===================
+
+
+
+# ---------------- Owner-only decorator command: !testdrop ----------------
+# This uses your existing command router. Only the specified user ID can run it.
+from discord.ext import commands as _dbg_commands
+
+@bot.command(name="testdrop")
+async def _dbg_testdrop(ctx):
+    if ctx.author.id != 939225086341296209:
+        return
+    try:
+        # ensure progressive system started
+        try:
+            _ = _PROGDROPS_STATE
+        except NameError:
+            await ctx.send("debug: progressive system not initialized."); return
+        if _PROGDROPS_STATE is None:
+            await ctx.send("debug: progressive system not ready."); return
+
+        # ensure this channel has a progressive amount set
+        _PROGDROPS_STATE.current.setdefault(ctx.channel.id, _PROGDROPS_CFG.base)
+
+        # check bank so test gives useful feedback
+        bank = int(_PROGDROPS_STATE.bank.get("treasury", 0))
+        if bank <= 0:
+            await ctx.send("💀 Bank is empty (debug). Seed treasury and try again.")
+            return
+
+        # spawn a real drop here
+        await _PROGDROPS_STATE.spawn(ctx.channel)
+    except Exception as _e:
+        try:
+            await ctx.send(f"debug error: {_e}")
+        except Exception:
+            pass
+# ------------------------------------------------------------------------
