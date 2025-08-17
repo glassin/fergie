@@ -628,6 +628,179 @@ def _pick_three_times_today_pt(n: int = 3):
     return list(times)
 
 # ================== Events ==================
+
+# ===================== Chat Drops (no cogs) =====================
+from dataclasses import dataclass, asdict
+from typing import Dict, Set, Optional
+
+@dataclass
+class _DropConfig:
+    base_tick: int = 1
+    bonus_choices: tuple = (5, 10, 20)
+    bonus_chance: float = 0.06
+    min_msg_len: int = 4
+    channel_tick_cooldown_sec: int = 8
+    per_user_tick_cooldown_sec: int = 12
+    per_user_claim_cooldown_sec: int = 120
+    split_mode: bool = False
+    split_first_n: int = 3
+    claim_window_sec: int = 45
+    channel_claim_cooldown_sec: int = 45
+    min_treasury_to_allow_claim: int = 1
+    clamp_payout_to_treasury: bool = True
+
+_chatdrop_state = {
+    "cfg": _DropConfig(),
+    "now": None,
+    "fmt": None,
+    "cap_wallet": None,
+    "get_user": None,
+    "save_bank": None,
+    "economy": None,
+    "lock": None,
+    "channel_pot": {},
+    "last_tick_ts": {},
+    "user_last_tick": {},
+    "channel_last_claim_ts": {},
+    "user_last_claim_ts": {},
+    "open_claims": {},
+}
+
+def init_chat_drops(*, now, fmt_bread, cap_wallet, get_user, save_bank, economy, economy_lock, config: Optional[_DropConfig]=None):
+    if config:
+        _chatdrop_state["cfg"] = config
+    _chatdrop_state["now"] = now
+    _chatdrop_state["fmt"] = fmt_bread
+    _chatdrop_state["cap_wallet"] = cap_wallet
+    _chatdrop_state["get_user"] = get_user
+    _chatdrop_state["save_bank"] = save_bank
+    _chatdrop_state["economy"] = economy
+    _chatdrop_state["lock"] = economy_lock
+
+def _cd_can_tick(channel_id: int, user_id: int, content: str) -> bool:
+    cfg = _chatdrop_state["cfg"]
+    s = (content or "").strip()
+    if len(s) < cfg.min_msg_len or s.startswith("!"):
+        return False
+    now = _chatdrop_state["now"]()
+    if now - _chatdrop_state["last_tick_ts"].get(channel_id, 0) < cfg.channel_tick_cooldown_sec:
+        return False
+    if now - _chatdrop_state["user_last_tick"].get((channel_id, user_id), 0) < cfg.per_user_tick_cooldown_sec:
+        return False
+    return True
+
+def _cd_tick_amount() -> int:
+    cfg = _chatdrop_state["cfg"]
+    amt = cfg.base_tick
+    if random.random() < cfg.bonus_chance:
+        amt += random.choice(cfg.bonus_choices)
+    return amt
+
+def _cd_open_claim_if_needed(channel_id: int):
+    if channel_id not in _chatdrop_state["open_claims"]:
+        _chatdrop_state["open_claims"][channel_id] = {"opened": _chatdrop_state["now"](), "claimants": set()}
+
+def _cd_claim_window_active(channel_id: int) -> bool:
+    cfg = _chatdrop_state["cfg"]
+    win = _chatdrop_state["open_claims"].get(channel_id)
+    return bool(win) and (_chatdrop_state["now"]() - win["opened"] <= cfg.claim_window_sec)
+
+async def chatdrops_on_message(message, *, send):
+    if getattr(message.author, "bot", False) or not getattr(message, "guild", None):
+        return
+    ch_id = message.channel.id
+    u_id = message.author.id
+    if not _cd_can_tick(ch_id, u_id, getattr(message, "content", "")):
+        return
+    amt = _cd_tick_amount()
+    pot = _chatdrop_state["channel_pot"].get(ch_id, 0) + amt
+    _chatdrop_state["channel_pot"][ch_id] = pot
+    now = _chatdrop_state["now"]()
+    _chatdrop_state["last_tick_ts"][ch_id] = now
+    _chatdrop_state["user_last_tick"][(ch_id, u_id)] = now
+
+async def chatdrops_cmd_pot(ctx):
+    ch_id = ctx.channel.id
+    fmt = _chatdrop_state["fmt"]
+    pot = _chatdrop_state["channel_pot"].get(ch_id, 0)
+    await ctx.send(f"🥖 pot in this channel: **{fmt(pot)}**")
+
+async def chatdrops_cmd_get(ctx):
+    cfg = _chatdrop_state["cfg"]
+    fmt = _chatdrop_state["fmt"]
+    ch_id = ctx.channel.id
+    u_id = ctx.author.id
+    pot = int(_chatdrop_state["channel_pot"].get(ch_id, 0))
+    if pot <= 0:
+        await ctx.send("No bread here right now. Keep chatting!"); return
+    t = _chatdrop_state["now"]()
+    if t - _chatdrop_state["channel_last_claim_ts"].get(ch_id, 0) < cfg.channel_claim_cooldown_sec:
+        await ctx.send("⏳ This channel just had a claim. Give it a moment."); return
+    if t - _chatdrop_state["user_last_claim_ts"].get(u_id, 0) < cfg.per_user_claim_cooldown_sec:
+        await ctx.send("Take a breather before claiming again."); return
+    _cd_open_claim_if_needed(ch_id)
+    if not _cd_claim_window_active(ch_id):
+        _chatdrop_state["open_claims"].pop(ch_id, None)
+        await ctx.send("Claim window expired. Try `!get` again to reopen."); return
+    claim = _chatdrop_state["open_claims"][ch_id]
+    claimants = claim["claimants"]
+    if cfg.split_mode:
+        if u_id in claimants:
+            await ctx.send("You’re already in on this split."); return
+        claimants.add(u_id)
+        remaining = cfg.split_first_n - len(claimants)
+        if remaining > 0 and _cd_claim_window_active(ch_id):
+            await ctx.send(f"{ctx.author.mention} joined the split! Need {remaining} more.")
+            return
+        winners = list(claimants)[: cfg.split_first_n]
+    else:
+        if claimants:
+            await ctx.send("Someone already claimed this round."); return
+        claimants.add(u_id)
+        winners = [u_id]
+    async with _chatdrop_state["lock"]:
+        bank = int(_chatdrop_state["economy"].get("treasury", 0))
+        if bank < cfg.min_treasury_to_allow_claim:
+            _chatdrop_state["open_claims"].pop(ch_id, None)
+            await ctx.send("💀 The bank is empty. No payout.")
+            return
+        paying = min(pot, bank) if cfg.clamp_payout_to_treasury else pot
+        if paying <= 0:
+            _chatdrop_state["open_claims"].pop(ch_id, None)
+            await ctx.send("💀 The bank is empty. No payout.")
+            return
+        if cfg.split_mode:
+            per = max(1, paying // max(1, len(winners)))
+            total_paid = per * len(winners)
+        else:
+            per = paying
+            total_paid = paying
+        actually_paid_total = 0
+        cap_skim_total = 0
+        for uid in winners:
+            u = _chatdrop_state["get_user"](uid)
+            before = u["balance"]
+            new_bal = before + per
+            final_bal, skim = _chatdrop_state["cap_wallet"](new_bal)
+            delta = final_bal - before
+            if delta > 0:
+                u["balance"] = final_bal
+                actually_paid_total += delta
+            cap_skim_total += skim
+        _chatdrop_state["economy"]["treasury"] = bank - actually_paid_total + cap_skim_total
+        await _chatdrop_state["save_bank"]()
+    _chatdrop_state["channel_pot"][ch_id] = max(0, pot - actually_paid_total)
+    _chatdrop_state["open_claims"].pop(ch_id, None)
+    _chatdrop_state["channel_last_claim_ts"][ch_id] = _chatdrop_state["now"]()
+    for uid in winners:
+        _chatdrop_state["user_last_claim_ts"][uid] = _chatdrop_state["now"]()
+    if cfg.split_mode:
+        mentions = ", ".join(f"<@{uid}>" for uid in winners)
+        await ctx.send(f"🎉 Split drop! {mentions} each got **{fmt(per)}** "
+                       f"(paid {fmt(actually_paid_total)} total). Pot now {fmt(_chatdrop_state['channel_pot'][ch_id])}.")
+    else:
+        await ctx.send(f"🎉 {ctx.author.mention} claimed **{fmt(actually_paid_total)}**! "
+                       f"Pot now {fmt(_chatdrop_state['channel_pot'][ch_id])}.")
 @bot.event
 async def on_ready():
 
@@ -660,10 +833,10 @@ async def on_ready():
             "economy_lock": economy_lock,
         }
         if not hasattr(bot, "_chatdrop_loaded"):
-            bot.add_cog(ChatDropCog(bot, helpers))
+            init_chat_drops(now=_now, fmt_bread=_fmt_bread, cap_wallet=_cap_wallet, get_user=_user, save_bank=_save_bank, economy=economy, economy_lock=economy_lock)
             bot._chatdrop_loaded = True
     except Exception as e:
-        print("ChatDropCog load error:", e)
+        print("ChatDrops init error:", e)
 
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
@@ -743,6 +916,11 @@ async def on_message(message: discord.Message):
 
     content = (message.content or "")
     lower = content.lower().strip()
+
+    # Chat drops pot grow
+    async def _send(t):
+        await message.channel.send(t)
+    await chatdrops_on_message(message, send=_send)
 
     # Process commands first
     if content.strip().startswith("!"):
@@ -2001,3 +2179,30 @@ if __name__ == "__main__":
     if 'REACTION_EMOETS' in globals():
         pass
     bot.run(TOKEN)
+
+
+# === Chat drop commands (no cogs) ===
+@bot.command(name="pot", help="Show the current bread pot for this channel")
+async def _cmd_pot(ctx: commands.Context):
+    await chatdrops_cmd_pot(ctx)
+
+@bot.command(name="get", help="Claim the bread pot in this channel")
+async def _cmd_get(ctx: commands.Context):
+    await chatdrops_cmd_get(ctx)
+
+@bot.command(name="dropsettings", help="Show bread drop settings")
+async def _cmd_dropsettings(ctx: commands.Context):
+    from dataclasses import asdict
+    d = asdict(_chatdrop_state["cfg"])
+    lines = [f"**{k}**: {v}" for k, v in d.items()]
+    await ctx.send("Bread drop settings:\n" + "\n".join(lines))
+
+@bot.command(name="drop", help="(Admin) Manually add to the pot in this channel")
+@commands.has_permissions(manage_guild=True)
+async def _cmd_drop_admin(ctx: commands.Context, amount: int):
+    if amount <= 0:
+        await ctx.send("Amount must be > 0"); return
+    ch_id = ctx.channel.id
+    fmt = _chatdrop_state["fmt"]
+    _chatdrop_state["channel_pot"][ch_id] = _chatdrop_state["channel_pot"].get(ch_id, 0) + int(amount)
+    await ctx.send(f"🛠️ Added {fmt(amount)} to this channel’s pot (now {fmt(_chatdrop_state['channel_pot'][ch_id])}).")
