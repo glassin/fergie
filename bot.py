@@ -2069,7 +2069,7 @@ class ChatDropCog(commands.Cog):
 # ===== Setup function =====
 async def setup(bot: commands.Bot):
     helpers = bot.helpers
-    await await bot.add_cog(ChatDropCog(bot, helpers))
+    await bot.add_cog(ChatDropCog(bot, helpers))
 
 
 
