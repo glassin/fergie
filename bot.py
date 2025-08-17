@@ -75,6 +75,7 @@ FIT_FOLLOWUP_TEXT  = "you know you'd look good in this girlie! you go girl! âœ‚ï
 
 # ---------- Bonk Papo schedule (3 times/day random) ----------
 BONK_PAPO_USER_ID = 1028310674318839878
+BONK_PAPO_CHANNEL_ID = 1131644171455844455  # channel for bonk posts
 BONK_PAPO_TEXT = "stop being horny papo! bad papo! <a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788>"
 
 intents = discord.Intents.default()
@@ -603,15 +604,24 @@ def _pick_two_random_times_today():
         t2 = rand_dt()
     return sorted([t1, t2])
 
-def _pick_three_times_today_pt():
-    tz = ZoneInfo("America/Los_Angeles")
-    today = datetime.now(tz=tz).date()
-    start = datetime.combine(today, dtime(hour=9, tzinfo=tz))
-    end   = datetime.combine(today, dtime(hour=22, tzinfo=tz))
-    def rand_dt():
-        delta_minutes = int((end - start).total_seconds() // 60)
-        offset = random.randint(0, delta_minutes)
-        return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
+def _today_key_pt() -> str:
+    return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+
+def _pick_three_times_today_pt(n: int = 3):
+    today_pt = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    start_pt = datetime.combine(today_pt, dtime(hour=9), tzinfo=ZoneInfo("America/Los_Angeles"))
+    end_pt   = datetime.combine(today_pt, dtime(hour=22), tzinfo=ZoneInfo("America/Los_Angeles"))
+    total_minutes = int((end_pt - start_pt).total_seconds() // 60)
+
+    def rand_dt_utc():
+        offset = random.randint(0, total_minutes)
+        when_pt = start_pt + timedelta(minutes=offset)
+        return when_pt.astimezone(timezone.utc).replace(second=0, microsecond=0)
+
+    times = {rand_dt_utc() for _ in range(n)}
+    while len(times) < n:
+        times.add(rand_dt_utc())
+    return sorted(times)
     times = sorted({rand_dt() for _ in range(3)})
     while len(times) < 3:
         times.add(rand_dt())
@@ -698,22 +708,22 @@ async def bonk_papo_scheduler():
     if not hasattr(bot, "_bonk_times") or not bot._bonk_times:
         bot._bonk_times = _pick_three_times_today_pt()
         bot._bonked = set()
-        bot._bonk_day = _today_key()
+        bot._bonk_day = _today_key_pt()
 
     now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+
     for t in bot._bonk_times:
         key = t.isoformat()
-        if now_utc == t and key not in getattr(bot, "_bonked", set()):
-            ch = bot.get_channel(CHANNEL_ID)
+        if abs((now_utc - t).total_seconds()) <= 60 and key not in bot._bonked:
+            ch = bot.get_channel(BONK_PAPO_CHANNEL_ID) or await bot.fetch_channel(BONK_PAPO_CHANNEL_ID)
             if ch:
                 await ch.send(f"<@{BONK_PAPO_USER_ID}> {BONK_PAPO_TEXT}")
             bot._bonked.add(key)
 
-    # reset per new day
-    if _today_key() != getattr(bot, "_bonk_day", None):
+    if _today_key_pt() != bot._bonk_day:
         bot._bonk_times = _pick_three_times_today_pt()
         bot._bonked = set()
-        bot._bonk_day = _today_key()
+        bot._bonk_day = _today_key_pt()
 
 @bonk_papo_scheduler.before_loop
 async def _bonk_wait():
