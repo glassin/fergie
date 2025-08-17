@@ -2135,7 +2135,7 @@ class _ProgState:
                 try:
                     await msg.edit(content=f"⏳ Drop expired. Next grows to **{self.fmt(self.current[cid])}**.", view=None)
                     _asyncio.create_task(_safe_delete_message(msg, delay=8))
-            except Exception:
+                except Exception:
                     pass
             self.active_msgs.pop(mid, None)
 
@@ -2206,6 +2206,11 @@ def _progdrops_setup(bot):
 
     return _tick, state, cfg
 
+# global refs for debug and visibility
+_PROGDROPS_TICK = None
+_PROGDROPS_STATE = None
+_PROGDROPS_CFG = None
+
 # one-time guard
 try:
     _PROGDROPS_STARTED
@@ -2223,6 +2228,41 @@ def start_progressive_drops(bot):
         tick.start()
         _PROGDROPS_STARTED = True
         print("[progdrops] started: interval=120s, base=5, step=5, cap=50, split_n=1")
+        # store globals for debug access
+        global _PROGDROPS_TICK, _PROGDROPS_STATE, _PROGDROPS_CFG
+        _PROGDROPS_TICK, _PROGDROPS_STATE, _PROGDROPS_CFG = tick, state, cfg
+
+        # debug-only message command: !testdrop (restricted to a single user ID)
+        async def _progdrops_debug_on_message(msg):
+            try:
+                if getattr(msg.author, "bot", False) or not getattr(msg, "guild", None):
+                    return
+                content = (getattr(msg, "content", "") or "").strip().lower()
+                if not content.startswith("!testdrop"):
+                    return
+                if msg.author.id != 939225086341296209:
+                    return  # not authorized
+                ch = msg.channel
+                # Ensure we have a progressive amount for this channel
+                _PROGDROPS_STATE.current.setdefault(ch.id, _PROGDROPS_CFG.base)
+                # Bank check so the user sees feedback if empty
+                bank = int(_PROGDROPS_STATE.bank.get("treasury", 0))
+                if bank <= 0:
+                    await ch.send("💀 Bank is empty (debug). Seed treasury to test.")
+                    return
+                await _PROGDROPS_STATE.spawn(ch)
+            except Exception as _e:
+                try:
+                    await msg.channel.send(f"debug error: {{_e}}")
+                except Exception:
+                    pass
+
+        try:
+            bot.add_listener(_progdrops_debug_on_message, "on_message")
+            print("[progdrops] debug command installed (!testdrop, owner-only)")
+        except Exception as _e:
+            print("[progdrops] failed to install debug command:", _e)
+
     except Exception as _e:
         print("[progdrops] failed to start:", _e)
 
