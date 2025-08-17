@@ -2017,6 +2017,15 @@ from typing import Dict as _Dict, Optional as _Optional, List as _List, Set as _
 import discord as _discord
 from discord.ext import tasks as _tasks
 
+
+async def _safe_delete_message(_msg, delay: int = 5):
+    try:
+        await _asyncio.sleep(delay)
+        await _msg.delete()
+    except Exception:
+        pass
+
+
 @_dataclass
 class _ProgCfg:
     interval_sec: int = 120         # how often we check for activity / post a drop
@@ -2091,6 +2100,7 @@ class _ProgState:
                         state["claimed"] = True
                         self.outer.current[cid] = self.outer.cfg.base
                         await interaction.response.edit_message(content=f"🎉 Split! Each got **{self.outer.fmt(per)}**.", view=None)
+                        _asyncio.create_task(_safe_delete_message(interaction.message, delay=5))
                         return
                     else:
                         # winner takes all
@@ -2106,6 +2116,7 @@ class _ProgState:
                         state["claimed"] = True
                         self.outer.current[cid] = self.outer.cfg.base
                         await interaction.response.edit_message(content=f"🎉 {interaction.user.mention} grabbed **{self.outer.fmt(delta)}**!", view=None)
+                        _asyncio.create_task(_safe_delete_message(interaction.message, delay=5))
                         return
 
         view.add_item(_Claim(self))
@@ -2123,6 +2134,7 @@ class _ProgState:
                 self.current[cid] = min(self.current.get(cid, self.cfg.base) + self.cfg.step, self.cfg.cap)
                 try:
                     await msg.edit(content=f"⏳ Drop expired. Next grows to **{self.fmt(self.current[cid])}**.", view=None)
+                _asyncio.create_task(_safe_delete_message(msg, delay=8))
                 except Exception:
                     pass
             self.active_msgs.pop(mid, None)
