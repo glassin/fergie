@@ -663,7 +663,8 @@ async def on_ready():
 #             bot.add_cog(ChatDropCog(bot, helpers))  # disabled: chat-drops listener handles drops now
             bot._chatdrop_loaded = True
     except Exception as e:
-#         print("ChatDropCog load error:", e)  # disabled: chat-drops listener handles drops now
+        # print("ChatDropCog load error:", e)  # disabled: chat-drops listener handles drops now
+        pass
 
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
