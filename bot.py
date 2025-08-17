@@ -666,7 +666,7 @@ async def on_ready():
 #         print("ChatDropCog load error:", e)  # disabled (replaced by progressive timed drops)
         pass
     print(f"Logged in as {bot.user}")
-    start_progressive_drops(bot)
+    setup_progressive_drops(bot)
     four_hour_post.start()
     six_hour_emoji.start()
     user1_twice_daily_fixed.start()
@@ -2217,7 +2217,7 @@ try:
 except NameError:
     _PROGDROPS_STARTED = False
 
-def start_progressive_drops(bot):
+def setup_progressive_drops(bot):
     global _PROGDROPS_STARTED
     if _PROGDROPS_STARTED:
         return
@@ -2304,3 +2304,8 @@ async def _dbg_testdrop(ctx):
         except Exception:
             pass
 # ------------------------------------------------------------------------
+
+
+# Backwards-compatible alias
+def setup_progressive_drops(bot):
+    return setup_progressive_drops(bot)
