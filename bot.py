@@ -1,6 +1,7 @@
 import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re
 import re
 from discord.ext import tasks, commands
+from chat_drop_cog import ChatDropCog
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
@@ -85,6 +86,9 @@ intents.message_content = True
 intents.members = True
 # Disable default help and replace with !halp
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+
+bot.add_cog(ChatDropCog(bot))
+
 
 # ===================== Bread Economy Settings =====================
 # Global hard cap on TOTAL currency in existence (bank + all users).
