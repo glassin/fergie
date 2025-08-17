@@ -660,13 +660,12 @@ async def on_ready():
             "economy_lock": economy_lock,
         }
         if not hasattr(bot, "_chatdrop_loaded"):
-#             bot.add_cog(ChatDropCog(bot, helpers))  # disabled (replaced by progressive timed drops)
+            bot.add_cog(ChatDropCog(bot, helpers))
             bot._chatdrop_loaded = True
     except Exception as e:
-#         print("ChatDropCog load error:", e)  # disabled (replaced by progressive timed drops)
-        pass
+        print("ChatDropCog load error:", e)
+
     print(f"Logged in as {bot.user}")
-    # setup_progressive_drops(bot)  # autostarted post-ready
     four_hour_post.start()
     six_hour_emoji.start()
     user1_twice_daily_fixed.start()
@@ -2004,352 +2003,110 @@ if __name__ == "__main__":
     bot.run(TOKEN)
 
 
-# ===================== Progressive Timed Drops (Button-based) =====================
-# Drops appear every 2 minutes in channels that had activity in the last 2 minutes.
-# Amount grows on missed drops, resets on claim. Uses your economy + wallet cap.
-# No on_message hooks, no decorators required.
 
-import asyncio as _asyncio
-import datetime as _dt
-from dataclasses import dataclass as _dataclass
-from typing import Dict as _Dict, Optional as _Optional, List as _List, Set as _Set
+# ======= ultra-simple owner-only drop command (no timers, no listeners) =======
+# Requirements: helpers exist: now, fmt_bread, _user, _cap_wallet, _save_bank, economy, economy_lock
+# Usage: owner types `!testdrop` in any channel -> button appears -> first click wins
 
-import discord as _discord
-from discord.ext import tasks as _tasks
+from discord.ext import commands as _usd_commands
+import discord as _usd_discord
+import asyncio as _usd_asyncio
 
+_DROP_OWNER_ID = 939225086341296209        # <- your ID
 
-async def _safe_delete_message(_msg, delay: int = 5):
+# per-channel progressive state (simple, in-memory)
+_PROG_SIMPLE = {"base": 5, "step": 5, "cap": 50, "chan": {}}  # chan_id -> current_amt
+
+async def _usd_safe_delete_message(_msg: _usd_discord.Message, delay: int = 6):
     try:
-        await _asyncio.sleep(delay)
+        await _usd_asyncio.sleep(delay)
         await _msg.delete()
     except Exception:
         pass
 
+@bot.command(name="testdrop")
+async def _usd_testdrop(ctx: _usd_commands.Context):
+    # owner-only
+    if ctx.author.id != _DROP_OWNER_ID:
+        return
 
-@_dataclass
-class _ProgCfg:
-    interval_sec: int = 120         # how often we check for activity / post a drop
-    active_window_sec: int = 120    # channel considered "active" if last message within this window
-    claim_window_sec: int = 45      # seconds to claim before it expires
-    base: int = 5                   # base drop
-    step: int = 5                   # grows by this on each miss
-    cap: int = 50                   # max drop
-    split_n: int = 1                # 1 = first click wins; >1 = split among first N
-    channels_whitelist: _Optional[_List[int]] = None  # if set, only these channels
+    ch = ctx.channel
+    cid = ch.id
+    # current progressive amount for this channel
+    amt = _PROG_SIMPLE["chan"].get(cid, _PROG_SIMPLE["base"])
+    amt = max(_PROG_SIMPLE["base"], min(amt, _PROG_SIMPLE["cap"]))
+    _PROG_SIMPLE["chan"][cid] = amt  # ensure present
 
-class _ProgState:
-    def __init__(self, cfg: _ProgCfg, helpers):
-        self.cfg = cfg
-        self.now = helpers["now"]
-        self.fmt = helpers["fmt_bread"]
-        self.get_user = helpers["_user"]
-        self.cap_wallet = helpers["_cap_wallet"]
-        self.save_bank = helpers["_save_bank"]
-        self.bank = helpers["economy"]
-        self.lock = helpers["economy_lock"]
-        self.current: _Dict[int, int] = {}      # channel_id -> current progressive amount
-        self.active_msgs: _Dict[int, int] = {}  # message_id -> channel_id
+    # treasury check for useful feedback (no inflation)
+    try:
+        bank = int(economy.get("treasury", 0))
+    except Exception:
+        await ctx.send("⚠️ economy not ready"); return
+    if bank <= 0:
+        await ctx.send("💀 Bank is empty (debug). Seed treasury and try again.")
+        return
 
-    async def spawn(self, ch: _discord.TextChannel):
-        cid = ch.id
-        amt = max(self.cfg.base, min(self.current.get(cid, self.cfg.base), self.cfg.cap))
+    class _USD_ClaimView(_usd_discord.ui.View):
+        def __init__(self, *, timeout: float = 45):
+            super().__init__(timeout=timeout)
+            self.claimed = False
 
-        # If treasury is empty, skip drop (still bump progressively on next time if expired previously)
-        try:
-            if int(self.bank.get("treasury", 0)) <= 0:
-                return
-        except Exception:
-            return
+        @_usd_discord.ui.button(label="Claim", style=_usd_discord.ButtonStyle.success)
+        async def claim(self, interaction: _usd_discord.Interaction, button: _usd_discord.ui.Button):
+            if self.claimed:
+                await interaction.response.send_message("Already claimed.", ephemeral=True); return
 
-        view = _discord.ui.View(timeout=self.cfg.claim_window_sec)
-        state = {"claimed": False, "claimants": set()}
-        self.current.setdefault(cid, self.cfg.base)
+            # payout under lock with wallet cap + save
+            async with economy_lock:
+                b = int(economy.get("treasury", 0))
+                paying = min(amt, b)
+                if paying <= 0:
+                    await interaction.response.send_message("💀 Bank is empty.", ephemeral=True); return
 
-        class _Claim(_discord.ui.Button):
-            def __init__(self, outer):
-                super().__init__(label=f"Claim {outer.fmt(amt)}", style=_discord.ButtonStyle.success)
-                self.outer = outer
+                u = _user(interaction.user.id)
+                before = u["balance"]
+                final, skim = _cap_wallet(before + paying)
+                delta = final - before
+                if delta <= 0:
+                    await interaction.response.send_message("You’re at wallet cap.", ephemeral=True); return
 
-            async def callback(self, interaction: _discord.Interaction):
-                if state["claimed"]:
-                    await interaction.response.send_message("Already claimed.", ephemeral=True); return
-                async with self.outer.lock:
-                    bank = int(self.outer.bank.get("treasury", 0))
-                    paying = min(amt, bank)
-                    if paying <= 0:
-                        await interaction.response.send_message("💀 Bank is empty.", ephemeral=True); return
+                u["balance"] = final
+                economy["treasury"] = b - delta + skim
+                await _save_bank()
 
-                    if self.outer.cfg.split_n > 1:
-                        state["claimants"].add(interaction.user.id)
-                        if len(state["claimants"]) < self.outer.cfg.split_n:
-                            await interaction.response.send_message("You're in — waiting for others...", ephemeral=True); return
-                        winners = list(state["claimants"])[: self.outer.cfg.split_n]
-                        per = max(1, paying // len(winners))
-                        actually_paid = 0; skim_total = 0
-                        for uid in winners:
-                            u = self.outer.get_user(uid)
-                            before = u["balance"]
-                            final, skim = self.outer.cap_wallet(before + per)
-                            delta = final - before
-                            if delta > 0:
-                                u["balance"] = final
-                                actually_paid += delta
-                            skim_total += skim
-                        self.outer.bank["treasury"] = bank - actually_paid + skim_total
-                        await self.outer.save_bank()
-                        state["claimed"] = True
-                        self.outer.current[cid] = self.outer.cfg.base
-                        await interaction.response.edit_message(content=f"🎉 Split! Each got **{self.outer.fmt(per)}**.", view=None)
-                        _asyncio.create_task(_safe_delete_message(interaction.message, delay=5))
-                        return
-                    else:
-                        # winner takes all
-                        u = self.outer.get_user(interaction.user.id)
-                        before = u["balance"]
-                        final, skim = self.outer.cap_wallet(before + paying)
-                        delta = final - before
-                        if delta <= 0:
-                            await interaction.response.send_message("You're at wallet cap.", ephemeral=True); return
-                        self.outer.bank["treasury"] = bank - delta + skim
-                        u["balance"] = final
-                        await self.outer.save_bank()
-                        state["claimed"] = True
-                        self.outer.current[cid] = self.outer.cfg.base
-                        await interaction.response.edit_message(content=f"🎉 {interaction.user.mention} grabbed **{self.outer.fmt(delta)}**!", view=None)
-                        _asyncio.create_task(_safe_delete_message(interaction.message, delay=5))
-                        return
+            self.claimed = True
+            # reset progressive for this channel
+            _PROG_SIMPLE["chan"][cid] = _PROG_SIMPLE["base"]
 
-        view.add_item(_Claim(self))
-        msg = await ch.send(f"💰 Get that bred degens! {self.fmt(amt)}", view=view)
-        mid = msg.id
-        self.active_msgs[mid] = cid
-
-        async def _wait_and_bump():
             try:
-                await view.wait()
+                await interaction.response.edit_message(
+                    content=f"🎉 {interaction.user.mention} grabbed **{fmt_bread(delta)}**!",
+                    view=None
+                )
+                _usd_asyncio.create_task(_usd_safe_delete_message(interaction.message, delay=5))
             except Exception:
                 pass
-            if not state["claimed"]:
-                # no claim → increase progressive amount for this channel
-                self.current[cid] = min(self.current.get(cid, self.cfg.base) + self.cfg.step, self.cfg.cap)
-                try:
-                    await msg.edit(content=f"⏳ Drop expired. Next grows to **{self.fmt(self.current[cid])}**.", view=None)
-                    _asyncio.create_task(_safe_delete_message(msg, delay=8))
-                except Exception:
-                    pass
-            self.active_msgs.pop(mid, None)
+            self.stop()
 
-        _asyncio.create_task(_wait_and_bump())
-
-def _progdrops_setup(bot):
-    # Build helpers from globals
-    g = globals()
-    need = ["now", "fmt_bread", "_user", "_cap_wallet", "_save_bank", "economy", "economy_lock"]
-    if any(k not in g for k in need):
-        return None, None, None
-
-    cfg = _ProgCfg(
-        interval_sec=120,
-        active_window_sec=120,
-        claim_window_sec=45,
-        base=5, step=5, cap=50,
-        split_n=1,
-        channels_whitelist=None  # None = any channel
-    )
-    helpers = dict(
-        now=g["now"], fmt_bread=g["fmt_bread"], _user=g["_user"],
-        _cap_wallet=g["_cap_wallet"], _save_bank=g["_save_bank"],
-        economy=g["economy"], economy_lock=g["economy_lock"]
-    )
-    state = _ProgState(cfg, helpers)
-
-    @_tasks.loop(seconds=cfg.interval_sec)
-    async def _tick():
-        await bot.wait_until_ready()
-        # Find active text channels across all guilds
-        nowdt = _dt.datetime.utcnow()
-        active = []
-        for guild in list(bot.guilds):
-            for ch in getattr(guild, "text_channels", []):
-                if cfg.channels_whitelist and ch.id not in cfg.channels_whitelist:
-                    continue
-                # Check last message freshness via snowflake timestamp
-                last_id = getattr(ch, "last_message_id", None)
-                if not last_id:
-                    continue
-                try:
-                    last_time = _discord.utils.snowflake_time(last_id)
-                except Exception:
-                    continue
-                if (nowdt - last_time).total_seconds() <= cfg.active_window_sec:
-                    active.append(ch)
-        if not active:
-            return
-        # Choose one active channel at random for this tick
-        try:
-            ch = random.choice(active)
-        except Exception:
-            import random as _random
-            ch = _random.choice(active)
-        # Ensure progressive state for this channel exists
-        state.current.setdefault(ch.id, cfg.base)
-        # Post the drop
-        try:
-            await state.spawn(ch)
-        except Exception as e:
-            # keep bot alive if a channel errors (permissions, etc.)
-            pass
-
-    @_tick.before_loop
-    async def _before():
-        await bot.wait_until_ready()
-
-    return _tick, state, cfg
-
-# global refs for debug and visibility
-_PROGDROPS_TICK = None
-_PROGDROPS_STATE = None
-_PROGDROPS_CFG = None
-
-# one-time guard
-try:
-    _PROGDROPS_STARTED
-except NameError:
-    _PROGDROPS_STARTED = False
-
-def # setup_progressive_drops(bot)  # autostarted post-ready:
-    global _PROGDROPS_STARTED
-    if _PROGDROPS_STARTED:
-        return
-    tick, state, cfg = _progdrops_setup(bot)
-    if tick is None:
-        return
+    view = _USD_ClaimView(timeout=45)
     try:
-        tick.start()
-        _PROGDROPS_STARTED = True
-        print("[progdrops] started: interval=120s, base=5, step=5, cap=50, split_n=1")
-        # store globals for debug access
-        global _PROGDROPS_TICK, _PROGDROPS_STATE, _PROGDROPS_CFG
-        _PROGDROPS_TICK, _PROGDROPS_STATE, _PROGDROPS_CFG = tick, state, cfg
+        msg = await ch.send(f"💰 Get that bred degens! {fmt_bread(amt)}", view=view)
+    except Exception:
+        await ctx.send("⚠️ I can’t send messages here."); return
 
-        # debug-only message command: !testdrop (restricted to a single user ID)
-        async def _progdrops_debug_on_message(msg):
+    # wait for claim; if none, bump progressive and tidy up
+    async def _usd_watch_and_bump():
+        try:
+            await view.wait()
+        except Exception:
+            pass
+        if not view.claimed:
+            _PROG_SIMPLE["chan"][cid] = min(_PROG_SIMPLE["chan"][cid] + _PROG_SIMPLE["step"], _PROG_SIMPLE["cap"])
             try:
-                if getattr(msg.author, "bot", False) or not getattr(msg, "guild", None):
-                    return
-                content = (getattr(msg, "content", "") or "").strip().lower()
-                if not content.startswith("!testdrop"):
-                    return
-                if msg.author.id != 939225086341296209:
-                    return  # not authorized
-                ch = msg.channel
-                # Ensure we have a progressive amount for this channel
-                _PROGDROPS_STATE.current.setdefault(ch.id, _PROGDROPS_CFG.base)
-                # Bank check so the user sees feedback if empty
-                bank = int(_PROGDROPS_STATE.bank.get("treasury", 0))
-                if bank <= 0:
-                    await ch.send("💀 Bank is empty (debug). Seed treasury to test.")
-                    return
-                await _PROGDROPS_STATE.spawn(ch)
-            except Exception as _e:
-                try:
-                    await msg.channel.send(f"debug error: {{_e}}")
-                except Exception:
-                    pass
+                await msg.edit(content=f"⏳ Drop expired. Next grows to **{fmt_bread(_PROG_SIMPLE['chan'][cid])}**.", view=None)
+                _usd_asyncio.create_task(_usd_safe_delete_message(msg, delay=8))
+            except Exception:
+                pass
 
-        try:
-            # (debug on_message listener removed; using decorator command instead)
-            print("[progdrops] debug command (decorator) ready")
-        except Exception as _e:
-            print("[progdrops] failed to install debug command:", _e)
-
-    except Exception as _e:
-        print("[progdrops] failed to start:", _e)
-
-# =================== end Progressive Timed Drops (Button-based) ===================
-
-
-
-# ---------------- Owner-only decorator command: !testdrop ----------------
-# This uses your existing command router. Only the specified user ID can run it.
-from discord.ext import commands as _dbg_commands
-
-@bot.command(name="testdrop")
-async def _dbg_testdrop(ctx):
-    if ctx.author.id != 939225086341296209:
-        return
-    try:
-        # ensure progressive system started
-        try:
-            _ = _PROGDROPS_STATE
-        except NameError:
-            await ctx.send("debug: progressive system not initialized."); return
-        if _PROGDROPS_STATE is None:
-            await ctx.send("debug: progressive system not ready."); return
-
-        # ensure this channel has a progressive amount set
-        _PROGDROPS_STATE.current.setdefault(ctx.channel.id, _PROGDROPS_CFG.base)
-
-        # check bank so test gives useful feedback
-        bank = int(_PROGDROPS_STATE.bank.get("treasury", 0))
-        if bank <= 0:
-            await ctx.send("💀 Bank is empty (debug). Seed treasury and try again.")
-            return
-
-        # spawn a real drop here
-        await _PROGDROPS_STATE.spawn(ctx.channel)
-    except Exception as _e:
-        try:
-            await ctx.send(f"debug error: {_e}")
-        except Exception:
-            pass
-# ------------------------------------------------------------------------
-
-
-# Backwards-compatible alias
-def # setup_progressive_drops(bot)  # autostarted post-ready:
-    return # setup_progressive_drops(bot)  # autostarted post-ready
-
-
-def # start_progressive_drops(bot)  # autostarted post-ready:
-    return # setup_progressive_drops(bot)  # autostarted post-ready
-
-
-# --- progressive drops post-ready autostart ---
-import asyncio as _autost_asyncio
-async def _progdrops_autostart():
-    try:
-        await bot.wait_until_ready()
-        setup_progressive_drops(bot)
-    except Exception as _e:
-        print("[progdrops] autostart failed:", _e)
-
-try:
-    _autost_asyncio.get_event_loop().create_task(_progdrops_autostart())
-except Exception as _e:
-    print("[progdrops] cannot schedule autostart:", _e)
-# ----------------------------------------------
-
-@bot.listen("on_message")
-async def _dbg_testdrop_listener(msg):
-    try:
-        if getattr(msg.author, "bot", False) or not getattr(msg, "guild", None):
-            return
-        if msg.author.id != 939225086341296209:
-            return
-        if (msg.content or "").strip().lower() != "!testdrop":
-            return
-        try:
-            _ = _PROGDROPS_STATE
-        except NameError:
-            return
-        if _PROGDROPS_STATE is None:
-            return
-        _PROGDROPS_STATE.current.setdefault(msg.channel.id, _PROGDROPS_CFG.base)
-        bank = int(_PROGDROPS_STATE.bank.get("treasury", 0))
-        if bank <= 0:
-            await msg.channel.send("💀 Bank is empty (debug). Seed treasury."); return
-        await _PROGDROPS_STATE.spawn(msg.channel)
-    except Exception as _e:
-        try: await msg.channel.send(f"debug error: {_e}")
-        except Exception: pass
+    _usd_asyncio.create_task(_usd_watch_and_bump())
+# ================= end ultra-simple drop command =================
