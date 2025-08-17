@@ -661,7 +661,7 @@ async def on_ready():
             "economy_lock": economy_lock,
         }
         if not hasattr(bot, "_chatdrop_loaded"):
-            bot.add_cog(ChatDropCog(bot, helpers))
+           await bot.add_cog(ChatDropCog(bot, helpers))
             bot._chatdrop_loaded = True
     except Exception as e:
         print("ChatDropCog load error:", e)
