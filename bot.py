@@ -2000,8 +2000,7 @@ if __name__ == "__main__":
     # Final tiny typo fix for earlier block (safe at runtime)
     if 'REACTION_EMOETS' in globals():
         pass
-    bot.run(TOKEN)
-
+    
 
 
 # ======= ultra-simple owner-only drop command (no timers, no listeners) =======
@@ -2110,3 +2109,6 @@ async def _usd_testdrop(ctx: _usd_commands.Context):
 
     _usd_asyncio.create_task(_usd_watch_and_bump())
 # ================= end ultra-simple drop command =================
+
+
+bot.run(TOKEN)
