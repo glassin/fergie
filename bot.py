@@ -648,8 +648,22 @@ async def on_ready():
         bot._raffles = {}  # guild_id -> raffle state
 
 
-    # --- Chat Drops: initialized (no cogs) ---
-    _chatdrops_init()
+    # --- ChatDrop: safe plug-in ---
+    try:
+        helpers = {
+            "now": _now,
+            "fmt_bread": _fmt_bread,
+            "cap_wallet": _cap_wallet,
+            "get_user": _user,
+            "save_bank": _save_bank,
+            "economy": economy,
+            "economy_lock": economy_lock,
+        }
+        if not hasattr(bot, "_chatdrop_loaded"):
+            bot.add_cog(ChatDropCog(bot, helpers))
+            bot._chatdrop_loaded = True
+    except Exception as e:
+        print("ChatDropCog load error:", e)
 
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
@@ -735,10 +749,7 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
         return
 
-    # Chat drops: let normal chat grow the pot quietly
-    await _chatdrops_on_message(message)
-
-        # Global jump scare trigger (image only, then creepy line), per-user cooldown
+    # Global jump scare trigger (image only, then creepy line), per-user cooldown
     if JUMPSCARE_TRIGGER in lower:
         now = _now()
         last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
@@ -1991,14 +2002,23 @@ if __name__ == "__main__":
         pass
     bot.run(TOKEN)
 
-# ===================== Chat Drops (no-cog) =====================
+
+
+# ========================= Chat Drops (No Cog, Listener-based) =========================
+# This block integrates currency drops without cogs. It uses your existing helpers:
+#   now -> int seconds, fmt_bread(int)->str, _cap_wallet(new)->(final,skim),
+#   _user(user_id)->dict with 'balance', _save_bank()->awaitable,
+#   economy dict with 'treasury', and economy_lock (asyncio.Lock)
+# It registers a lightweight listener via bot.add_listener so it won't conflict with your on_message.
 
 from dataclasses import dataclass, asdict
+from typing import Dict, Set, Optional
+import random
 
 @dataclass
 class _DropConfig:
     base_tick: int = 1
-    bonus_choices: tuple = (5,10,20)
+    bonus_choices: tuple = (5, 10, 20)
     bonus_chance: float = 0.06
     min_msg_len: int = 4
     channel_tick_cooldown_sec: int = 8
@@ -2011,158 +2031,226 @@ class _DropConfig:
     min_treasury_to_allow_claim: int = 1
     clamp_payout_to_treasury: bool = True
 
-_chd = {
+_CHAT_DROPS = {
     "cfg": _DropConfig(),
-    "channel_pot": {},
-    "last_tick_ts": {},
-    "user_last_tick": {},
-    "channel_last_claim_ts": {},
-    "user_last_claim_ts": {},
-    "open_claims": {},
+    "initialized": False,
+    "now": None,
+    "fmt": None,
+    "cap_wallet": None,
+    "get_user": None,
+    "save_bank": None,
+    "economy": None,
+    "lock": None,
+    "channel_pot": {},            # channel_id -> int
+    "last_tick_ts": {},           # channel_id -> ts
+    "user_last_tick": {},         # (channel_id, user_id) -> ts
+    "channel_last_claim_ts": {},  # channel_id -> ts
+    "user_last_claim_ts": {},     # user_id -> ts
+    "open_claims": {},            # channel_id -> {"opened": ts, "claimants": set()}
 }
 
-def _chatdrops_init():
-    # nothing to wire; uses existing helpers below
-    pass
+def _drops_init():
+    # Wire helpers from existing globals if present.
+    g = globals()
+    req = ["now", "fmt_bread", "_cap_wallet", "_user", "_save_bank", "economy", "economy_lock", "bot"]
+    missing = [k for k in req if k not in g]
+    if missing:
+        # If not ready yet, we skip; init will try again on first listener call.
+        return
+    _CHAT_DROPS["now"] = g["now"]
+    _CHAT_DROPS["fmt"] = g["fmt_bread"]
+    _CHAT_DROPS["cap_wallet"] = g["_cap_wallet"]
+    _CHAT_DROPS["get_user"] = g["_user"]
+    _CHAT_DROPS["save_bank"] = g["_save_bank"]
+    _CHAT_DROPS["economy"] = g["economy"]
+    _CHAT_DROPS["lock"] = g["economy_lock"]
+    _CHAT_DROPS["initialized"] = True
 
-def _cd_can_tick(channel_id: int, user_id: int, content: str) -> bool:
-    cfg = _chd["cfg"]
+def _drops_can_tick(channel_id: int, user_id: int, content: str) -> bool:
+    cfg: _DropConfig = _CHAT_DROPS["cfg"]
     content = (content or "").strip()
     if len(content) < cfg.min_msg_len or content.startswith("!"):
         return False
-    now = _now()
-    if now - _chd["last_tick_ts"].get(channel_id, 0) < cfg.channel_tick_cooldown_sec:
+    nowv = _CHAT_DROPS["now"]()
+    if nowv - _CHAT_DROPS["last_tick_ts"].get(channel_id, 0) < cfg.channel_tick_cooldown_sec:
         return False
-    if now - _chd["user_last_tick"].get((channel_id, user_id), 0) < cfg.per_user_tick_cooldown_sec:
+    if nowv - _CHAT_DROPS["user_last_tick"].get((channel_id, user_id), 0) < cfg.per_user_tick_cooldown_sec:
         return False
     return True
 
-def _cd_tick_amount() -> int:
-    cfg = _chd["cfg"]
+def _drops_tick_amount() -> int:
+    cfg: _DropConfig = _CHAT_DROPS["cfg"]
     amt = cfg.base_tick
     if random.random() < cfg.bonus_chance:
         amt += random.choice(cfg.bonus_choices)
     return amt
 
-def _cd_open_claim_if_needed(channel_id: int):
-    if channel_id not in _chd["open_claims"]:
-        _chd["open_claims"][channel_id] = {"opened": _now(), "claimants": set()}
+def _drops_open_claim_if_needed(channel_id: int):
+    if channel_id not in _CHAT_DROPS["open_claims"]:
+        _CHAT_DROPS["open_claims"][channel_id] = {"opened": _CHAT_DROPS["now"](), "claimants": set()}
 
-def _cd_claim_window_active(channel_id: int) -> bool:
-    cfg = _chd["cfg"]
-    win = _chd["open_claims"].get(channel_id)
-    return bool(win) and (_now() - win["opened"] <= cfg.claim_window_sec)
+def _drops_claim_window_active(channel_id: int) -> bool:
+    cfg: _DropConfig = _CHAT_DROPS["cfg"]
+    win = _CHAT_DROPS["open_claims"].get(channel_id)
+    return bool(win) and (_CHAT_DROPS["now"]() - win["opened"] <= cfg.claim_window_sec)
 
-async def _chatdrops_on_message(msg: discord.Message):
-    if msg.author.bot or not msg.guild:
+async def _drops_on_message(msg):
+    if not _CHAT_DROPS["initialized"]:
+        _drops_init()
+    if not _CHAT_DROPS["initialized"]:
+        return  # helpers not available yet
+
+    if getattr(msg.author, "bot", False) or not getattr(msg, "guild", None):
         return
+
+    content = (getattr(msg, "content", "") or "").strip()
+
+    # Handle commands manually so we don't rely on command decorators existing in user base.
+    if content.startswith("!"):
+        parts = content.split()
+        cmd = parts[0].lower()
+        # !pot
+        if cmd == "!pot":
+            ch_id = msg.channel.id
+            fmt = _CHAT_DROPS["fmt"]
+            pot = _CHAT_DROPS["channel_pot"].get(ch_id, 0)
+            await msg.channel.send(f"🥖 pot in this channel: **{fmt(pot)}**")
+            return
+        # !dropsettings
+        if cmd == "!dropsettings":
+            d = asdict(_CHAT_DROPS["cfg"])
+            await msg.channel.send("Bread drop settings:\n" + "\n".join(f"**{k}**: {v}" for k,v in d.items()))
+            return
+        # !drop <amount> (admin)
+        if cmd == "!drop" and getattr(msg.author, "guild_permissions", None) and msg.author.guild_permissions.manage_guild:
+            try:
+                amount = int(parts[1])
+            except Exception:
+                amount = 0
+            if amount <= 0:
+                await msg.channel.send("Amount must be > 0")
+                return
+            ch_id = msg.channel.id
+            fmt = _CHAT_DROPS["fmt"]
+            _CHAT_DROPS["channel_pot"][ch_id] = _CHAT_DROPS["channel_pot"].get(ch_id, 0) + amount
+            await msg.channel.send(f"🛠️ Added {fmt(amount)} to this channel’s pot (now {fmt(_CHAT_DROPS['channel_pot'][ch_id])}).")
+            return
+        # !get
+        if cmd == "!get":
+            cfg: _DropConfig = _CHAT_DROPS["cfg"]
+            fmt = _CHAT_DROPS["fmt"]
+            ch_id = msg.channel.id
+            u_id = msg.author.id
+            pot = int(_CHAT_DROPS["channel_pot"].get(ch_id, 0))
+
+            if pot <= 0:
+                await msg.channel.send("No bread here right now. Keep chatting!"); return
+
+            t = _CHAT_DROPS["now"]()
+            # channel/user cooldowns
+            if t - _CHAT_DROPS["channel_last_claim_ts"].get(ch_id, 0) < cfg.channel_claim_cooldown_sec:
+                await msg.channel.send("⏳ This channel just had a claim. Give it a moment."); return
+            if t - _CHAT_DROPS["user_last_claim_ts"].get(u_id, 0) < cfg.per_user_claim_cooldown_sec:
+                await msg.channel.send("Take a breather before claiming again."); return
+
+            # open or continue window
+            _drops_open_claim_if_needed(ch_id)
+            if not _drops_claim_window_active(ch_id):
+                _CHAT_DROPS["open_claims"].pop(ch_id, None)
+                await msg.channel.send("Claim window expired. Try `!get` again to reopen."); return
+
+            claim = _CHAT_DROPS["open_claims"][ch_id]
+            claimants: Set[int] = claim["claimants"]
+
+            if cfg.split_mode:
+                if u_id in claimants:
+                    await msg.channel.send("You’re already in on this split."); return
+                claimants.add(u_id)
+                remaining = cfg.split_first_n - len(claimants)
+                if remaining > 0 and _drops_claim_window_active(ch_id):
+                    await msg.channel.send(f"{msg.author.mention} joined the split! Need {remaining} more.")
+                    return
+                winners = list(claimants)[: cfg.split_first_n]
+            else:
+                if claimants:
+                    await msg.channel.send("Someone already claimed this round."); return
+                claimants.add(u_id)
+                winners = [u_id]
+
+            # atomic payout
+            async with _CHAT_DROPS["lock"]:
+                bank = int(_CHAT_DROPS["economy"].get("treasury", 0))
+                if bank < cfg.min_treasury_to_allow_claim:
+                    _CHAT_DROPS["open_claims"].pop(ch_id, None)
+                    await msg.channel.send("💀 The bank is empty. No payout.")
+                    return
+
+                paying = min(pot, bank) if cfg.clamp_payout_to_treasury else pot
+                if paying <= 0:
+                    _CHAT_DROPS["open_claims"].pop(ch_id, None)
+                    await msg.channel.send("💀 The bank is empty. No payout.")
+                    return
+
+                if cfg.split_mode:
+                    per = max(1, paying // max(1, len(winners)))
+                    total_paid = per * len(winners)  # keep remainder
+                else:
+                    per = paying
+                    total_paid = paying
+
+                # pay with cap logic
+                actually_paid_total = 0
+                cap_skim_total = 0
+                for uid in winners:
+                    u = _CHAT_DROPS["get_user"](uid)
+                    before = u["balance"]
+                    new_bal = before + per
+                    final_bal, skim = _CHAT_DROPS["cap_wallet"](new_bal)
+                    delta = final_bal - before
+                    if delta > 0:
+                        u["balance"] = final_bal
+                        actually_paid_total += delta
+                    cap_skim_total += skim
+
+                _CHAT_DROPS["economy"]["treasury"] = bank - actually_paid_total + cap_skim_total
+                await _CHAT_DROPS["save_bank"]()
+
+            # update state
+            _CHAT_DROPS["channel_pot"][ch_id] = max(0, pot - actually_paid_total)
+            _CHAT_DROPS["open_claims"].pop(ch_id, None)
+            _CHAT_DROPS["channel_last_claim_ts"][ch_id] = _CHAT_DROPS["now"]()
+            for uid in winners:
+                _CHAT_DROPS["user_last_claim_ts"][uid] = _CHAT_DROPS["now"]()
+
+            if cfg.split_mode:
+                mentions = ", ".join(f"<@{uid}>" for uid in winners)
+                await msg.channel.send(f"🎉 Split drop! {mentions} each got **{fmt(per)}** "
+                                       f"(paid {fmt(actually_paid_total)} total). Pot now {fmt(_CHAT_DROPS['channel_pot'][ch_id])}.")
+            else:
+                await msg.channel.send(f"🎉 {msg.author.mention} claimed **{fmt(actually_paid_total)}**! "
+                                       f"Pot now {fmt(_CHAT_DROPS['channel_pot'][ch_id])}.")
+            return
+
+        # Other '!' commands are handled by your existing system; do nothing here.
+        return
+
+    # Non-command message: try to grow the pot quietly
     ch_id = msg.channel.id
     u_id = msg.author.id
-    if not _cd_can_tick(ch_id, u_id, getattr(msg, "content", "")):
+    if not _drops_can_tick(ch_id, u_id, content):
         return
-    amt = _cd_tick_amount()
-    pot = _chd["channel_pot"].get(ch_id, 0) + amt
-    _chd["channel_pot"][ch_id] = pot
-    now = _now()
-    _chd["last_tick_ts"][ch_id] = now
-    _chd["user_last_tick"][(ch_id, u_id)] = now
+    amt = _drops_tick_amount()
+    pot = _CHAT_DROPS["channel_pot"].get(ch_id, 0) + amt
+    _CHAT_DROPS["channel_pot"][ch_id] = pot
+    nowv = _CHAT_DROPS["now"]()
+    _CHAT_DROPS["last_tick_ts"][ch_id] = nowv
+    _CHAT_DROPS["user_last_tick"][(ch_id, u_id)] = nowv
 
-# ---- Commands ----
-@bot.command(name="pot")
-async def _cmd_pot(ctx: commands.Context):
-    ch_id = ctx.channel.id
-    await ctx.send(f"🥖 pot in this channel: **{_fmt_bread(_chd['channel_pot'].get(ch_id, 0))}**")
-
-@bot.command(name="dropsettings")
-async def _cmd_dropsettings(ctx: commands.Context):
-    d = asdict(_chd["cfg"])
-    await ctx.send("Bread drop settings:\n" + "\n".join(f"**{k}**: {v}" for k,v in d.items()))
-
-@bot.command(name="drop")
-@commands.has_permissions(manage_guild=True)
-async def _cmd_drop_admin(ctx: commands.Context, amount: int):
-    if amount <= 0:
-        await ctx.send("Amount must be > 0"); return
-    ch_id = ctx.channel.id
-    _chd["channel_pot"][ch_id] = _chd["channel_pot"].get(ch_id, 0) + int(amount)
-    await ctx.send(f"🛠️ Added {_fmt_bread(amount)} to this channel’s pot (now {_fmt_bread(_chd['channel_pot'][ch_id])}).")
-
-@bot.command(name="get")
-async def _cmd_get(ctx: commands.Context):
-    cfg = _chd["cfg"]
-    ch_id = ctx.channel.id
-    u_id = ctx.author.id
-    pot = int(_chd["channel_pot"].get(ch_id, 0))
-    if pot <= 0:
-        await ctx.send("No bread here right now. Keep chatting!"); return
-    t = _now()
-    if t - _chd["channel_last_claim_ts"].get(ch_id, 0) < cfg.channel_claim_cooldown_sec:
-        await ctx.send("⏳ This channel just had a claim. Give it a moment."); return
-    if t - _chd["user_last_claim_ts"].get(u_id, 0) < cfg.per_user_claim_cooldown_sec:
-        await ctx.send("Take a breather before claiming again."); return
-    _cd_open_claim_if_needed(ch_id)
-    if not _cd_claim_window_active(ch_id):
-        _chd["open_claims"].pop(ch_id, None)
-        await ctx.send("Claim window expired. Try `!get` again to reopen."); return
-    claim = _chd["open_claims"][ch_id]
-    claimants = claim["claimants"]
-    if cfg.split_mode:
-        if u_id in claimants:
-            await ctx.send("You’re already in on this split."); return
-        claimants.add(u_id)
-        remaining = cfg.split_first_n - len(claimants)
-        if remaining > 0 and _cd_claim_window_active(ch_id):
-            await ctx.send(f"{ctx.author.mention} joined the split! Need {remaining} more.")
-            return
-        winners = list(claimants)[: cfg.split_first_n]
-    else:
-        if claimants:
-            await ctx.send("Someone already claimed this round."); return
-        claimants.add(u_id)
-        winners = [u_id]
-
-    async with economy_lock:
-        bank = int(economy.get("treasury", 0))
-        if bank < cfg.min_treasury_to_allow_claim:
-            _chd["open_claims"].pop(ch_id, None)
-            await ctx.send("💀 The bank is empty. No payout.")
-            return
-        paying = min(pot, bank) if cfg.clamp_payout_to_treasury else pot
-        if paying <= 0:
-            _chd["open_claims"].pop(ch_id, None)
-            await ctx.send("💀 The bank is empty. No payout.")
-            return
-        if cfg.split_mode:
-            per = max(1, paying // max(1, len(winners)))
-            total_paid = per * len(winners)
-        else:
-            per = paying
-            total_paid = paying
-        actually_paid_total = 0
-        cap_skim_total = 0
-        for uid in winners:
-            u = _user(uid)
-            before = u["balance"]
-            new_bal = before + per
-            final_bal, skim = _cap_wallet(new_bal)
-            delta = final_bal - before
-            if delta > 0:
-                u["balance"] = final_bal
-                actually_paid_total += delta
-            cap_skim_total += skim
-        economy["treasury"] = bank - actually_paid_total + cap_skim_total
-        await _save_bank()
-
-    _chd["channel_pot"][ch_id] = max(0, pot - actually_paid_total)
-    _chd["open_claims"].pop(ch_id, None)
-    _chd["channel_last_claim_ts"][ch_id] = _now()
-    for uid in winners:
-        _chd["user_last_claim_ts"][uid] = _now()
-
-    if cfg.split_mode:
-        mentions = ", ".join(f"<@{uid}>" for uid in winners)
-        await ctx.send(f"🎉 Split drop! {mentions} each got **{_fmt_bread(per)}** "
-                       f"(paid {_fmt_bread(actually_paid_total)} total). Pot now {_fmt_bread(_chd['channel_pot'][ch_id])}.")
-    else:
-        await ctx.send(f"🎉 {ctx.author.mention} claimed **{_fmt_bread(actually_paid_total)}**! "
-                       f"Pot now {_fmt_bread(_chd['channel_pot'][ch_id])}.")
+# Register listener once bot exists. If bot isn't created yet, this runs again on import later.
+try:
+    if "bot" in globals():
+        bot.add_listener(_drops_on_message, "on_message")
+except Exception as _e:
+    # Soft fail; listener may be added later or manually.
+    pass
+# ======================================================================================
