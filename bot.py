@@ -666,7 +666,7 @@ async def on_ready():
 #         print("ChatDropCog load error:", e)  # disabled (replaced by progressive timed drops)
         pass
     print(f"Logged in as {bot.user}")
-    setup_progressive_drops(bot)
+    # setup_progressive_drops(bot)  # autostarted post-ready
     four_hour_post.start()
     six_hour_emoji.start()
     user1_twice_daily_fixed.start()
@@ -2217,7 +2217,7 @@ try:
 except NameError:
     _PROGDROPS_STARTED = False
 
-def setup_progressive_drops(bot):
+def # setup_progressive_drops(bot)  # autostarted post-ready:
     global _PROGDROPS_STARTED
     if _PROGDROPS_STARTED:
         return
@@ -2307,5 +2307,49 @@ async def _dbg_testdrop(ctx):
 
 
 # Backwards-compatible alias
-def setup_progressive_drops(bot):
-    return setup_progressive_drops(bot)
+def # setup_progressive_drops(bot)  # autostarted post-ready:
+    return # setup_progressive_drops(bot)  # autostarted post-ready
+
+
+def # start_progressive_drops(bot)  # autostarted post-ready:
+    return # setup_progressive_drops(bot)  # autostarted post-ready
+
+
+# --- progressive drops post-ready autostart ---
+import asyncio as _autost_asyncio
+async def _progdrops_autostart():
+    try:
+        await bot.wait_until_ready()
+        setup_progressive_drops(bot)
+    except Exception as _e:
+        print("[progdrops] autostart failed:", _e)
+
+try:
+    _autost_asyncio.get_event_loop().create_task(_progdrops_autostart())
+except Exception as _e:
+    print("[progdrops] cannot schedule autostart:", _e)
+# ----------------------------------------------
+
+@bot.listen("on_message")
+async def _dbg_testdrop_listener(msg):
+    try:
+        if getattr(msg.author, "bot", False) or not getattr(msg, "guild", None):
+            return
+        if msg.author.id != 939225086341296209:
+            return
+        if (msg.content or "").strip().lower() != "!testdrop":
+            return
+        try:
+            _ = _PROGDROPS_STATE
+        except NameError:
+            return
+        if _PROGDROPS_STATE is None:
+            return
+        _PROGDROPS_STATE.current.setdefault(msg.channel.id, _PROGDROPS_CFG.base)
+        bank = int(_PROGDROPS_STATE.bank.get("treasury", 0))
+        if bank <= 0:
+            await msg.channel.send("💀 Bank is empty (debug). Seed treasury."); return
+        await _PROGDROPS_STATE.spawn(msg.channel)
+    except Exception as _e:
+        try: await msg.channel.send(f"debug error: {_e}")
+        except Exception: pass
