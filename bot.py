@@ -1,6 +1,5 @@
 import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re
 from discord.ext import tasks, commands
-from chat_drop import ChatDropCog
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
@@ -2002,6 +2001,3 @@ if __name__ == "__main__":
     if 'REACTION_EMOETS' in globals():
         pass
     bot.run(TOKEN)
-
-
-
