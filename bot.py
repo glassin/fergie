@@ -2134,8 +2134,45 @@ async def _lulu_wait_ready():
 
 
 # ---------- Lululemon commands ----------
-@bot.command(name="lulu", help="Post a random Lululemon 'What’s New' link")
+@bot.command(name="lulu", help="Post a random Lululemon 'What’s New' link", aliases=["lululemon"])
 @commands.guild_only()
+async def lulu_cmd(ctx: commands.Context, *, arg: str | None = None):
+    """
+    Usage:
+      !lulu                -> post in this channel with current message
+      !lulu #channel       -> post in that channel
+      !lulu setmsg <text>  -> change the message copy (persists until restart)
+    """
+    try:
+        # handle setmsg
+        if arg and arg.lower().startswith("setmsg "):
+            new_msg = arg[7:].strip()
+            if not new_msg:
+                return await ctx.reply("Give me some text after `setmsg`.")
+            bot._lulu_msg = new_msg
+            return await ctx.reply(f"Updated Lulu message to:\n> {bot._lulu_msg}")
+
+        # pick target channel (default: current)
+        target = ctx.channel
+        if arg:
+            m = re.search(r"<#(\d+)>|^(\d{15,25})$", arg.strip())
+            if m:
+                chan_id = int((m.group(1) or m.group(2)))
+                target = ctx.guild.get_channel(chan_id) or await ctx.guild.fetch_channel(chan_id)
+
+        async with ctx.typing():
+            link = await fetch_random_lulu_link(LULU_WHATS_NEW_URL)
+        link = link or LULU_WHATS_NEW_URL
+        await target.send(f"{get_lulu_msg()}\n{link}")
+        if target.id != ctx.channel.id:
+            await ctx.reply(f"Dropped one in <#{target.id}> ✅")
+    except Exception as e:
+        try:
+            await ctx.reply("couldn't fetch a product rn, dropping the main page instead 💅\n" + LULU_WHATS_NEW_URL)
+        except Exception:
+            pass
+        print("!lulu error:", repr(e))
+
 async def lulu_cmd(ctx: commands.Context, *, arg: str | None = None):
     """
     Usage:
