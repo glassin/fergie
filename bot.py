@@ -98,8 +98,8 @@ GIFT_TAX_TIERS = [(1000,0.05),(3000,0.10),(6000,0.15)]
 GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))
 BASE_ROLL_WIN_PROB = float(os.getenv("BASE_ROLL_WIN_PROB", "0.46"))
 INACTIVE_WINDOW_DAYS = int(os.getenv("INACTIVE_WINDOW_DAYS", "7"))
-PENALTY_IMAGE = "https://cdn.discordapp.com/attachments/988495153272598670/1407014204980068414/Screenshot_2025-08-11_at_7.29.15_AM.png?ex=68a48f97&is=68a33e17&hm=dde4c48b966c049f577c8a150959da445486e8c6edd7493109412e1cffab3633&"
-JACKPOT_IMAGE = "https://cdn.discordapp.com/attachments/988495153272598670/1407014204980068414/Screenshot_2025-08-11_at_7.29.15_AM.png?ex=68a48f97&is=68a33e17&hm=dde4c48b966c049f577c8a150959da445486e8c6edd7493109412e1cffab3633&"
+PENALTY_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
+JACKPOT_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
 # ==================================================================
 
 # ===== Casino Tuning (improvements) =====
@@ -677,7 +677,8 @@ async def on_ready():
     fit_auto_daily.start()          # auto-fit once a day
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
     rebuild_mimic.start()           # build mimic model hourly
-    raffle_watcher.start()          # raffle auto-draw watcher
+    raffle_watcher.start()
+    daily_gym_reminder.start()          # raffle auto-draw watcher
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
@@ -909,7 +910,46 @@ async def user3_task():
 async def daily_scam_post():
     channel = bot.get_channel(CHANNEL_ID)
     if channel and random.random() < 0.7:
-        await channel.send("SCAM!!! 🚨🙄💅")
+        await channel.send("WEN monies for 🙄💅!")
+
+
+# ---- Gym Reminder ----
+import random
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
+from discord.ext import tasks
+
+GYM_CHANNEL_ID = 123456789012345678  # replace with your channel ID
+
+GYM_EMOTES_1 = ["💪", "🏋️‍♂️", "🏋️‍♀️", "🏃‍♂️", "🏃‍♀️", "🤸‍♀️", "🚴‍♂️", "🔥", "💯", "🥇", "🧠", "🫀"]
+GYM_EMOTES_2 = ["🏋️‍♀️", "🏋️‍♂️", "🚴‍♀️", "🏃‍♂️", "🏃‍♀️", "🥵", "🔥", "⚡️", "💥", "💢", "🗣️", "📣"]
+
+def pick_emotes(pool, k=3):
+    k = min(k, len(pool))
+    return " ".join(random.sample(pool, k))
+
+@tasks.loop(time=[
+    dtime(hour=4, minute=30, tzinfo=ZoneInfo("America/Los_Angeles")),  # 4:30 AM PT
+    dtime(hour=5, minute=10, tzinfo=ZoneInfo("America/Los_Angeles")),  # 5:10 AM PT
+])
+async def daily_gym_reminder():
+    ch = bot.get_channel(GYM_CHANNEL_ID) or await bot.fetch_channel(GYM_CHANNEL_ID)
+    if not ch:
+        return
+
+    now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).time()
+
+    if now_pt.hour == 4 and now_pt.minute == 30:
+        emotes = pick_emotes(GYM_EMOTES_1, k=3)
+        await ch.send(f"wake up gorditos it's time for gymmies!!! {emotes}")
+    elif now_pt.hour == 5 and now_pt.minute == 10:
+        emotes = pick_emotes(GYM_EMOTES_2, k=3)
+        await ch.send(f"ÁNDALE! don't be lazy! {emotes}")
+
+@daily_gym_reminder.before_loop
+async def _wait_ready_gym():
+    await bot.wait_until_ready()
+
 
 # ======== Daily auto allowance + inactivity penalties (8am PT) ========
 @tasks.loop(time=dtime(hour=8, tzinfo=ZoneInfo("America/Los_Angeles")))
