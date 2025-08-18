@@ -698,13 +698,12 @@ async def on_ready():
     rebuild_mimic.start()           # build mimic model hourly
     raffle_watcher.start()
     daily_gym_reminder.start()          # raffle auto-draw watcher
-
-@tasks.loop(minutes=1)
     try:
         lulu_daily_scheduler.start()
     except RuntimeError:
         pass
 
+@tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
     now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
     if (not bot._kewchie_times) or (bot._kewchie_times[0].date() != now_utc.date()):
