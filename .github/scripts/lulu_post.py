@@ -4,10 +4,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import requests
 
-# 👇 same name you'll add in GitHub Secrets
 WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
-
-# Page to scrape (Women -> What's New)
 LULU_URL = "https://shop.lululemon.com/c/women-whats-new/n16o10zq0cf?icid=home-homepage;L1;l2;cdp:womens-whats-new;"
 MESSAGE = "thoughts girly? I need new fits. 💗🥹"
 
@@ -16,12 +13,17 @@ ABS_LINK_RE = re.compile(r'https://shop\.lululemon\.com[^"\s>]+/(?:p|product)/[^
 REL_LINK_RE = re.compile(r'href="(/[^"\s>]+/(?:p|product)/[^"\s>#]+)"', re.I)
 BASE = "https://shop.lululemon.com"
 
-def pick_daily_slot_pt(salt=""):
-    """Choose ONE 5-minute slot between 08:00–13:55 PT for TODAY (deterministic)."""
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (GitHubActions; +https://github.com)",
+    "Accept": "text/html,application/xhtml+xml",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+def pick_daily_slot_pt(salt="fergie-1"):
     today = datetime.now(PT).date().isoformat()
     random.seed(f"{today}-{salt}")
-    hour = random.randint(8, 13)          # 8..13 (14:00 exclusive)
-    minute = (random.randint(0, 59)//5)*5 # 0,5,10,...55
+    hour = random.randint(8, 13)          # 8..13 (14 excluded)
+    minute = (random.randint(0, 59)//5)*5 # 0,5,...55
     return hour, minute
 
 def current_slot_pt():
@@ -29,9 +31,8 @@ def current_slot_pt():
     return now.hour, (now.minute//5)*5
 
 def fetch_one_product_url():
-    """Download page HTML, extract product links, pick one at random."""
     try:
-        r = requests.get(LULU_URL, headers={"User-Agent":"Mozilla/5.0"}, timeout=20)
+        r = requests.get(LULU_URL, headers=HEADERS, timeout=20)
         r.raise_for_status()
         html = r.text
     except Exception as e:
@@ -43,7 +44,6 @@ def fetch_one_product_url():
         if m.startswith("/"):
             links.add(BASE + m)
 
-    # keep only product pages
     links = [u for u in links if "/p/" in u or "/product/" in u]
     if not links:
         return None
@@ -51,37 +51,30 @@ def fetch_one_product_url():
     return links[0]
 
 def send_webhook(url):
-    r = requests.post(WEBHOOK_URL, json={"content": f"{url}\n{MESSAGE}"}, timeout=20)
+    data = {"content": f"{url}\n{MESSAGE}"}
+    r = requests.post(WEBHOOK_URL, json=data, timeout=20)
     r.raise_for_status()
 
 def main():
     if not WEBHOOK_URL:
-        print("[error] missing DISCORD_WEBHOOK_URL secret", file=sys.stderr)
+        print("[error] missing DISCORD_WEBHOOK_URL", file=sys.stderr)
         sys.exit(1)
 
-    # allow manual one-off test
+    # manual run: force a post now
     if os.environ.get("FORCE_NOW") == "1":
-        link = fetch_one_product_url()
-        if link:
-            send_webhook(link)
-            print(f"[ok] forced post {link}")
-        else:
-            print("[skip] no product links found")
+        link = fetch_one_product_url() or LULU_URL
+        send_webhook(link)
+        print(f"[ok] forced {link}")
         return
 
-    # scheduled mode: only post in today's chosen slot
-    salt = os.environ.get("SALT", "fergie-1")
-    target_h, target_m = pick_daily_slot_pt(salt)
-    now_h, now_m = current_slot_pt()
-    if (now_h, now_m) != (target_h, target_m):
-        print(f"[skip] now PT {now_h:02d}:{now_m:02d}, target {target_h:02d}:{target_m:02d}")
+    # scheduled window: post only in today's chosen 5-min slot
+    th, tm = pick_daily_slot_pt(os.environ.get("SALT", "fergie-1"))
+    nh, nm = current_slot_pt()
+    if (nh, nm) != (th, tm):
+        print(f"[skip] now PT {nh:02d}:{nm:02d}, target {th:02d}:{tm:02d}")
         return
 
-    link = fetch_one_product_url()
-    if not link:
-        print("[skip] no product links found")
-        return
-
+    link = fetch_one_product_url() or LULU_URL
     send_webhook(link)
     print(f"[ok] posted {link}")
 
