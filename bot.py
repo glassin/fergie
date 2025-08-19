@@ -631,6 +631,10 @@ def _pick_three_times_today_pt(n: int = 3):
 @bot.event
 async def on_ready():
 
+    if not getattr(bot, "_ext_loaded", False):
+        bot._ext_loaded = True
+        await setup_extensions()
+
     # DB init & load economy
     await _db_init()
     await _load_bank()
@@ -2041,3 +2045,13 @@ if __name__ == "__main__":
     if 'REACTION_EMOETS' in globals():
         pass
     bot.run(TOKEN)
+
+
+# ---- load the Lulu cog ----
+async def setup_extensions():
+    try:
+        await bot.load_extension("lulu")
+        print("✅ Lulu cog loaded")
+    except Exception as e:
+        print("❌ Failed to load lulu:", e)
+
