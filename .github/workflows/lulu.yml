@@ -1,27 +1,25 @@
-name: Lulu Daily Post
+name: Lulu Daily Post (random 8–2 PT)
 
 on:
   schedule:
-    - cron: "0 16 * * *"   # runs at 8am PST
-    - cron: "0 22 * * *"   # runs at 2pm PST
-  workflow_dispatch:       # lets you run it manually from GitHub
+    # PDT window 08:00–13:55 PT -> 15:00–20:55 UTC
+    - cron: "*/5 15-20 * * *"
+    # PST window 08:00–13:55 PT -> 16:00–21:55 UTC (uncomment in winter)
+    # - cron: "*/5 16-21 * * *"
+  workflow_dispatch: {}
 
 jobs:
-  post-to-discord:
+  post:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-
-      - name: Install dependencies
-        run: pip install requests
-
-      - name: Run Lulu post script
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Run poster (posts ONLY in today's chosen 5-min slot)
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          # SALT lets you shift which minute gets chosen; any constant string is fine.
+          SALT: "fergie-1"
         run: python .github/scripts/lulu_post.py
