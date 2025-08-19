@@ -910,7 +910,7 @@ async def user3_task():
 async def daily_scam_post():
     channel = bot.get_channel(CHANNEL_ID)
     if channel and random.random() < 0.7:
-        await channel.send("SCAM!!! 🚨🙄💅")
+        await channel.send("I NEED MONIES!!!🙄💅")
 
 
 # ---- Gym Reminder ----
