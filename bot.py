@@ -667,7 +667,7 @@ async def on_ready():
         print("ChatDropCog load error:", e)
 
     print(f"Logged in as {bot.user}")
-```)  
+ 
 
 That’s before all the `.start()` task calls, so the cog loads first.  
 
