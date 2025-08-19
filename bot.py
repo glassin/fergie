@@ -6,26 +6,7 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict, Counter
 from typing import List, Tuple
 
-
-# ---------- Lululemon "What's New" ----------
-LULU_WHATS_NEW_URL = ("https://shop.lululemon.com/c/women-whats-new/n16o10zq0cf"
-                      "?icid=home-homepage;L1;l2;cdp:womens-whats-new;")
-try:
-    LULU_CHANNEL_ID = int(os.getenv("LULU_CHANNEL_ID", str(FIT_CHANNEL_ID)))
-except Exception:
-    LULU_CHANNEL_ID = int(os.getenv("LULU_CHANNEL_ID", "1273436116699058290"))
-
-# ---------- Lululemon copy ----------
-LULU_MSG_DEFAULT = 'thoughts girlie? I need new fits. 💗 😏'
-LULU_MSG_ENV = os.getenv("LULU_MSG", "").strip()
-
-def get_lulu_msg() -> str:
-    return (getattr(bot, "_lulu_msg", "") or LULU_MSG_ENV or LULU_MSG_DEFAULT).strip()
-
-
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
-from discord.ext import commands, tasks
-
 
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
@@ -648,73 +629,6 @@ def _pick_three_times_today_pt(n: int = 3):
 
 # ================== Events ==================
 @bot.event
-
-# ---------- Lululemon daily scheduler ----------
-@tasks.loop(minutes=1)
-async def lulu_daily_scheduler():
-    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
-
-    # reset seed at date change
-    if not hasattr(bot, "_lulu_time") or bot._lulu_time.date() != now_utc.date():
-        bot._lulu_time = _pick_one_time_today_pt(8, 14)  # 8:00–13:59 PT
-        bot._lulu_posted = False
-
-    # Post within a 60s window
-    if not getattr(bot, "_lulu_posted", False) and abs((now_utc - bot._lulu_time).total_seconds()) <= 60:
-        try:
-            ch = bot.get_channel(LULU_CHANNEL_ID) or await bot.fetch_channel(LULU_CHANNEL_ID)
-            if ch:
-                link = await fetch_random_lulu_link(LULU_WHATS_NEW_URL) or LULU_WHATS_NEW_URL
-                await ch.send(f"{get_lulu_msg()}\n{link}")
-            bot._lulu_posted = True
-        except Exception:
-            # fail-closed; don't hard-crash the loop
-            bot._lulu_posted = True
-
-@lulu_daily_scheduler.before_loop
-async def _lulu_wait_ready():
-    await bot.wait_until_ready()
-
-
-# ---------- Lululemon commands ----------
-@bot.command(name="lulu", help="Post a random Lululemon 'What’s New' link", aliases=["lululemon"])
-@commands.guild_only()
-async def lulu_cmd(ctx: commands.Context, *, arg: str | None = None):
-    """
-    Usage:
-      !lulu                -> post in this channel with current message
-      !lulu #channel       -> post in that channel
-      !lulu setmsg <text>  -> change the message copy (persists until restart)
-    """
-    try:
-        # handle setmsg
-        if arg and arg.lower().startswith("setmsg "):
-            new_msg = arg[7:].strip()
-            if not new_msg:
-                return await ctx.reply("Give me some text after `setmsg`.")
-            bot._lulu_msg = new_msg
-            return await ctx.reply(f"Updated Lulu message to:\n> {bot._lulu_msg}")
-
-        # pick target channel (default: current)
-        target = ctx.channel
-        if arg:
-            m = re.search(r"<#(\d+)>|^(\d{15,25})$", arg.strip())
-            if m:
-                chan_id = int((m.group(1) or m.group(2)))
-                target = ctx.guild.get_channel(chan_id) or await ctx.guild.fetch_channel(chan_id)
-
-        async with ctx.typing():
-            link = await fetch_random_lulu_link(LULU_WHATS_NEW_URL)
-        link = link or LULU_WHATS_NEW_URL
-        await target.send(f"{get_lulu_msg()}\n{link}")
-        if target.id != ctx.channel.id:
-            await ctx.reply(f"Dropped one in <#{target.id}> ✅")
-    except Exception as e:
-        try:
-            await ctx.reply("couldn't fetch a product rn, dropping the main page instead 💅\n" + LULU_WHATS_NEW_URL)
-        except Exception:
-            pass
-
 async def on_ready():
 
     # DB init & load economy
@@ -765,10 +679,6 @@ async def on_ready():
     rebuild_mimic.start()           # build mimic model hourly
     raffle_watcher.start()
     daily_gym_reminder.start()          # raffle auto-draw watcher
-    try:
-        lulu_daily_scheduler.start()
-    except RuntimeError:
-        pass
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
@@ -834,40 +744,6 @@ async def on_message(message: discord.Message):
 
     content = (message.content or "")
     lower = content.lower().strip()
-
-# --- Fallback dispatcher for !lulutest / !lulu (in case command framework is blocked) ---
-if lower.startswith("!lulutest"):
-    await message.reply("ok ✅", mention_author=False)
-    return
-if lower.startswith("!lulu"):
-    # parse optional channel mention or ID
-    target = message.channel
-    rest = content[len("!lulu"):].strip()
-    m_ = re.search(r"<#(\d+)>|^(\d{15,25})$", rest) if rest else None
-    if m_:
-        chan_id = int((m_.group(1) or m_.group(2)))
-        try:
-            target = message.guild.get_channel(chan_id) or await message.guild.fetch_channel(chan_id)
-        except Exception:
-            target = message.channel
-    # setmsg override
-    if rest.lower().startswith("setmsg "):
-        new_msg = rest[7:].strip()
-        if new_msg:
-            bot._lulu_msg = new_msg
-            await message.reply(f"Updated Lulu message to:\n> {bot._lulu_msg}", mention_author=False)
-            return
-    try:
-        link = await fetch_random_lulu_link(LULU_WHATS_NEW_URL)
-        link = link or LULU_WHATS_NEW_URL
-        await target.send(f"{get_lulu_msg()}\n{link}")
-        if target.id != message.channel.id:
-            await message.reply(f"Dropped one in <#{target.id}> ✅", mention_author=False)
-    except Exception:
-        await message.reply("couldn't fetch a product rn, dropping the main page instead 💅\n" + LULU_WHATS_NEW_URL, mention_author=False)
-    return
-
-
 
     # Process commands first
     if content.strip().startswith("!"):
@@ -1034,7 +910,7 @@ async def user3_task():
 async def daily_scam_post():
     channel = bot.get_channel(CHANNEL_ID)
     if channel and random.random() < 0.7:
-        await channel.send("SCAM!!! 🚨🙄💅")
+        await channel.send("I NEED MONIES!!! 🙄💅")
 
 
 # ---- Gym Reminder ----
@@ -2165,97 +2041,3 @@ if __name__ == "__main__":
     if 'REACTION_EMOETS' in globals():
         pass
     bot.run(TOKEN)
-
-
-# ---------- Lululemon helpers ----------
-def _pick_one_time_today_pt(start_hour=8, end_hour=14):
-    """Pick a single random time today between [start_hour, end_hour) PT and return as UTC datetime (minute precision)."""
-    tz_pt = ZoneInfo("America/Los_Angeles")
-    today = datetime.now(tz_pt).date()
-    start_pt = datetime.combine(today, dtime(hour=start_hour), tzinfo=tz_pt)
-    end_pt   = datetime.combine(today, dtime(hour=end_hour),   tzinfo=tz_pt)
-    total_minutes = int((end_pt - start_pt).total_seconds() // 60) - 1
-    offset = random.randint(0, max(0, total_minutes))
-    when_pt = start_pt + timedelta(minutes=offset)
-    return when_pt.astimezone(timezone.utc).replace(second=0, microsecond=0)
-
-async def fetch_random_lulu_link(page_url: str) -> str | None:
-    """Fetch the Lululemon What's New page and return a random product URL."""
-    headers = {"User-Agent": "Mozilla/5.0"}
-    try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(page_url, headers=headers, timeout=20, allow_redirects=True) as r:
-                if r.status != 200:
-                    return None
-                html = await r.text()
-    except Exception:
-        return None
-
-    # extract candidate product links
-    candidates = set()
-    for href in re.findall(r'href="([^"]+)"', html):
-        if "shop.lululemon.com" in href and "/p/" in href:
-            candidates.add(href.split("?")[0])
-        elif href.startswith("/p/"):
-            candidates.add("https://shop.lululemon.com" + href.split("?")[0])
-
-    return random.choice(list(candidates)) if candidates else None
-
-
-
-
-
-
-
-
-        print("!lulu error:", repr(e))
-
-# Optional: Slash command versions if app commands are enabled
-try:
-    from discord import app_commands
-
-    @app_commands.command(name="lulu", description="Post a random Lululemon link")
-    @app_commands.describe(channel="Where to post (defaults to here)",
-                           message_override="Temporarily override the message copy")
-    async def lulu_slash(interaction: discord.Interaction,
-                         channel: discord.TextChannel | None = None,
-                         message_override: str | None = None):
-        ch = channel or interaction.channel
-        link = await fetch_random_lulu_link(LULU_WHATS_NEW_URL) or LULU_WHATS_NEW_URL
-        msg = (message_override.strip() if message_override else get_lulu_msg())
-        await ch.send(f"{msg}\n{link}")
-        await interaction.response.send_message(f"Sent in <#{ch.id}> ✅", ephemeral=True)
-
-    @app_commands.command(name="lulu_setmsg", description="Set the default Lulu message text")
-    @app_commands.describe(text="New default message")
-    async def lulu_setmsg(interaction: discord.Interaction, text: str):
-        bot._lulu_msg = text.strip()
-        await interaction.response.send_message(
-            f"Updated Lulu message to:\n> {bot._lulu_msg}",
-            ephemeral=True
-        )
-
-    if hasattr(bot, "tree"):
-        async def _maybe_sync_tree():
-            try:
-                await bot.tree.sync()
-            except Exception as e:
-                print("Slash sync failed:", e)
-        if not hasattr(bot, "_lulu_sync_scheduled"):
-            bot._lulu_sync_scheduled = True
-            import asyncio as _asyncio
-            async def _wait_and_sync():
-                await bot.wait_until_ready()
-                await _maybe_sync_tree()
-            _asyncio.create_task(_wait_and_sync())
-except Exception:
-    pass
-
-
-
-
-@bot.command(name="lulutest", help="Quick diagnostic: replies 'ok'")
-@commands.guild_only()
-async def lulutest_cmd(ctx: commands.Context):
-    await ctx.reply("ok ✅", mention_author=False)
-
