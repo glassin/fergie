@@ -1,0 +1,27 @@
+name: Lulu Daily Post
+
+on:
+  schedule:
+    - cron: "0 16 * * *"   # runs at 8am PST
+    - cron: "0 22 * * *"   # runs at 2pm PST
+  workflow_dispatch:       # lets you run it manually from GitHub
+
+jobs:
+  post-to-discord:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run Lulu post script
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python .github/scripts/lulu_post.py
