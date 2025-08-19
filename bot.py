@@ -98,7 +98,7 @@ GIFT_TAX_TIERS = [(1000,0.05),(3000,0.10),(6000,0.15)]
 GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))
 BASE_ROLL_WIN_PROB = float(os.getenv("BASE_ROLL_WIN_PROB", "0.46"))
 INACTIVE_WINDOW_DAYS = int(os.getenv("INACTIVE_WINDOW_DAYS", "7"))
-PENALTY_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
+PENALTY_IMAGE = "https://cdn.discordapp.com/attachments/988495153272598670/1407014204980068414/Screenshot_2025-08-11_at_7.29.15_AM.png?ex=68a5e117&is=68a48f97&hm=9c27750a53479e3e3f208e30bb8dd16150ec316c6b7c35bf6fb92cba8dc4382e&"
 JACKPOT_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
 # ==================================================================
 
