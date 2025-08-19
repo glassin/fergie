@@ -1,5 +1,6 @@
 import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re
 from discord.ext import tasks, commands
+from cogs.lulu_whatsnew import LuluWhatsNewCog
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
@@ -664,6 +665,41 @@ async def on_ready():
             bot._chatdrop_loaded = True
     except Exception as e:
         print("ChatDropCog load error:", e)
+
+    print(f"Logged in as {bot.user}")
+```)  
+
+That’s before all the `.start()` task calls, so the cog loads first.  
+
+---
+
+### ✅ Here’s exactly how it should look:
+
+```python
+    print(f"Logged in as {bot.user}")
+
+    # --- LuluWhatsNewCog: daily Lulu + !lulu ---
+    try:
+        if not getattr(bot, "_lulu_loaded", False):
+            await bot.add_cog(LuluWhatsNewCog(bot))
+            bot._lulu_loaded = True
+            print("✅ LuluWhatsNewCog loaded")
+    except Exception as e:
+        print("❌ LuluWhatsNewCog load error:", e)
+
+    four_hour_post.start()
+    six_hour_emoji.start()
+    user1_twice_daily_fixed.start()
+    user2_twice_daily_fixed.start()
+    user3_task.start()
+    daily_scan_post.start()
+    daily_auto_allowance.start()  # 8am PT allowance + penalties
+    kewchie_daily_scheduler.start()  # random twice-daily posts
+    fit_auto_daily.start()  # auto-fit once a day
+    bonk_papo_scheduler.start()  # 3x/day random bonk messages
+    rebuild_mimic.start()  # build mimic model hourly
+    raffle_watcher.start()
+    daily_gym_reminder.start()  # raffle auto-draw watcher
 
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
