@@ -1,6 +1,5 @@
 import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re
 from discord.ext import tasks, commands
-from cogs.lulu_whatsnew import LuluWhatsNewCog
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
@@ -667,41 +666,6 @@ async def on_ready():
         print("ChatDropCog load error:", e)
 
     print(f"Logged in as {bot.user}")
- 
-
-That’s before all the `.start()` task calls, so the cog loads first.  
-
----
-
-### ✅ Here’s exactly how it should look:
-
-```python
-    print(f"Logged in as {bot.user}")
-
-    # --- LuluWhatsNewCog: daily Lulu + !lulu ---
-    try:
-        if not getattr(bot, "_lulu_loaded", False):
-            await bot.add_cog(LuluWhatsNewCog(bot))
-            bot._lulu_loaded = True
-            print("✅ LuluWhatsNewCog loaded")
-    except Exception as e:
-        print("❌ LuluWhatsNewCog load error:", e)
-
-    four_hour_post.start()
-    six_hour_emoji.start()
-    user1_twice_daily_fixed.start()
-    user2_twice_daily_fixed.start()
-    user3_task.start()
-    daily_scan_post.start()
-    daily_auto_allowance.start()  # 8am PT allowance + penalties
-    kewchie_daily_scheduler.start()  # random twice-daily posts
-    fit_auto_daily.start()  # auto-fit once a day
-    bonk_papo_scheduler.start()  # 3x/day random bonk messages
-    rebuild_mimic.start()  # build mimic model hourly
-    raffle_watcher.start()
-    daily_gym_reminder.start()  # raffle auto-draw watcher
-
-    print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
     user1_twice_daily_fixed.start()
@@ -768,63 +732,9 @@ async def _bonk_wait():
 
 @bot.event
 async def on_message(message: discord.Message):
-    # ---------- 0) Handle WEBHOOK posts first (daily link posts) ----------
-    # Webhook messages show up with message.webhook_id set.
-    if getattr(message, "webhook_id", None):
-        text = (message.content or "").lower()
-
-        # Brand-specific replies
-        if "lululemon.com" in text:
-            options = [
-                "cart… added. don’t judge me 🛒✨",
-                "she’s serving athleisure elite 🔥",
-                "ok but the matching set? say less 😮‍💨",
-            ]
-        elif "aloyoga.com" in text:
-            options = [
-                "alo? more like *allow* me to splurge 😭",
-                "that’s a pilates princess fit fr 👑",
-                "studio to street, we love to see it 👟",
-            ]
-        elif "anthropologie.com" in text:
-            options = [
-                "cottagecore but make it rent-due 😅",
-                "this is so ‘brunch then farmer’s market’ vibes 🥐🌼",
-                "ok ethereal queen, twirl on them ✨",
-            ]
-        elif "freepeople.com" in text:
-            options = [
-                "boho baddie unlocked 🧚‍♀️",
-                "floaty fit for main-character energy 🎬",
-                "festival season stays winning 🎶",
-            ]
-        elif "potterybarn.com" in text:
-            options = [
-                "ooo spooky decor? put it in the cart 🎃🕸️",
-                "your apartment is about to eat, bestie 🏠",
-                "ok homemaker era, i see you ✨",
-            ]
-        else:
-            options = [
-                "adds to cart in silence 👀",
-                "this is dangerously cute ngl 😵‍💫",
-                "ok but… i *need* this actually",
-            ]
-
-        try:
-            await message.reply(random.choice(options), mention_author=False)
-        except Exception as e:
-            print("Webhook reply error:", e)
-
-        # still allow commands parser to see webhook messages (harmless)
-        await bot.process_commands(message)
+    if message.author.bot:
         return
 
-    # ---------- 1) Ignore ONLY our own bot (not all bot/webhooks) ----------
-    if bot.user and message.author.id == bot.user.id:
-        return
-
-    # ---------- 2) EXISTING LOGIC BELOW (unchanged) ----------
     # --- Mimic: capture USER3 messages + mark "last seen" per channel ---
     if message.author.id == USER3_ID:
         await _mimic_store_message(message)
@@ -835,7 +745,7 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
-    # Process commands first (your project’s style)
+    # Process commands first
     if content.strip().startswith("!"):
         await bot.process_commands(message)
         return
@@ -941,8 +851,8 @@ async def on_message(message: discord.Message):
                                 random.choice(REACTION_EMOTES)])
         await message.reply(choice, mention_author=False)
 
-    # keep commands working for regular (non-webhook) messages
-    await bot.process_commands(message)
+# ---- Reply watcher for FIT follow-up (20s window) ----
+@bot.listen("on_message")
 async def _fit_reply_watch(message: discord.Message):
     if message.author.bot: return
     if not message.reference or not message.reference.resolved: return
