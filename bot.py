@@ -1,4 +1,3 @@
-from discord.ext import commands, tasks
 import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
@@ -14,7 +13,6 @@ LULU_WHATS_NEW_URL = ("https://shop.lululemon.com/c/women-whats-new/n16o10zq0cf"
 try:
     LULU_CHANNEL_ID = int(os.getenv("LULU_CHANNEL_ID", str(FIT_CHANNEL_ID)))
 except Exception:
-    # Fallback: default to the provided ID if FIT_CHANNEL_ID is not defined at import time
     LULU_CHANNEL_ID = int(os.getenv("LULU_CHANNEL_ID", "1273436116699058290"))
 
 # ---------- Lululemon copy ----------
@@ -26,6 +24,8 @@ def get_lulu_msg() -> str:
 
 
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
+from discord.ext import commands, tasks
+
 
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
@@ -2066,7 +2066,6 @@ if __name__ == "__main__":
     bot.run(TOKEN)
 
 
-
 # ---------- Lululemon helpers ----------
 def _pick_one_time_today_pt(start_hour=8, end_hour=14):
     """Pick a single random time today between [start_hour, end_hour) PT and return as UTC datetime (minute precision)."""
@@ -2173,35 +2172,6 @@ async def lulu_cmd(ctx: commands.Context, *, arg: str | None = None):
             pass
         print("!lulu error:", repr(e))
 
-async def lulu_cmd(ctx: commands.Context, *, arg: str | None = None):
-    """
-    Usage:
-      !lulu                -> post in this channel with current message
-      !lulu #channel       -> post in that channel
-      !lulu setmsg <text>  -> change the message copy (persists until restart)
-    """
-    # handle setmsg
-    if arg and arg.lower().startswith("setmsg "):
-        new_msg = arg[7:].strip()
-        if not new_msg:
-            return await ctx.reply("Give me some text after `setmsg`.")
-        bot._lulu_msg = new_msg
-        return await ctx.reply(f"Updated Lulu message to:\n> {bot._lulu_msg}")
-
-    # pick target channel (default: current)
-    target = ctx.channel
-    if arg:
-        m = re.search(r"<#(\d+)>|^(\d{15,25})$", arg.strip())
-        if m:
-            chan_id = int((m.group(1) or m.group(2)))
-            target = ctx.guild.get_channel(chan_id) or await ctx.guild.fetch_channel(chan_id)
-
-    # fetch link and post
-    link = await fetch_random_lulu_link(LULU_WHATS_NEW_URL) or LULU_WHATS_NEW_URL
-    await target.send(f"{get_lulu_msg()}\n{link}")
-    if target.id != ctx.channel.id:
-        await ctx.reply(f"Dropped one in <#{target.id}> ✅")
-
 # Optional: Slash command versions if app commands are enabled
 try:
     from discord import app_commands
@@ -2227,21 +2197,27 @@ try:
             ephemeral=True
         )
 
-    # register to tree in setup_hook if available
     if hasattr(bot, "tree"):
         async def _maybe_sync_tree():
             try:
                 await bot.tree.sync()
             except Exception as e:
                 print("Slash sync failed:", e)
-        # queue a background sync after ready
         if not hasattr(bot, "_lulu_sync_scheduled"):
             bot._lulu_sync_scheduled = True
+            import asyncio as _asyncio
             async def _wait_and_sync():
                 await bot.wait_until_ready()
                 await _maybe_sync_tree()
-            import asyncio as _asyncio
             _asyncio.create_task(_wait_and_sync())
 except Exception:
     pass
+
+
+
+
+@bot.command(name="lulutest", help="Quick diagnostic: replies 'ok'")
+@commands.guild_only()
+async def lulutest_cmd(ctx: commands.Context):
+    await ctx.reply("ok ✅", mention_author=False)
 
