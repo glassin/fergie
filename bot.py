@@ -188,7 +188,7 @@ BRATTY_LINES = [
     "*sigh*","*double sigh*","I'm having a horrible day.","oh my gaaaaawwwwww........d","HALP!","LISTEN!",
     "que triste","I've been dying","wen coffee colon cleansing?","skinnie winnie","labooobies",
     "I want a pumpkin cream cold brewwwww",
-    "update I want it to be fall already . need cold breeze, sweaters and flared leggings and a cute beanie and Halloween decor",
+    "I hate my boss",
     "JONATHAN!","UGH!","MMMMM","was it tasty?","LMFAO I CANT","AAAAAAAAAAAAAAAA",
     "no one pay's attention to me!!!!","I wanna take a trip so bad now"
 ]
