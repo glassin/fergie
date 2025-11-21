@@ -897,7 +897,7 @@ async def user1_twice_daily_fixed():
 async def user2_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER2_ID}> shooo cornman!")
+        await channel.send(f"<@{USER2_ID}> Kurtie!")
 
 @tasks.loop(hours=8)
 async def user3_task():
@@ -2005,7 +2005,7 @@ async def halp(ctx, *, command: str | None = None):
             "• Daily scam post (70% chance)\n"
             "• 8am PT: auto allowance for all members + inactivity penalties\n"
             "• `USER1_ID`: pings twice daily; reacts to “pinche fergie”; random 3x/day “bonk papo”\n"
-            "• `USER2_ID`: pings twice daily with “shooo cornman!”\n"
+            "• `USER2_ID`: pings twice daily with “Kurtie!”\n"
             "• `USER3_ID`: random replies (35% of their msgs) + ping every 8h\n"
             "• `LOBO_ID`: once/day “send me money lobo.” when they post\n"
             "• `!fit`: 20s follow-up if the target user replies to the fit post"
