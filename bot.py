@@ -187,7 +187,7 @@ BRATTY_LINES = [
     "very cheugi","cayuuuuuute","I hate it here!","SEND ME TO THE ER MF!!!","send me monies!!!",
     "*sigh*","*double sigh*","I'm having a horrible day.","oh my gaaaaawwwwww........d","HALP!","LISTEN!",
     "que triste","I've been dying","wen coffee colon cleansing?","skinnie winnie","labooobies",
-    "I want a pumpkin cream cold brewwwww",
+    "I need caffeine!!!!","Edwin slap jammies on me 🍑",
     "I hate my boss",
     "JONATHAN!","UGH!","MMMMM","was it tasty?","LMFAO I CANT","AAAAAAAAAAAAAAAA",
     "no one pay's attention to me!!!!","I wanna take a trip so bad now"
