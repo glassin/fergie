@@ -672,7 +672,7 @@ async def on_ready():
     user2_twice_daily_fixed.start()
     user3_task.start()
     daily_scam_post.start()
-    daily_auto_allowance.start()  # 8am PT allowance + penalties
+    # daily_auto_allowance.start()  # disabled: no more 8am allowance/penalty run
     kewchie_daily_scheduler.start()  # random twice-daily posts
     fit_auto_daily.start()          # auto-fit once a day
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
