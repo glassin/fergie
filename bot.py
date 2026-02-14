@@ -69,7 +69,7 @@ FIT_IMAGE_URLS = [
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818464170195/pinterest_681169512428788228.jpg?ex=689f6969&is=689e17e9&hm=86b1b23a623b8dbbf9789a9a002c8589dec91f139c39caad0a5ee6f470f26d6e&",
 ]
 FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
-FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
+# FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
 FIT_FOLLOWUP_EMOTE = "<a:slap_peach:1227392416617730078>"
 FIT_FOLLOWUP_TEXT  = "you know you'd look good in this girlie! you go girl! ✂️"
 
@@ -897,14 +897,14 @@ async def user1_twice_daily_fixed():
 async def user2_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER2_ID}> Kurtie!")
+        await channel.send(f"<@{USER2_ID}> let's share ceviche kurtiepoo!")
 
 @tasks.loop(hours=8)
 async def user3_task():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         phrase = random.choice(USER3_LINES)
-        await channel.send(f"<@{USER3_ID}> {phrase}")
+        await channel.send(f"<@{USER1_ID}> {phrase}")
 
 @tasks.loop(hours=24)
 async def daily_scam_post():
@@ -2005,8 +2005,8 @@ async def halp(ctx, *, command: str | None = None):
             "• Daily scam post (70% chance)\n"
             "• 8am PT: auto allowance for all members + inactivity penalties\n"
             "• `USER1_ID`: pings twice daily; reacts to “pinche fergie”; random 3x/day “bonk papo”\n"
-            "• `USER2_ID`: pings twice daily with “Kurtie!”\n"
-            "• `USER3_ID`: random replies (35% of their msgs) + ping every 8h\n"
+            "• `USER2_ID`: pings twice daily with “let's share ceviche kurtiepoo!”\n"
+            "• `USER3_ID`: random replies (35% of their msgs)\n"
             "• `LOBO_ID`: once/day “send me money lobo.” when they post\n"
             "• `!fit`: 20s follow-up if the target user replies to the fit post"
         ),
