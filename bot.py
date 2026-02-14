@@ -919,7 +919,7 @@ from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 from discord.ext import tasks
 
-GYM_CHANNEL_ID = 123456789012345678  # replace with your channel ID
+GYM_CHANNEL_ID = 1272237309521170434  # replace with your channel ID
 
 GYM_EMOTES_1 = ["💪", "🏋️‍♂️", "🏋️‍♀️", "🏃‍♂️", "🏃‍♀️", "🤸‍♀️", "🚴‍♂️", "🔥", "💯", "🥇", "🧠", "🫀"]
 GYM_EMOTES_2 = ["🏋️‍♀️", "🏋️‍♂️", "🚴‍♀️", "🏃‍♂️", "🏃‍♀️", "🥵", "🔥", "⚡️", "💥", "💢", "🗣️", "📣"]
