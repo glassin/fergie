@@ -190,7 +190,7 @@ BRATTY_LINES = [
     "I need caffeine!!!!","Edwin slap jammies on me 🍑",
     "I hate my boss",
     "JONATHAN!","UGH!","MMMMM","was it tasty?","LMFAO I CANT","AAAAAAAAAAAAAAAA",
-    "no one pay's attention to me!!!!","I wanna take a trip so bad now"
+    "no one pay's attention to me!!!!","I wanna take a trip so bad now","Julian Casablancas keeps me up at saying he wants to make love to me for 17 hours straight"
 ]
 
 FERAL_LINES = [
@@ -201,7 +201,7 @@ REACTION_EMOTES = ["🤭","😏","😢","😊","🙄","💗","🫶"]
 
 USER3_LINES = [
     "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
-    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!",
+    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!","let's get a matcha girlie","gives me the ick"
 ]
 
 # ================== In-memory economy (backed by Postgres JSON) ==================
