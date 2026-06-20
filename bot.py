@@ -493,6 +493,16 @@ User asked:
 
                 data = await r.json()
 
+
+                if "error" in data:
+                    return f"Gemini error: {data['error'].get('message', data['error'])}"
+
+                if "candidates" not in data:
+                    return f"Gemini gave no answer: {data}"
+
+                if not data["candidates"]:
+                    return f"Gemini returned empty candidates: {data}"
+
                 return (
                     data["candidates"][0]
                     ["content"]["parts"][0]
