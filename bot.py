@@ -533,11 +533,6 @@ User asked:
                 }
             ]
         }
-    ],
-    "tools": [
-        {
-            "google_search": {}
-        }
     ]
 }
 
