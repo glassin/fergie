@@ -959,6 +959,7 @@ async def on_message(message: discord.Message):
             .strip()
         )
 
+   
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
 
@@ -1003,6 +1004,52 @@ async def on_message(message: discord.Message):
                 )
             return
 
+        coffee_triggers = [
+            "coffee pls",
+            "coffee gossip",
+            "what are the coffee girlies drinking",
+            "trending coffee drinks",
+            "matcha pls",
+            "drinkies"
+        ]
+
+        q = question.lower()
+
+        if any(trigger in q for trigger in coffee_triggers):
+
+            wait = await message.reply(
+                "ugh fine. stalking the coffee girlies rn... ☕🙄",
+                mention_author=False
+            )
+
+            answer = await ask_gemini(
+                """
+Search Reddit discussions, recent web articles, and coffee trends.
+
+Focus on:
+- r/starbucks
+- r/coffee
+- r/espresso
+- r/matcha
+- popular cafe drink trends
+- seasonal drinks
+- viral TikTok-style coffee drinks if they appear in search
+
+Give a short Fergie-style report:
+- 4 to 7 trending drinks
+- why people like them
+- any drama or complaints people have
+- one bratty final recommendation
+
+Keep it funny, bratty, and useful.
+"""
+            )
+
+            if len(answer) > 1800:
+                answer = answer[:1800]
+
+            await wait.edit(content=answer)
+            return
         if question:
 
             wait = await message.reply(
