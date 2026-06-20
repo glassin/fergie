@@ -208,6 +208,29 @@ USER3_LINES = [
 # ================== In-memory economy (backed by Postgres JSON) ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
+    
+gemini_cooldowns = {}
+GEMINI_COOLDOWN_SECONDS = 15
+
+async def gemini_on_cooldown(message):
+    user_id = message.author.id
+    now = time.time()
+
+    last = gemini_cooldowns.get(user_id, 0)
+    elapsed = now - last
+
+    if elapsed < GEMINI_COOLDOWN_SECONDS:
+        remaining = int(GEMINI_COOLDOWN_SECONDS - elapsed)
+
+        await message.reply(
+            f"ugh. slow down. Google's already glaring at me. 🙄\n"
+            f"fak ask me again in {remaining} seconds.",
+            mention_author=False
+        )
+        return True
+
+    gemini_cooldowns[user_id] = now
+    return False
 
 economy_lock = asyncio.Lock()
 economy = {
@@ -1032,9 +1055,11 @@ async def on_message(message: discord.Message):
             "drinkies"
         ]
 
-        q = question.lower()
-
+                q = question.lower()
         if any(trigger in q for trigger in coffee_triggers):
+
+            if await gemini_on_cooldown(message):
+                return
 
             wait = await message.reply(
                 "ugh fine. stalking the coffee girlies rn... ☕🙄",
@@ -1069,7 +1094,11 @@ Keep it funny, bratty, and useful.
 
             await wait.edit(content=answer)
             return
+
         if question:
+
+            if await gemini_on_cooldown(message):
+                return
 
             wait = await message.reply(
                 "pensando...",
