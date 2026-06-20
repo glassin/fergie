@@ -788,33 +788,7 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
-        # AI mention mode
-if bot.user in message.mentions:
-
-    question = (
-        content
-        .replace(f"<@{bot.user.id}>", "")
-        .replace(f"<@!{bot.user.id}>", "")
-        .strip()
-    )
-
-    if question:
-
-        wait = await message.reply(
-            "thinking..."
-        )
-
-        answer = await ask_gemini(question)
-
-        if len(answer) > 1800:
-            answer = answer[:1800]
-
-        await wait.edit(
-            content=answer
-        )
-
-        return
-
+    
     # Process commands first
     if content.strip().startswith("!"):
         await bot.process_commands(message)
@@ -911,9 +885,38 @@ if bot.user in message.mentions:
             mentioned = True
 
     if mentioned:
-        await message.reply(random.choice(BRATTY_LINES), mention_author=False)
-        return
 
+        question = (
+            content
+            .replace(f"<@{bot.user.id}>", "")
+            .replace(f"<@!{bot.user.id}>", "")
+            .strip()
+        )
+
+        if question:
+
+            wait = await message.reply(
+                "thinking...",
+                mention_author=False
+            )
+
+            answer = await ask_gemini(question)
+
+            if len(answer) > 1800:
+                answer = answer[:1800]
+
+            await wait.edit(
+                content=answer
+            )
+
+            return
+
+        await message.reply(
+            random.choice(BRATTY_LINES),
+            mention_author=False
+        )
+
+        return
     # Random chat sass (global)
     if random.random() < REPLY_CHANCE:
         choice = random.choice([random.choice(BRATTY_LINES),
