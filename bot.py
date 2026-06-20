@@ -495,8 +495,17 @@ User asked:
 
 
                 if "error" in data:
-                    return f"Gemini error: {data['error'].get('message', data['error'])}"
+                    msg = data["error"].get("message", "")
 
+                    if "quota" in msg.lower():
+                        return (
+                            "ugh. Google put me in timeout again. 🙄\n"
+                            "Try asking me again in a minute."
+                        )
+
+                    return f"Gemini error: {msg}"
+
+              
                 if "candidates" not in data:
                     return f"Gemini gave no answer: {data}"
 
