@@ -896,7 +896,7 @@ async def on_message(message: discord.Message):
         if question:
 
             wait = await message.reply(
-                "thinking...",
+                "pensando...",
                 mention_author=False
             )
 
