@@ -786,7 +786,9 @@ async def on_message(message: discord.Message):
         bot._last_user3_in_ch[message.channel.id] = _now()
 
     content = (message.content or "")
-    # AI mention mode
+    lower = content.lower().strip()
+
+        # AI mention mode
 if bot.user in message.mentions:
 
     question = (
@@ -812,7 +814,6 @@ if bot.user in message.mentions:
         )
 
         return
-    lower = content.lower().strip()
 
     # Process commands first
     if content.strip().startswith("!"):
