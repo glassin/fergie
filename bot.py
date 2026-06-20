@@ -1189,14 +1189,19 @@ async def on_reaction_add(reaction, user):
     if reaction.message.author.id != bot.user.id:
         return
 
-    async for msg in reaction.message.channel.history(limit=50):
-        if msg.author.id == user.id:
-            choices = ["🍑", bot.get_emoji(1227392416617730078)]
+  async for msg in reaction.message.channel.history(limit=50):
+    if msg.author.id == user.id:
+
+        custom_emoji = bot.get_emoji(1227392416617730078)
+
+        choices = ["🍑"]
+
+        if custom_emoji:
+            choices.append(custom_emoji)
 
         emoji = random.choice(choices)
 
-        if emoji:
-            await msg.add_reaction(emoji)
+        await msg.add_reaction(emoji)
 
         return
 # ---- Reply watcher for FIT follow-up (20s window) ----
