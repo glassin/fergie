@@ -45,6 +45,20 @@ JUMPSCARE_TRIGGER = "concha"
 JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
 JUMPSCARE_EMOTE_TEXT = "<:monkagiga:1131711987794063511>"
+
+HYDRATION_VIDEO = "hydration_waifu.mp4"
+
+HYDRATION_TRIGGERS = [
+    "drink water",
+    "hydration break",
+    "hydrate papo",
+    "water break",
+    "stay hydrated",
+    "powerade",
+    "bloomies"
+]
+
+HYDRATION_COOLDOWN_SECONDS = 120
 # ---------------------------------------
 
 # ---------- Kewchie (Kali Uchis) ----------
@@ -888,7 +902,27 @@ async def _bonk_wait():
 
 @bot.event
 async def on_message(message: discord.Message):
+
     if message.author.bot:
+        return
+
+    if not hasattr(bot, "_hydration_last"):
+        bot._hydration_last = {}
+
+    hydration_lower = (message.content or "").lower()
+
+    if any(trigger in hydration_lower for trigger in HYDRATION_TRIGGERS):
+        now = time.time()
+        last = bot._hydration_last.get(message.channel.id, 0)
+
+        if now - last >= HYDRATION_COOLDOWN_SECONDS:
+            bot._hydration_last[message.channel.id] = now
+
+            await message.channel.send(
+                "hydrate, girlies! 🙄💧",
+                file=discord.File(HYDRATION_VIDEO)
+            )
+
         return
 
     # --- Mimic: capture USER3 messages + mark "last seen" per channel ---
