@@ -374,6 +374,28 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
 def _mark_active(uid: int):
     _user(uid)["last_active"] = _now()
 
+# ================== User Memory helpers ==================
+async def get_user_memories(user_id: int):
+    data = await _db_get(f"memories:{user_id}")
+    if not isinstance(data, dict):
+        return []
+    return data.get("items", [])
+
+async def save_user_memories(user_id: int, items: list[str]):
+    await _db_set(f"memories:{user_id}", {"items": items[-25:]})
+
+async def add_user_memory(user_id: int, memory: str):
+    items = await get_user_memories(user_id)
+    items.append(memory)
+    await save_user_memories(user_id, items)
+
+async def forget_user_memory(user_id: int, text: str):
+    items = await get_user_memories(user_id)
+    lowered = text.lower()
+    new_items = [m for m in items if lowered not in m.lower()]
+    await save_user_memories(user_id, new_items)
+    return len(items) - len(new_items)
+
 # ============== Casino helpers ==============
 def _dynamic_max_bet(vault: int, user_bal: int) -> int:
     """Cap a bet by global GAMBLE_MAX_BET, user balance, vault %, and available vault."""
@@ -937,6 +959,50 @@ async def on_message(message: discord.Message):
             .strip()
         )
 
+        if question.lower().startswith("remember "):
+            memory = question[9:].strip()
+
+            if memory:
+                await add_user_memory(message.author.id, memory)
+                await message.reply(
+                    f"Fine. I remembered it: {memory} 🙄",
+                    mention_author=False
+                )
+                return
+
+        if question.lower() in ["what do you remember about me", "what do you remember about me?"]:
+            memories = await get_user_memories(message.author.id)
+
+            if not memories:
+                await message.reply(
+                    "I remember nothing. A clean slate. Suspicious. 🙄",
+                    mention_author=False
+                )
+                return
+
+            text = "\n".join([f"- {m}" for m in memories])
+            await message.reply(
+                f"Ugh, here's what I remember about you:\n{text}",
+                mention_author=False
+            )
+            return
+
+        if question.lower().startswith("forget "):
+            thing = question[7:].strip()
+            removed = await forget_user_memory(message.author.id, thing)
+
+            if removed:
+                await message.reply(
+                    f"Fine. I forgot anything matching: {thing}",
+                    mention_author=False
+                )
+            else:
+                await message.reply(
+                    "I don't remember that anyway. Very dramatic of you.",
+                    mention_author=False
+                )
+            return
+
         if question:
 
             wait = await message.reply(
@@ -944,7 +1010,18 @@ async def on_message(message: discord.Message):
                 mention_author=False
             )
 
-            answer = await ask_gemini(question)
+            memories = await get_user_memories(message.author.id)
+            memory_text = "\n".join([f"- {m}" for m in memories]) if memories else "None"
+
+            answer = await ask_gemini(
+                f"""
+User memories:
+{memory_text}
+
+User asked:
+{question}
+"""
+            )
 
             if len(answer) > 1800:
                 answer = answer[:1800]
