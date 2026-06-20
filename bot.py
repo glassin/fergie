@@ -1178,7 +1178,21 @@ User asked:
                                 random.choice(FERAL_LINES),
                                 random.choice(REACTION_EMOTES)])
         await message.reply(choice, mention_author=False)
+@bot.event
+async def on_reaction_add(reaction, user):
+    if user.bot:
+        return
 
+    if not bot.user:
+        return
+
+    if reaction.message.author.id != bot.user.id:
+        return
+
+    async for msg in reaction.message.channel.history(limit=50):
+        if msg.author.id == user.id:
+            await msg.add_reaction("🍑")
+            return
 # ---- Reply watcher for FIT follow-up (20s window) ----
 @bot.listen("on_message")
 async def _fit_reply_watch(message: discord.Message):
