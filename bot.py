@@ -45,20 +45,6 @@ JUMPSCARE_TRIGGER = "concha"
 JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
 JUMPSCARE_EMOTE_TEXT = "<:monkagiga:1131711987794063511>"
-
-HYDRATION_VIDEO = "hydration_waifu.mp4"
-
-HYDRATION_TRIGGERS = [
-    "drink water",
-    "hydration break",
-    "hydrate papo",
-    "water break",
-    "stay hydrated",
-    "powerade",
-    "bloomies"
-]
-
-HYDRATION_COOLDOWN_SECONDS = 120
 # ---------------------------------------
 
 # ---------- Kewchie (Kali Uchis) ----------
@@ -222,29 +208,6 @@ USER3_LINES = [
 # ================== In-memory economy (backed by Postgres JSON) ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
-    
-gemini_cooldowns = {}
-GEMINI_COOLDOWN_SECONDS = 15
-
-async def gemini_on_cooldown(message):
-    user_id = message.author.id
-    now = time.time()
-
-    last = gemini_cooldowns.get(user_id, 0)
-    elapsed = now - last
-
-    if elapsed < GEMINI_COOLDOWN_SECONDS:
-        remaining = int(GEMINI_COOLDOWN_SECONDS - elapsed)
-
-        await message.reply(
-            f"ugh. slow down. Google's already glaring at me. 🙄\n"
-            f"fak ask me again in {remaining} seconds.",
-            mention_author=False
-        )
-        return True
-
-    gemini_cooldowns[user_id] = now
-    return False
 
 economy_lock = asyncio.Lock()
 economy = {
@@ -471,7 +434,7 @@ async def ask_gemini(prompt):
                     "text": f"""
 You are Fergie.
 
-Fergie is a bratty, dramatic, chronically caffeinated Discord qtpi.
+Fergie is a bratty, dramatic, chronically caffeinated Discord gremlin.
 
 She loves:
 - coffee
@@ -497,41 +460,24 @@ She occasionally says things like:
 She still gives accurate answers.
 
 Rules:
-- Answer the user's question FIRST.
-
-- Correct information is more important than personality.
-
-- NEVER guess facts.
-
-- NEVER invent sports scores, schedules, match results, news, dates, statistics, or current events.
-
-- If you do not know something for certain, say:
-"I don't know for sure."
-
-- If the user asks for current information and Google Search is available, use Google Search.
-
-- If Google Search is unavailable, tell the user you cannot verify current information.
-
-- Do not say you can look something up.
-Actually answer the question whenever possible.
-
-- Put useful information first.
-
-- Add ONE short bratty Fergie comment after the answer.
-
-- Keep answers concise unless the user asks for details.
-
-- If the user asks for music recommendations, give 5-8 songs with artist names and a short reason.
-
-- Do not be hateful or cruel.
-
-- Stay Fergie.
+- Always answer the user's actual question.
+- Keep answers short unless the user asks for details.
+- If the user asks for current info, use Google Search.
+- If the user asks for music recommendations, give 5-8 song recommendations.
+- For music recs, include artist names and a tiny bratty reason why.
+- Do not be cruel or hateful.
+- Stay fergie.
 
 User asked:
 {prompt}
 """
                 }
             ]
+        }
+    ],
+    "tools": [
+        {
+            "google_search": {}
         }
     ]
 }
@@ -546,25 +492,6 @@ User asked:
             ) as r:
 
                 data = await r.json()
-
-
-                if "error" in data:
-                    msg = data["error"].get("message", "")
-
-                    if "quota" in msg.lower():
-                        return (
-                            "ugh. Google put me in timeout again. 🙄\n"
-                            "Try asking me again in a minute."
-                        )
-
-                    return f"Gemini error: {msg}"
-
-              
-                if "candidates" not in data:
-                    return f"Gemini gave no answer: {data}"
-
-                if not data["candidates"]:
-                    return f"Gemini returned empty candidates: {data}"
 
                 return (
                     data["candidates"][0]
@@ -914,27 +841,7 @@ async def _bonk_wait():
 
 @bot.event
 async def on_message(message: discord.Message):
-
     if message.author.bot:
-        return
-
-    if not hasattr(bot, "_hydration_last"):
-        bot._hydration_last = {}
-
-    hydration_lower = (message.content or "").lower()
-
-    if any(trigger in hydration_lower for trigger in HYDRATION_TRIGGERS):
-        now = time.time()
-        last = bot._hydration_last.get(message.channel.id, 0)
-
-        if now - last >= HYDRATION_COOLDOWN_SECONDS:
-            bot._hydration_last[message.channel.id] = now
-
-            await message.channel.send(
-                "hydrate, girlies! 🙄💧",
-                file=discord.File(HYDRATION_VIDEO)
-            )
-
         return
 
     # --- Mimic: capture USER3 messages + mark "last seen" per channel ---
@@ -1052,7 +959,6 @@ async def on_message(message: discord.Message):
             .strip()
         )
 
-   
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
 
@@ -1097,59 +1003,7 @@ async def on_message(message: discord.Message):
                 )
             return
 
-        coffee_triggers = [
-            "coffee pls",
-            "coffee gossip",
-            "what are the coffee girlies drinking",
-            "trending coffee drinks",
-            "matcha pls",
-            "drinkies"
-        ]
-
-        q = question.lower()
-        if any(trigger in q for trigger in coffee_triggers):
-
-            if await gemini_on_cooldown(message):
-                return
-
-            wait = await message.reply(
-                "ugh fine. stalking the coffee girlies rn... ☕🙄",
-                mention_author=False
-            )
-
-            answer = await ask_gemini(
-                """
-Search Reddit discussions, recent web articles, and coffee trends.
-
-Focus on:
-- r/starbucks
-- r/coffee
-- r/espresso
-- r/matcha
-- popular cafe drink trends
-- seasonal drinks
-- viral TikTok-style coffee drinks if they appear in search
-
-Give a short Fergie-style report:
-- 4 to 7 trending drinks
-- why people like them
-- any drama or complaints people have
-- one bratty final recommendation
-
-Keep it funny, bratty, and useful.
-"""
-            )
-
-            if len(answer) > 1800:
-                answer = answer[:1800]
-
-            await wait.edit(content=answer)
-            return
-
         if question:
-
-            if await gemini_on_cooldown(message):
-                return
 
             wait = await message.reply(
                 "pensando...",
@@ -1190,32 +1044,7 @@ User asked:
                                 random.choice(FERAL_LINES),
                                 random.choice(REACTION_EMOTES)])
         await message.reply(choice, mention_author=False)
-@bot.event
-async def on_reaction_add(reaction, user):
-    if user.bot:
-        return
 
-    if not bot.user:
-        return
-
-    if reaction.message.author.id != bot.user.id:
-        return
-
-    async for msg in reaction.message.channel.history(limit=50):
-        if msg.author.id == user.id:
-
-            custom_emoji = bot.get_emoji(1227392416617730078)
-
-            choices = ["🍑"]
-
-            if custom_emoji:
-                choices.append(custom_emoji)
-
-            emoji = random.choice(choices)
-
-            await msg.add_reaction(emoji)
-
-            return
 # ---- Reply watcher for FIT follow-up (20s window) ----
 @bot.listen("on_message")
 async def _fit_reply_watch(message: discord.Message):
@@ -1246,21 +1075,11 @@ async def four_hour_post():
         ])
         await channel.send(text)
 
-@four_hour_post.before_loop
-async def _wait_four_hour_post():
-    await bot.wait_until_ready()
-    await asyncio.sleep(4 * 3600)
-
 @tasks.loop(hours=6)
 async def six_hour_emoji():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         await channel.send(BREAD_EMOJI)
-
-@six_hour_emoji.before_loop
-async def _wait_six_hour_emoji():
-    await bot.wait_until_ready()
-    await asyncio.sleep(6 * 3600)
 
 @tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
 async def user1_twice_daily_fixed():
@@ -1281,21 +1100,11 @@ async def user3_task():
         phrase = random.choice(USER3_LINES)
         await channel.send(f"<@{USER1_ID}> {phrase}")
 
-@user3_task.before_loop
-async def _wait_user3_task():
-    await bot.wait_until_ready()
-    await asyncio.sleep(8 * 3600)
-
 @tasks.loop(hours=24)
 async def daily_scam_post():
     channel = bot.get_channel(CHANNEL_ID)
     if channel and random.random() < 0.7:
         await channel.send("I NEED MONIES!!!🙄💅")
-
-@daily_scam_post.before_loop
-async def _wait_daily_scam_post():
-    await bot.wait_until_ready()
-    await asyncio.sleep(24 * 3600)
 
 
 # ---- Gym Reminder ----
