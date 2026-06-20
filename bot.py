@@ -1202,10 +1202,10 @@ async def on_reaction_add(reaction, user):
             emoji = random.choice(choices)
 
             try:
+   try:
     await msg.add_reaction(emoji)
 except discord.HTTPException:
     pass
-
             return
 # ---- Reply watcher for FIT follow-up (20s window) ----
 @bot.listen("on_message")
