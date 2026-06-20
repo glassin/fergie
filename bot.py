@@ -1170,11 +1170,21 @@ async def four_hour_post():
         ])
         await channel.send(text)
 
+@four_hour_post.before_loop
+async def _wait_four_hour_post():
+    await bot.wait_until_ready()
+    await asyncio.sleep(4 * 3600)
+
 @tasks.loop(hours=6)
 async def six_hour_emoji():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         await channel.send(BREAD_EMOJI)
+
+@six_hour_emoji.before_loop
+async def _wait_six_hour_emoji():
+    await bot.wait_until_ready()
+    await asyncio.sleep(6 * 3600)
 
 @tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
 async def user1_twice_daily_fixed():
@@ -1195,11 +1205,21 @@ async def user3_task():
         phrase = random.choice(USER3_LINES)
         await channel.send(f"<@{USER1_ID}> {phrase}")
 
+@user3_task.before_loop
+async def _wait_user3_task():
+    await bot.wait_until_ready()
+    await asyncio.sleep(8 * 3600)
+
 @tasks.loop(hours=24)
 async def daily_scam_post():
     channel = bot.get_channel(CHANNEL_ID)
     if channel and random.random() < 0.7:
         await channel.send("I NEED MONIES!!!🙄💅")
+
+@daily_scam_post.before_loop
+async def _wait_daily_scam_post():
+    await bot.wait_until_ready()
+    await asyncio.sleep(24 * 3600)
 
 
 # ---- Gym Reminder ----
