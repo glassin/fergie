@@ -10,6 +10,7 @@ import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
 CHANNEL_ID  = 1273436116699058290
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
@@ -393,6 +394,48 @@ def _est_win_prob(bet: int) -> float:
 def _can_afford(user_obj: dict, amt: int) -> bool:
     return int(user_obj.get("balance", 0)) >= amt
 
+async def ask_gemini(prompt):
+
+    if not GEMINI_KEY:
+        return "gemini key missing"
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+    )
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": prompt
+                    }
+                ]
+            }
+        ]
+    }
+
+    try:
+
+        async with aiohttp.ClientSession() as session:
+
+            async with session.post(
+                url,
+                json=payload
+            ) as r:
+
+                data = await r.json()
+
+                return (
+                    data["candidates"][0]
+                    ["content"]["parts"][0]
+                    ["text"]
+                )
+
+    except Exception as e:
+
+        return f"error: {e}"
 # ================== Spotify helpers ==================
 _spotify_token = {"access_token": None, "expires_at": 0}
 
@@ -743,6 +786,32 @@ async def on_message(message: discord.Message):
         bot._last_user3_in_ch[message.channel.id] = _now()
 
     content = (message.content or "")
+    # AI mention mode
+if bot.user in message.mentions:
+
+    question = (
+        content
+        .replace(f"<@{bot.user.id}>", "")
+        .replace(f"<@!{bot.user.id}>", "")
+        .strip()
+    )
+
+    if question:
+
+        wait = await message.reply(
+            "thinking..."
+        )
+
+        answer = await ask_gemini(question)
+
+        if len(answer) > 1800:
+            answer = answer[:1800]
+
+        await wait.edit(
+            content=answer
+        )
+
+        return
     lower = content.lower().strip()
 
     # Process commands first
