@@ -188,7 +188,7 @@ BRATTY_LINES = [
     "*sigh*","*double sigh*","I'm having a horrible day.","oh my gaaaaawwwwww........d","HALP!","LISTEN!",
     "que triste","I've been dying","wen coffee colon cleansing?","skinnie winnie","labooobies",
     "I need caffeine!!!!","wen coconut oil? 🍑",
-    "I hate my boss","@481916394410344450 true or false?",
+    "I hate my boss","<@481916394410344450> true or false?",,
     "JONATHAN!","UGH!","MMMMM","was it tasty?","LMFAO I CANT","AAAAAAAAAAAAAAAA",
     "no one pay's attention to me!!!!","I wanna take a trip so bad now","Julian Casablancas keeps me up at saying he wants to make love to me for 17 hours straight","relax yourself","relajate","usted callese","i need a snack, a lil taste, a lil lick, a lil crunch"
 ]
