@@ -405,16 +405,21 @@ async def ask_gemini(prompt):
     )
 
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "text": prompt
-                    }
-                ]
-            }
-        ]
-    }
+    "contents": [
+        {
+            "parts": [
+                {
+                    "text": prompt
+                }
+            ]
+        }
+    ],
+    "tools": [
+        {
+            "google_search": {}
+        }
+    ]
+}
 
     try:
 
