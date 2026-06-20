@@ -1055,7 +1055,7 @@ async def on_message(message: discord.Message):
             "drinkies"
         ]
 
-                q = question.lower()
+        q = question.lower()
         if any(trigger in q for trigger in coffee_triggers):
 
             if await gemini_on_cooldown(message):
