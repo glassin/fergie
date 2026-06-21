@@ -476,7 +476,7 @@ needs_search = any(word in prompt.lower() for word in [
     "stock",
     "price"
 ])
-    payload = {
+payload = {
     "contents": [
         {
             "parts": [
