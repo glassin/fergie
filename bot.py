@@ -551,6 +551,7 @@ User asked:
             ) as r:
 
                 data = await r.json()
+                print(data)
 
 
                 if "error" in data:
