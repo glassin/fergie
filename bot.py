@@ -560,7 +560,7 @@ User asked:
 
                     return f"Gemini error: {msg}"
 
-              print("GOT CANDIDATES")
+        
                 if "candidates" not in data:
                     return f"Gemini gave no answer: {data}"
 
