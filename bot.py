@@ -1181,8 +1181,8 @@ Keep it funny, bratty, and useful.
             memories = await get_user_memories(message.author.id)
             memory_text = "\n".join([f"- {m}" for m in memories]) if memories else "None"
 
-      answer = await ask_gemini(
-    f"""
+               answer = await ask_gemini(
+                f"""
 User memories:
 {memory_text}
 
@@ -1194,8 +1194,8 @@ User asked:
 
 If the user is replying to your previous message, use that previous message as context.
 """,
-    needs_search=should_use_search(question)
-)
+               needs_search=should_use_search(question)
+            )
 
             if len(answer) > 1800:
                 answer = answer[:1800]
