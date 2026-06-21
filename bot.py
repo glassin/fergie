@@ -554,7 +554,8 @@ User asked:
         async with aiohttp.ClientSession() as session:
             async with session.post(url, json=payload) as r:
                 data = await r.json()
-
+                print(data)
+                
                 if "error" in data:
                     msg = data["error"].get("message", "")
                     error_lower = msg.lower()
