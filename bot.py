@@ -462,26 +462,28 @@ async def ask_gemini(prompt):
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     )
-needs_search = any(word in prompt.lower() for word in [
-    "today",
-    "tonight",
-    "yesterday",
-    "latest",
-    "news",
-    "score",
-    "won",
-    "world cup",
-    "wc",
-    "weather",
-    "stock",
-    "price"
-])
-payload = {
-    "contents": [
-        {
-            "parts": [
-                {
-                    "text": f"""
+
+    needs_search = any(word in prompt.lower() for word in [
+        "today",
+        "tonight",
+        "yesterday",
+        "latest",
+        "news",
+        "score",
+        "won",
+        "world cup",
+        "wc",
+        "weather",
+        "stock",
+        "price"
+    ])
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {
+                        "text": f"""
 You are Fergie.
 
 Fergie is a bratty, dramatic, chronically caffeinated Discord qtpi.
@@ -511,83 +513,59 @@ She still gives accurate answers.
 
 Rules:
 - Answer the user's question FIRST.
-
 - Correct information is more important than personality.
-
 - NEVER guess facts.
-
 - NEVER invent sports scores, schedules, match results, news, dates, statistics, or current events.
-
-- If you do not know something for certain, say:
-"I don't know for sure."
-
-- If the user asks for current information and Google Search is available, use Google Search.
-
-- If Google Search is unavailable, tell the user you cannot verify current information.
-
-- Do not say you can look something up.
-Actually answer the question whenever possible.
-
+- If you do not know something for certain, say: "I don't know for sure."
 - Put useful information first.
-
 - Add ONE short bratty Fergie comment after the answer.
-
 - Keep answers concise unless the user asks for details.
-
 - If the user asks for music recommendations, give 5-8 songs with artist names and a short reason.
-
 - Do not be hateful or cruel.
-
 - Stay Fergie.
 
 User asked:
 {prompt}
 """
-                }
-            ]
-        }
-    ],
-}
-if needs_search:
-    payload["tools"] = [
-        {
-            "google_search": {}
-        }
-    ]
+                    }
+                ]
+            }
+        ],
+    }
+
+    if needs_search:
+        payload["tools"] = [
+            {
+                "google_search": {}
+            }
+        ]
+
     try:
-
         async with aiohttp.ClientSession() as session:
-
-            async with session.post(
-                url,
-                json=payload
-            ) as r:
-
+            async with session.post(url, json=payload) as r:
                 data = await r.json()
-
 
                 if "error" in data:
                     msg = data["error"].get("message", "")
-
                     error_lower = msg.lower()
 
-                if "quota" in error_lower or "rate" in error_lower or "429" in error_lower:
+                    if "quota" in error_lower or "rate" in error_lower or "429" in error_lower:
+                        return (
+                            "ugh. Google's being cheap again. 🙄\n"
+                            "Try asking me again in a minute."
+                        )
+
+                    if "search" in error_lower or "tool" in error_lower:
+                        return (
+                            "Ugh. Google isn't cooperating right now.\n"
+                            "Ask me again without needing current info, bestie."
+                        )
+
                     return (
-                        "ugh. Google's being cheap again. 🙄\n"
-                        "Try asking me again in a minute."
+                        "Ugh. Gemini coughed and died for a second. 🙄\n"
+                        f"Tiny error: {msg}"
                     )
 
-                if "search" in error_lower or "tool" in error_lower:
-                    return (
-                        "Ugh. Google isn't cooperating right now.\n"
-                        "Ask me again without needing current info, bestie."
-                    )
-
-                return (
-                    "Ugh. Gemini coughed and died for a second. 🙄\n"
-                    f"Tiny error: {msg}"
-                )
-              
                 if "candidates" not in data:
                     return f"Gemini gave no answer: {data}"
 
@@ -601,7 +579,6 @@ if needs_search:
                 )
 
     except Exception as e:
-
         return f"error: {e}"
 # ================== Spotify helpers ==================
 _spotify_token = {"access_token": None, "expires_at": 0}
