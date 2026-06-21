@@ -10,7 +10,6 @@ import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
 CHANNEL_ID  = 1273436116699058290
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
@@ -45,20 +44,6 @@ JUMPSCARE_TRIGGER = "concha"
 JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
 JUMPSCARE_EMOTE_TEXT = "<:monkagiga:1131711987794063511>"
-
-HYDRATION_VIDEO = "hydration_waifu.mp4"
-
-HYDRATION_TRIGGERS = [
-    "drink water",
-    "hydration break",
-    "hydrate papo",
-    "water break",
-    "stay hydrated",
-    "powerade",
-    "bloomies"
-]
-
-HYDRATION_COOLDOWN_SECONDS = 120
 # ---------------------------------------
 
 # ---------- Kewchie (Kali Uchis) ----------
@@ -84,7 +69,7 @@ FIT_IMAGE_URLS = [
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818464170195/pinterest_681169512428788228.jpg?ex=689f6969&is=689e17e9&hm=86b1b23a623b8dbbf9789a9a002c8589dec91f139c39caad0a5ee6f470f26d6e&",
 ]
 FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
-# FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
+FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
 FIT_FOLLOWUP_EMOTE = "<a:slap_peach:1227392416617730078>"
 FIT_FOLLOWUP_TEXT  = "you know you'd look good in this girlie! you go girl! ✂️"
 
@@ -202,10 +187,10 @@ BRATTY_LINES = [
     "very cheugi","cayuuuuuute","I hate it here!","SEND ME TO THE ER MF!!!","send me monies!!!",
     "*sigh*","*double sigh*","I'm having a horrible day.","oh my gaaaaawwwwww........d","HALP!","LISTEN!",
     "que triste","I've been dying","wen coffee colon cleansing?","skinnie winnie","labooobies",
-    "I need caffeine!!!!","wen coconut oil? 🍑",
-    "I hate my boss","<@481916394410344450> true or false?",
+    "I need caffeine!!!!","Edwin slap jammies on me 🍑",
+    "I hate my boss",
     "JONATHAN!","UGH!","MMMMM","was it tasty?","LMFAO I CANT","AAAAAAAAAAAAAAAA",
-    "no one pay's attention to me!!!!","I wanna take a trip so bad now","Julian Casablancas keeps me up at saying he wants to make love to me for 17 hours straight","relax yourself","relajate","usted callese","i need a snack, a lil taste, a lil lick, a lil crunch"
+    "no one pay's attention to me!!!!","I wanna take a trip so bad now"
 ]
 
 FERAL_LINES = [
@@ -216,35 +201,12 @@ REACTION_EMOTES = ["🤭","😏","😢","😊","🙄","💗","🫶"]
 
 USER3_LINES = [
     "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
-    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!","let's get a matcha girlie","gives me the ick","como jodes!","you're obsessed!", "I love that for you"
+    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!",
 ]
 
 # ================== In-memory economy (backed by Postgres JSON) ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
-    
-gemini_cooldowns = {}
-GEMINI_COOLDOWN_SECONDS = 15
-
-async def gemini_on_cooldown(message):
-    user_id = message.author.id
-    now = time.time()
-
-    last = gemini_cooldowns.get(user_id, 0)
-    elapsed = now - last
-
-    if elapsed < GEMINI_COOLDOWN_SECONDS:
-        remaining = int(GEMINI_COOLDOWN_SECONDS - elapsed)
-
-        await message.reply(
-            f"ugh. slow down. Google's already glaring at me. 🙄\n"
-            f"fak ask me again in {remaining} seconds.",
-            mention_author=False
-        )
-        return True
-
-    gemini_cooldowns[user_id] = now
-    return False
 
 economy_lock = asyncio.Lock()
 economy = {
@@ -411,28 +373,6 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
 def _mark_active(uid: int):
     _user(uid)["last_active"] = _now()
 
-# ================== User Memory helpers ==================
-async def get_user_memories(user_id: int):
-    data = await _db_get(f"memories:{user_id}")
-    if not isinstance(data, dict):
-        return []
-    return data.get("items", [])
-
-async def save_user_memories(user_id: int, items: list[str]):
-    await _db_set(f"memories:{user_id}", {"items": items[-25:]})
-
-async def add_user_memory(user_id: int, memory: str):
-    items = await get_user_memories(user_id)
-    items.append(memory)
-    await save_user_memories(user_id, items)
-
-async def forget_user_memory(user_id: int, text: str):
-    items = await get_user_memories(user_id)
-    lowered = text.lower()
-    new_items = [m for m in items if lowered not in m.lower()]
-    await save_user_memories(user_id, new_items)
-    return len(items) - len(new_items)
-
 # ============== Casino helpers ==============
 def _dynamic_max_bet(vault: int, user_bal: int) -> int:
     """Cap a bet by global GAMBLE_MAX_BET, user balance, vault %, and available vault."""
@@ -452,145 +392,7 @@ def _est_win_prob(bet: int) -> float:
 
 def _can_afford(user_obj: dict, amt: int) -> bool:
     return int(user_obj.get("balance", 0)) >= amt
-def should_use_search(question: str) -> bool:
-    q = (question or "").lower()
 
-    search_words = [
-        "today",
-        "tonight",
-        "yesterday",
-        "latest",
-        "news",
-        "score",
-        "scores",
-        "won",
-        "win",
-        "world cup",
-        "wc",
-        "weather",
-        "forecast",
-        "stock",
-        "price",
-        "current",
-        "right now",
-        "this week",
-        "this weekend"
-    ]
-
-    return any(word in q for word in search_words)
-async def ask_gemini(prompt, needs_search=False):
-
-    if not GEMINI_KEY:
-        return "gemini key missing"
-
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
-    )
-
-
-    payload = {
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "text": f"""
-You are Fergie.
-
-Fergie is a bratty, dramatic, chronically caffeinated Discord qtpi.
-
-She loves:
-- coffee
-- bread
-- music
-- complaining
-- gymmies
-- Jonathan
-
-She is helpful, but acts mildly inconvenienced about helping.
-
-She is playful and sassy, but never genuinely mean.
-
-She occasionally says things like:
-- "ugh, fine."
-- "listen."
-- "very cheugy."
-- "I hate it here."
-- "*sigh*"
-- "JONATHAN!"
-- "oh my gawwwwwd"
-
-She still gives accurate answers.
-
-Rules:
-- Answer the user's question FIRST.
-- Correct information is more important than personality.
-- NEVER guess facts.
-- NEVER invent sports scores, schedules, match results, news, dates, statistics, or current events.
-- If you do not know something for certain, say: "I don't know for sure."
-- Put useful information first.
-- Add ONE short bratty Fergie comment after the answer.
-- Keep answers concise unless the user asks for details.
-- If the user asks for music recommendations, give 5-8 songs with artist names and a short reason.
-- Do not be hateful or cruel.
-- Stay Fergie.
-
-User asked:
-{prompt}
-"""
-                    }
-                ]
-            }
-        ],
-    }
-
-    if needs_search:
-        payload["tools"] = [
-            {
-                "google_search": {}
-            }
-        ]
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as r:
-                data = await r.json()
-
-                if "error" in data:
-                    msg = data["error"].get("message", "")
-                    error_lower = msg.lower()
-
-                    if "quota" in error_lower or "rate" in error_lower or "429" in error_lower:
-                        return (
-                            "ugh. Google's being cheap again. 🙄\n"
-                            "Try asking me again in a minute."
-                        )
-
-                    if "search" in error_lower or "tool" in error_lower:
-                        return (
-                            "Ugh. Google isn't cooperating right now.\n"
-                            "Ask me again without needing current info, bestie."
-                        )
-
-                    return (
-                        "Ugh. Gemini coughed and died for a second. 🙄\n"
-                        f"Tiny error: {msg}"
-                    )
-
-                if "candidates" not in data:
-                    return f"Gemini gave no answer: {data}"
-
-                if not data["candidates"]:
-                    return f"Gemini returned empty candidates: {data}"
-
-                return (
-                    data["candidates"][0]
-                    ["content"]["parts"][0]
-                    ["text"]
-                )
-
-    except Exception as e:
-        return f"error: {e}"
 # ================== Spotify helpers ==================
 _spotify_token = {"access_token": None, "expires_at": 0}
 
@@ -930,27 +732,7 @@ async def _bonk_wait():
 
 @bot.event
 async def on_message(message: discord.Message):
-
     if message.author.bot:
-        return
-
-    if not hasattr(bot, "_hydration_last"):
-        bot._hydration_last = {}
-
-    hydration_lower = (message.content or "").lower()
-
-    if any(trigger in hydration_lower for trigger in HYDRATION_TRIGGERS):
-        now = time.time()
-        last = bot._hydration_last.get(message.channel.id, 0)
-
-        if now - last >= HYDRATION_COOLDOWN_SECONDS:
-            bot._hydration_last[message.channel.id] = now
-
-            await message.channel.send(
-                "hydrate, girlies! 🙄💧",
-                file=discord.File(HYDRATION_VIDEO)
-            )
-
         return
 
     # --- Mimic: capture USER3 messages + mark "last seen" per channel ---
@@ -963,7 +745,6 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
-    
     # Process commands first
     if content.strip().startswith("!"):
         await bot.process_commands(message)
@@ -1060,190 +841,16 @@ async def on_message(message: discord.Message):
             mentioned = True
 
     if mentioned:
-
-        question = (
-            content
-            .replace(f"<@{bot.user.id}>", "")
-            .replace(f"<@!{bot.user.id}>", "")
-            .strip()
-        )
-        reply_context = ""
-
-        if message.reference and message.reference.resolved:
-            replied_msg = message.reference.resolved
-
-            if replied_msg.author.id == bot.user.id:
-                reply_context = replied_msg.content or ""
-   
-        if question.lower().startswith("remember "):
-            memory = question[9:].strip()
-
-            if memory:
-                await add_user_memory(message.author.id, memory)
-                await message.reply(
-                    f"Fine. I remembered it: {memory} 🙄",
-                    mention_author=False
-                )
-                return
-
-        if question.lower() in ["what do you remember about me", "what do you remember about me?"]:
-            memories = await get_user_memories(message.author.id)
-
-            if not memories:
-                await message.reply(
-                    "I remember nothing. A clean slate. Suspicious. 🙄",
-                    mention_author=False
-                )
-                return
-
-            text = "\n".join([f"- {m}" for m in memories])
-            await message.reply(
-                f"Ugh, here's what I remember about you:\n{text}",
-                mention_author=False
-            )
-            return
-
-        if question.lower().startswith("forget "):
-            thing = question[7:].strip()
-            removed = await forget_user_memory(message.author.id, thing)
-
-            if removed:
-                await message.reply(
-                    f"Fine. I forgot anything matching: {thing}",
-                    mention_author=False
-                )
-            else:
-                await message.reply(
-                    "I don't remember that anyway. Very dramatic of you.",
-                    mention_author=False
-                )
-            return
-
-        coffee_triggers = [
-            "coffee pls",
-            "coffee gossip",
-            "what are the coffee girlies drinking",
-            "trending coffee drinks",
-            "matcha pls",
-            "drinkies"
-        ]
-
-        q = question.lower()
-        if any(trigger in q for trigger in coffee_triggers):
-
-            if await gemini_on_cooldown(message):
-                return
-
-            wait = await message.reply(
-                "ugh fine. stalking the coffee girlies rn... ☕🙄",
-                mention_author=False
-            )
-
-            answer = await ask_gemini(
-                """
-Search Reddit discussions, recent web articles, and coffee trends.
-
-Focus on:
-- r/starbucks
-- r/coffee
-- r/espresso
-- r/matcha
-- popular cafe drink trends
-- seasonal drinks
-- viral TikTok-style coffee drinks if they appear in search
-
-Give a short Fergie-style report:
-- 4 to 7 trending drinks
-- why people like them
-- any drama or complaints people have
-- one bratty final recommendation
-
-Keep it funny, bratty, and useful.
-"""
-            )
-
-            if len(answer) > 1800:
-                answer = answer[:1800]
-
-            await wait.edit(content=answer)
-            return
-
-        if question:
-
-            if await gemini_on_cooldown(message):
-                return
-
-            wait = await message.reply(
-                "pensando...",
-                mention_author=False
-            )
-
-            memories = await get_user_memories(message.author.id)
-            memory_text = "\n".join([f"- {m}" for m in memories]) if memories else "None"
-
-               answer = await ask_gemini(
-                f"""
-User memories:
-{memory_text}
-
-Previous Fergie message being replied to:
-{reply_context}
-
-User asked:
-{question}
-
-If the user is replying to your previous message, use that previous message as context.
-""",
-               needs_search=should_use_search(question)
-            )
-
-            if len(answer) > 1800:
-                answer = answer[:1800]
-
-            await wait.edit(
-                content=answer
-            )
-
-            return
-
-        await message.reply(
-            random.choice(BRATTY_LINES),
-            mention_author=False
-        )
-
+        await message.reply(random.choice(BRATTY_LINES), mention_author=False)
         return
+
     # Random chat sass (global)
     if random.random() < REPLY_CHANCE:
         choice = random.choice([random.choice(BRATTY_LINES),
                                 random.choice(FERAL_LINES),
                                 random.choice(REACTION_EMOTES)])
         await message.reply(choice, mention_author=False)
-@bot.event
-async def on_reaction_add(reaction, user):
-    if user.bot:
-        return
 
-    if not bot.user:
-        return
-
-    if reaction.message.author.id != bot.user.id:
-        return
-
-    async for msg in reaction.message.channel.history(limit=50):
-        if msg.author.id == user.id:
-
-            custom_emoji = bot.get_emoji(1227392416617730078)
-
-            choices = ["🍑"]
-
-            if custom_emoji:
-                choices.append(custom_emoji)
-
-            emoji = random.choice(choices)
-
-            await msg.add_reaction(emoji)
-
-            return
 # ---- Reply watcher for FIT follow-up (20s window) ----
 @bot.listen("on_message")
 async def _fit_reply_watch(message: discord.Message):
@@ -1274,21 +881,11 @@ async def four_hour_post():
         ])
         await channel.send(text)
 
-@four_hour_post.before_loop
-async def _wait_four_hour_post():
-    await bot.wait_until_ready()
-    await asyncio.sleep(4 * 3600)
-
 @tasks.loop(hours=6)
 async def six_hour_emoji():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         await channel.send(BREAD_EMOJI)
-
-@six_hour_emoji.before_loop
-async def _wait_six_hour_emoji():
-    await bot.wait_until_ready()
-    await asyncio.sleep(6 * 3600)
 
 @tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
 async def user1_twice_daily_fixed():
@@ -1300,30 +897,20 @@ async def user1_twice_daily_fixed():
 async def user2_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER2_ID}> when jacuzzi?")
+        await channel.send(f"<@{USER2_ID}> Kurtie!")
 
 @tasks.loop(hours=8)
 async def user3_task():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         phrase = random.choice(USER3_LINES)
-        await channel.send(f"<@{USER1_ID}> {phrase}")
-
-@user3_task.before_loop
-async def _wait_user3_task():
-    await bot.wait_until_ready()
-    await asyncio.sleep(8 * 3600)
+        await channel.send(f"<@{USER3_ID}> {phrase}")
 
 @tasks.loop(hours=24)
 async def daily_scam_post():
     channel = bot.get_channel(CHANNEL_ID)
     if channel and random.random() < 0.7:
         await channel.send("I NEED MONIES!!!🙄💅")
-
-@daily_scam_post.before_loop
-async def _wait_daily_scam_post():
-    await bot.wait_until_ready()
-    await asyncio.sleep(24 * 3600)
 
 
 # ---- Gym Reminder ----
@@ -1332,7 +919,7 @@ from datetime import datetime, time as dtime
 from zoneinfo import ZoneInfo
 from discord.ext import tasks
 
-GYM_CHANNEL_ID = 1272237309521170434  # replace with your channel ID
+GYM_CHANNEL_ID = 123456789012345678  # replace with your channel ID
 
 GYM_EMOTES_1 = ["💪", "🏋️‍♂️", "🏋️‍♀️", "🏃‍♂️", "🏃‍♀️", "🤸‍♀️", "🚴‍♂️", "🔥", "💯", "🥇", "🧠", "🫀"]
 GYM_EMOTES_2 = ["🏋️‍♀️", "🏋️‍♂️", "🚴‍♀️", "🏃‍♂️", "🏃‍♀️", "🥵", "🔥", "⚡️", "💥", "💢", "🗣️", "📣"]
@@ -2418,8 +2005,8 @@ async def halp(ctx, *, command: str | None = None):
             "• Daily scam post (70% chance)\n"
             "• 8am PT: auto allowance for all members + inactivity penalties\n"
             "• `USER1_ID`: pings twice daily; reacts to “pinche fergie”; random 3x/day “bonk papo”\n"
-            "• `USER2_ID`: pings twice daily with “when jacuzzi?”\n"
-            "• `USER3_ID`: random replies (35% of their msgs)\n"
+            "• `USER2_ID`: pings twice daily with “Kurtie!”\n"
+            "• `USER3_ID`: random replies (35% of their msgs) + ping every 8h\n"
             "• `LOBO_ID`: once/day “send me money lobo.” when they post\n"
             "• `!fit`: 20s follow-up if the target user replies to the fit post"
         ),
