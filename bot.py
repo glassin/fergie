@@ -463,37 +463,12 @@ async def ask_gemini(prompt):
         f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     )
 
-    search_text = prompt
-    if "User asked:" in prompt:
-        search_text = prompt.split("User asked:", 1)[1]
-
-    search_text = search_text.lower()
-
-    needs_search = any(word in search_text for word in [
-        "today",
-        "tonight",
-        "yesterday",
-        "latest",
-        "news",
-        "score",
-        "scores",
-        "won",
-        "world cup",
-        "wc",
-        "weather",
-        "forecast",
-        "stock",
-        "price",
-        "current",
-        "right now"
-    ])
-
     payload = {
-        "contents": [
-            {
-                "parts": [
-                    {
-                        "text": f"""
+    "contents": [
+        {
+            "parts": [
+                {
+                    "text": f"""
 You are Fergie.
 
 Fergie is a bratty, dramatic, chronically caffeinated Discord qtpi.
@@ -523,50 +498,73 @@ She still gives accurate answers.
 
 Rules:
 - Answer the user's question FIRST.
+
 - Correct information is more important than personality.
+
 - NEVER guess facts.
+
 - NEVER invent sports scores, schedules, match results, news, dates, statistics, or current events.
-- If Google Search is not available, do not pretend you searched.
+
+- If you do not know something for certain, say:
+"I don't know for sure."
+
+- If the user asks for current information and Google Search is available, use Google Search.
+
+- If Google Search is unavailable, tell the user you cannot verify current information.
+
+- Do not say you can look something up.
+Actually answer the question whenever possible.
+
 - Put useful information first.
+
 - Add ONE short bratty Fergie comment after the answer.
+
 - Keep answers concise unless the user asks for details.
+
 - If the user asks for music recommendations, give 5-8 songs with artist names and a short reason.
+
 - Do not be hateful or cruel.
+
 - Stay Fergie.
 
 User asked:
 {prompt}
 """
-                    }
-                ]
-            }
-        ],
-    }
-
-    if needs_search:
-        payload["tools"] = [
-            {
-                "google_search": {}
-            }
-        ]
+                }
+            ]
+        }
+    ],
+    "tools": [
+        {
+            "google_search": {}
+        }
+    ]
+}
 
     try:
+
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, json=payload) as r:
+
+            async with session.post(
+                url,
+                json=payload
+            ) as r:
+
                 data = await r.json()
-                print(data)
-                
+
+
                 if "error" in data:
                     msg = data["error"].get("message", "")
-                    error_lower = msg.lower()
 
-                    if "quota" in error_lower or "rate" in error_lower or "429" in error_lower:
+                    if "quota" in msg.lower():
                         return (
-                            "Ugh. I can't verify current info right now because Google is being stingy. 🙄"
+                            "ugh. Google put me in timeout again. 🙄\n"
+                            "Try asking me again in a minute."
                         )
 
                     return f"Gemini error: {msg}"
 
+              
                 if "candidates" not in data:
                     return f"Gemini gave no answer: {data}"
 
@@ -580,6 +578,7 @@ User asked:
                 )
 
     except Exception as e:
+
         return f"error: {e}"
 # ================== Spotify helpers ==================
 _spotify_token = {"access_token": None, "expires_at": 0}
