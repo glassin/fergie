@@ -462,7 +462,20 @@ async def ask_gemini(prompt):
         "https://generativelanguage.googleapis.com/v1beta/models/"
         f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     )
-
+needs_search = any(word in prompt.lower() for word in [
+    "today",
+    "tonight",
+    "yesterday",
+    "latest",
+    "news",
+    "score",
+    "won",
+    "world cup",
+    "wc",
+    "weather",
+    "stock",
+    "price"
+])
     payload = {
     "contents": [
         {
@@ -534,13 +547,13 @@ User asked:
             ]
         }
     ],
-    "tools": [
+}
+if needs_search:
+    payload["tools"] = [
         {
             "google_search": {}
         }
     ]
-}
-
     try:
 
         async with aiohttp.ClientSession() as session:
@@ -556,14 +569,24 @@ User asked:
                 if "error" in data:
                     msg = data["error"].get("message", "")
 
-                    if "quota" in msg.lower():
-                        return (
-                            "ugh. Google put me in timeout again. 🙄\n"
-                            "Try asking me again in a minute."
-                        )
+                               error_lower = msg.lower()
 
-                    return f"Gemini error: {msg}"
+                if "quota" in error_lower or "rate" in error_lower or "429" in error_lower:
+                    return (
+                        "ugh. Google's being cheap again. 🙄\n"
+                        "Try asking me again in a minute."
+                    )
 
+                if "search" in error_lower or "tool" in error_lower:
+                    return (
+                        "Ugh. Google isn't cooperating right now.\n"
+                        "Ask me again without needing current info, bestie."
+                    )
+
+                return (
+                    "Ugh. Gemini coughed and died for a second. 🙄\n"
+                    f"Tiny error: {msg}"
+                )
               
                 if "candidates" not in data:
                     return f"Gemini gave no answer: {data}"
