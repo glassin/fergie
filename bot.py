@@ -452,8 +452,33 @@ def _est_win_prob(bet: int) -> float:
 
 def _can_afford(user_obj: dict, amt: int) -> bool:
     return int(user_obj.get("balance", 0)) >= amt
+def should_use_search(question: str) -> bool:
+    q = (question or "").lower()
 
-async def ask_gemini(prompt):
+    search_words = [
+        "today",
+        "tonight",
+        "yesterday",
+        "latest",
+        "news",
+        "score",
+        "scores",
+        "won",
+        "win",
+        "world cup",
+        "wc",
+        "weather",
+        "forecast",
+        "stock",
+        "price",
+        "current",
+        "right now",
+        "this week",
+        "this weekend"
+    ]
+
+    return any(word in q for word in search_words)
+async def ask_gemini(prompt, needs_search=False):
 
     if not GEMINI_KEY:
         return "gemini key missing"
@@ -463,20 +488,6 @@ async def ask_gemini(prompt):
         f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     )
 
-    needs_search = any(word in prompt.lower() for word in [
-        "today",
-        "tonight",
-        "yesterday",
-        "latest",
-        "news",
-        "score",
-        "won",
-        "world cup",
-        "wc",
-        "weather",
-        "stock",
-        "price"
-    ])
 
     payload = {
         "contents": [
@@ -1170,7 +1181,7 @@ Keep it funny, bratty, and useful.
             memories = await get_user_memories(message.author.id)
             memory_text = "\n".join([f"- {m}" for m in memories]) if memories else "None"
 
-            answer = await ask_gemini(
+      answer = await ask_gemini(
     f"""
 User memories:
 {memory_text}
@@ -1182,7 +1193,8 @@ User asked:
 {question}
 
 If the user is replying to your previous message, use that previous message as context.
-"""
+""",
+    needs_search=should_use_search(question)
 )
 
             if len(answer) > 1800:
