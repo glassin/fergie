@@ -1056,7 +1056,13 @@ async def on_message(message: discord.Message):
             .replace(f"<@!{bot.user.id}>", "")
             .strip()
         )
+        reply_context = ""
 
+        if message.reference and message.reference.resolved:
+            replied_msg = message.reference.resolved
+
+            if replied_msg.author.id == bot.user.id:
+                reply_context = replied_msg.content or ""
    
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
@@ -1165,14 +1171,19 @@ Keep it funny, bratty, and useful.
             memory_text = "\n".join([f"- {m}" for m in memories]) if memories else "None"
 
             answer = await ask_gemini(
-                f"""
+    f"""
 User memories:
 {memory_text}
 
+Previous Fergie message being replied to:
+{reply_context}
+
 User asked:
 {question}
+
+If the user is replying to your previous message, use that previous message as context.
 """
-            )
+)
 
             if len(answer) > 1800:
                 answer = answer[:1800]
