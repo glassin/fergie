@@ -569,7 +569,7 @@ if needs_search:
                 if "error" in data:
                     msg = data["error"].get("message", "")
 
-                               error_lower = msg.lower()
+                    error_lower = msg.lower()
 
                 if "quota" in error_lower or "rate" in error_lower or "429" in error_lower:
                     return (
