@@ -1063,28 +1063,28 @@ async def on_message(message: discord.Message):
 
             if replied_msg.author.id == bot.user.id:
                 reply_context = replied_msg.content or ""
-   recent_chat = []
 
-async for msg in message.channel.history(limit=6):
-    if msg.author.bot:
-        continue
+        recent_chat = []
 
-    if msg.id == message.id:
-        continue
+        async for msg in message.channel.history(limit=6):
+            if msg.author.bot:
+                continue
 
-clean_content = (msg.content or "").strip()
+            if msg.id == message.id:
+                continue
 
-if not clean_content:
-    continue
+            clean_content = (msg.content or "").strip()
 
-recent_chat.append(
-    f"{msg.author.display_name}: {clean_content}"
-)
+            if not clean_content:
+                continue
 
-recent_chat.reverse()
+            recent_chat.append(
+                f"{msg.author.display_name}: {clean_content}"
+            )
 
-chat_context = "\n".join(recent_chat)
+        recent_chat.reverse()
 
+        chat_context = "\n".join(recent_chat)
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
 
