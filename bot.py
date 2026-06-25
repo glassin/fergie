@@ -61,6 +61,18 @@ HYDRATION_TRIGGERS = [
 HYDRATION_COOLDOWN_SECONDS = 120
 # ---------------------------------------
 
+# ---------- Spotify awareness ----------
+SPOTIFY_LINK_TRIGGERS = [
+    "open.spotify.com/track",
+    "open.spotify.com/album",
+    "open.spotify.com/playlist",
+    "open.spotify.com/artist"
+]
+
+SPOTIFY_AWARENESS_CHANCE = 0.45
+SPOTIFY_AWARENESS_COOLDOWN_SECONDS = 90
+# ---------------------------------------
+
 # ---------- Kewchie (Kali Uchis) ----------
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
@@ -854,6 +866,7 @@ async def on_ready():
         bot._duels = {}  # channel_id -> duel state
     if not hasattr(bot, "_raffles"):
         bot._raffles = {}  # guild_id -> raffle state
+        bot.spotify_last = 0
 
 
     # --- ChatDrop: safe plug-in ---
@@ -972,6 +985,46 @@ async def on_message(message: discord.Message):
 
     content = (message.content or "")
     lower = content.lower().strip()
+    # ---------- Spotify awareness ----------
+
+if any(trigger in lower for trigger in SPOTIFY_LINK_TRIGGERS):
+
+    now = time.time()
+
+    if now - bot.spotify_last >= SPOTIFY_AWARENESS_COOLDOWN_SECONDS:
+
+        bot.spotify_last = now
+
+        if random.random() <= SPOTIFY_AWARENESS_CHANCE:
+
+            comments = [
+
+                "Spotify link detected. Are we healing or spiraling today? ☕🎵",
+
+                "Another playlist. You people really do narrate your lives with music. 🙄",
+
+                "Music posted. Hopefully it's not twelve hours of sad indie boys again.",
+
+                "Spotify spotted. Proceeding to judge everyone's taste silently.",
+
+                "Oh good. Someone brought background music to the function. ☕",
+
+                "Certified banger? Or emotional damage? I can't tell.",
+
+                "Spotify link #827 today. Concerning behavior.",
+
+                "Midwest emo detected. Are we okay bestie? ☕"
+
+            ]
+            
+print("SPOTIFY EMBEDS:", message.embeds)
+
+            await message.reply(
+                random.choice(comments),
+                mention_author=False
+            )
+
+# ---------------------------------------
 
     
     # Process commands first
