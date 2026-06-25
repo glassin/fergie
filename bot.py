@@ -1017,7 +1017,7 @@ if any(trigger in lower for trigger in SPOTIFY_LINK_TRIGGERS):
 
             ]
             
-print("SPOTIFY EMBEDS:", message.embeds)
+            print("SPOTIFY EMBEDS:", message.embeds)
 
             await message.reply(
                 random.choice(comments),
