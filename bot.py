@@ -973,7 +973,13 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
-    
+    if "open.spotify.com/" in lower:
+        await message.reply(
+            "Spotify spotted. Fergie is judging silently for now. 🙄🎵",
+            mention_author=False
+        )
+        return
+            
     # Process commands first
     if content.strip().startswith("!"):
         await bot.process_commands(message)
