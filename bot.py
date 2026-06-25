@@ -972,37 +972,7 @@ async def on_message(message: discord.Message):
 
     content = (message.content or "")
     lower = content.lower().strip()
-spotify_links = [
-    "open.spotify.com/track/",
-    "open.spotify.com/album/",
-    "open.spotify.com/playlist/",
-    "open.spotify.com/artist/"
-]
 
-
-if any(link in lower for link in spotify_links):
-
-    if random.random() < 0.40:
-
-        comments = [
-
-            "Spotify spotted. 🙄",
-
-            "Another playlist. You people really soundtrack your trauma.",
-
-            "Certified banger? Or emotional damage?",
-
-            "Healing era or spiraling era today? 🎵",
-
-            "Background music has entered the chat."
-
-        ]
-
-
-        await message.reply(
-            random.choice(comments),
-            mention_author=False
-        )
     
     # Process commands first
     if content.strip().startswith("!"):
