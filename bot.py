@@ -572,7 +572,7 @@ User asked:
             ) as r:
 
                 data = await r.json()
-print(json.dumps(data, indent=2)[:4000])
+                print(json.dumps(data, indent=2)[:4000])
 
                 if "error" in data:
                     msg = data["error"].get("message", "")
