@@ -981,7 +981,7 @@ async def on_message(message: discord.Message):
         title = embed.title or "Unknown Song"
 
         await message.reply(
-            f"Spotify detected.\nI see **{title}** 🙄🎵",
+            f"Spotify detected.\nI see **{title}**. 🙄🎵",
             mention_author=False
         )
 
