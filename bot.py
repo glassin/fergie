@@ -1255,41 +1255,37 @@ Keep it funny, bratty, and useful.
 
             await wait.edit(content=answer)
             return
-image_query = extract_image_query(question)
-
-if image_query:
-
-    img = await fetch_google_image(image_query)
-
-    if img:
-
-        embed = discord.Embed(
-            title=img["title"],
-            color=0xff8ec7
-        )
-
-        embed.set_image(url=img["image"])
-
-        if img["source"]:
-            embed.description = f"Source: {img['source']}"
-
-        await message.reply(
-            embed=embed,
-            mention_author=False
-        )
-
-        return
-
-    else:
-        await message.reply(
-            f"ugh. couldn't find a pic of **{image_query}** 🙄",
-            mention_author=False
-        )
-
-        return
         
         if question:
+            
+            image_query = extract_image_query(question)
 
+            if image_query:
+                img = await fetch_google_image(image_query)
+
+                if img:
+                    embed = discord.Embed(
+                        title=img["title"],
+                        color=0xff8ec7
+                    )
+
+                    embed.set_image(url=img["image"])
+
+                    if img["source"]:
+                        embed.description = f"Source: {img['source']}"
+
+                    await message.reply(
+                        embed=embed,
+                        mention_author=False
+                    )
+                    return
+
+                await message.reply(
+                    f"ugh. couldn't find a pic of **{image_query}** 🙄",
+                    mention_author=False
+                )
+                return
+                
             if await gemini_on_cooldown(message):
                 return
 
