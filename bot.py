@@ -974,11 +974,24 @@ async def on_message(message: discord.Message):
     lower = content.lower().strip()
 
     if "open.spotify.com/" in lower:
+
+    if message.embeds:
+        embed = message.embeds[0]
+
+        title = embed.title or "Unknown Song"
+
+        await message.reply(
+            f"Spotify detected.\nI see **{title}** 🙄🎵",
+            mention_author=False
+        )
+
+    else:
         await message.reply(
             "Spotify spotted. Fergie is judging silently for now. 🙄🎵",
             mention_author=False
         )
-        return
+
+    return
             
     # Process commands first
     if content.strip().startswith("!"):
