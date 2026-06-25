@@ -1018,7 +1018,7 @@ if any(trigger in lower for trigger in SPOTIFY_LINK_TRIGGERS):
             ]
             
 
-              await message.reply(
+            await message.reply(
                 random.choice(comments),
                 mention_author=False
             )
