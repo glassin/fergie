@@ -995,33 +995,22 @@ if any(trigger in lower for trigger in SPOTIFY_LINK_TRIGGERS):
 
         bot.spotify_last = now
 
-        if random.random() <= SPOTIFY_AWARENESS_CHANCE:
+if random.random() <= SPOTIFY_AWARENESS_CHANCE:
+    comments = [
+        "Spotify link detected. Are we healing or spiraling today? ☕🎵",
+        "Another playlist. You people really do narrate your lives with music. 🙄",
+        "Music posted. Hopefully it's not twelve hours of sad indie boys again.",
+        "Spotify spotted. Proceeding to judge everyone's taste silently.",
+        "Oh good. Someone brought background music to the function. ☕",
+        "Certified banger? Or emotional damage? I can't tell.",
+        "Spotify link #827 today. Concerning behavior.",
+        "Midwest emo detected. Are we okay bestie? ☕"
+    ]
 
-            comments = [
-
-                "Spotify link detected. Are we healing or spiraling today? ☕🎵",
-
-                "Another playlist. You people really do narrate your lives with music. 🙄",
-
-                "Music posted. Hopefully it's not twelve hours of sad indie boys again.",
-
-                "Spotify spotted. Proceeding to judge everyone's taste silently.",
-
-                "Oh good. Someone brought background music to the function. ☕",
-
-                "Certified banger? Or emotional damage? I can't tell.",
-
-                "Spotify link #827 today. Concerning behavior.",
-
-                "Midwest emo detected. Are we okay bestie? ☕"
-
-            ]
-            
-
-            await message.reply(
-                random.choice(comments),
-                mention_author=False
-            )
+    await message.reply(
+        random.choice(comments),
+        mention_author=False
+    )
 
 # ---------------------------------------
 
