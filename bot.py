@@ -5,7 +5,7 @@ from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict, Counter
 from typing import List, Tuple
-
+from duckduckgo_search import DDGS
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
 # ===================== ENV & CONSTANTS =====================
@@ -796,7 +796,32 @@ async def fetch_gif(query: str, limit: int = 20):
             return random.choice(items)["media_formats"]["gif"]["url"]
 
 async def fetch_bread_gif(): return await fetch_gif(SEARCH_TERM, RESULT_LIMIT)
+async def fetch_duckduck_image(query):
 
+    try:
+        with DDGS() as ddgs:
+
+            results = list(
+                ddgs.images(
+                    query,
+                    max_results=20
+                )
+            )
+
+        if not results:
+            return None
+
+        item = random.choice(results)
+
+        return {
+            "title": item.get("title", query),
+            "image": item.get("image"),
+            "source": item.get("url", "")
+        }
+
+    except Exception as e:
+        print("DuckDuck image error:", e)
+        return None
 # ================== Schedulers helpers ==================
 def _pick_two_random_times_today():
     tz = ZoneInfo("America/Los_Angeles")
@@ -1200,7 +1225,28 @@ Keep it funny, bratty, and useful.
             return
 
         if question:
+            
+            img = await fetch_duckduck_image(question)
 
+            if img and img["image"]:
+
+                embed = discord.Embed(
+                    title=img["title"],
+                    color=0xff8ec7
+                )
+
+                embed.set_image(url=img["image"])
+
+                if img["source"]:
+                   embed.description = f"Source: {img['source']}"
+
+                await message.reply(
+                    embed=embed,
+                    mention_author=False
+                )
+
+                return
+        
             if await gemini_on_cooldown(message):
                 return
 
