@@ -1063,7 +1063,28 @@ async def on_message(message: discord.Message):
 
             if replied_msg.author.id == bot.user.id:
                 reply_context = replied_msg.content or ""
-   
+   recent_chat = []
+
+async for msg in message.channel.history(limit=6):
+    if msg.author.bot:
+        continue
+
+    if msg.id == message.id:
+        continue
+
+clean_content = (msg.content or "").strip()
+
+if not clean_content:
+    continue
+
+recent_chat.append(
+    f"{msg.author.display_name}: {clean_content}"
+)
+
+recent_chat.reverse()
+
+chat_context = "\n".join(recent_chat)
+
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
 
@@ -1174,6 +1195,9 @@ Keep it funny, bratty, and useful.
     f"""
 User memories:
 {memory_text}
+
+Recent chat:
+{chat_context}
 
 Previous Fergie message being replied to:
 {reply_context}
