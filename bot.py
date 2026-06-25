@@ -973,37 +973,7 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
-    if "open.spotify.com/" in lower:
-
-        title = None
-
-        if message.embeds:
-            embed = message.embeds[0]
-            title = embed.title
-
-        if title:
-            responses = [
-                f"Oh god. **{title}**? We're doing this today? 🙄🎵",
-                f"**{title}** detected. Emotional damage levels rising.",
-                f"Not **{title}**. Very concerning behavior.",
-                f"Playing **{title}** in public is brave.",
-                f"I see **{title}**. Certified banger? Jury's still out.",
-                f"Ah yes, **{title}**. Character development music.",
-                f"**{title}**? Okay, taste department is under review."
-            ]
-
-            await message.reply(
-                random.choice(responses),
-                mention_author=False
-            )
-        else:
-            await message.reply(
-                "Spotify spotted. Fergie is judging silently for now. 🙄🎵",
-                mention_author=False
-            )
-
-        return
-            
+    
     # Process commands first
     if content.strip().startswith("!"):
         await bot.process_commands(message)
