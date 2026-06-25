@@ -572,7 +572,7 @@ User asked:
             ) as r:
 
                 data = await r.json()
-                print(json.dumps(data.get("candidates", [{}])[0].get("groundingMetadata", {}), indent=2))
+
 
                 if "error" in data:
                     msg = data["error"].get("message", "")
