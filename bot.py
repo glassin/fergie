@@ -982,8 +982,18 @@ async def on_message(message: discord.Message):
             title = embed.title
 
         if title:
+            responses = [
+                f"Oh god. **{title}**? We're doing this today? 🙄🎵",
+                f"**{title}** detected. Emotional damage levels rising.",
+                f"Not **{title}**. Very concerning behavior.",
+                f"Playing **{title}** in public is brave.",
+                f"I see **{title}**. Certified banger? Jury's still out.",
+                f"Ah yes, **{title}**. Character development music.",
+                f"**{title}**? Okay, taste department is under review."
+            ]
+
             await message.reply(
-                f"Spotify detected.\nI see **{title}**. 🙄🎵",
+                random.choice(responses),
                 mention_author=False
             )
         else:
