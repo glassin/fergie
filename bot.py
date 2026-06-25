@@ -12,8 +12,6 @@ import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 TOKEN       = os.getenv("DISCORD_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
-GOOGLE_IMAGE_KEY = os.getenv("GOOGLE_IMAGE_SEARCH_KEY")
-GOOGLE_IMAGE_CX = os.getenv("GOOGLE_IMAGE_SEARCH_CX")
 CHANNEL_ID  = 1273436116699058290
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
@@ -798,62 +796,7 @@ async def fetch_gif(query: str, limit: int = 20):
             return random.choice(items)["media_formats"]["gif"]["url"]
 
 async def fetch_bread_gif(): return await fetch_gif(SEARCH_TERM, RESULT_LIMIT)
-def extract_image_query(question: str):
-    q = (question or "").strip()
 
-    patterns = [
-        r"^(show me|send|find|get|pull up)\s+(a\s+)?(pic|picture|photo|image|img)\s+(of\s+)?(.+)$",
-        r"^(pic|picture|photo|image|img)\s+(of\s+)?(.+)$",
-    ]
-
-    for pattern in patterns:
-        match = re.match(pattern, q, re.IGNORECASE)
-        if match:
-            return match.group(match.lastindex).strip()
-
-    return None
-
-
-async def fetch_google_image(query: str):
-    if not GOOGLE_IMAGE_KEY or not GOOGLE_IMAGE_CX:
-        return None
-
-    url = "https://www.googleapis.com/customsearch/v1"
-
-    params = {
-        "key": GOOGLE_IMAGE_KEY,
-        "cx": GOOGLE_IMAGE_CX,
-        "q": query,
-        "searchType": "image",
-        "num": 5,
-        "safe": "off",
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, params=params, timeout=15) as r:
-                data = await r.json()
-
-                if r.status != 200:
-                    print("Google image search error:", data)
-                    return None
-
-                items = data.get("items", [])
-
-                if not items:
-                    return None
-
-                item = random.choice(items)
-
-                return {
-                    "title": item.get("title", query),
-                    "image": item.get("link"),
-                    "source": item.get("image", {}).get("contextLink", ""),
-                }
-
-    except Exception as e:
-        print("Google image search exception:", e)
-        return None
 # ================== Schedulers helpers ==================
 def _pick_two_random_times_today():
     tz = ZoneInfo("America/Los_Angeles")
@@ -1255,37 +1198,9 @@ Keep it funny, bratty, and useful.
 
             await wait.edit(content=answer)
             return
-        
+
         if question:
-            
-            image_query = extract_image_query(question)
 
-            if image_query:
-                img = await fetch_google_image(image_query)
-
-                if img:
-                    embed = discord.Embed(
-                        title=img["title"],
-                        color=0xff8ec7
-                    )
-
-                    embed.set_image(url=img["image"])
-
-                    if img["source"]:
-                        embed.description = f"Source: {img['source']}"
-
-                    await message.reply(
-                        embed=embed,
-                        mention_author=False
-                    )
-                    return
-
-                await message.reply(
-                    f"ugh. couldn't find a pic of **{image_query}** 🙄",
-                    mention_author=False
-                )
-                return
-                
             if await gemini_on_cooldown(message):
                 return
 
