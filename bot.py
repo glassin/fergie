@@ -213,7 +213,61 @@ FERAL_LINES = [
 ]
 
 REACTION_EMOTES = ["🤭","😏","😢","😊","🙄","💗","🫶"]
+FERGIE_MUSIC_VERDICTS = [
 
+    "divorced in a luxury apartment coded.",
+
+    "another man staring out a rainy window.",
+
+    "unemployed hot girl anthem.",
+
+    "situationship survivor music.",
+
+    "walking around target pretending you're okay coded.",
+
+    "this belongs in a 2014 tumblr gifset.",
+
+    "driving home from therapy vibes.",
+
+    "emotionally expensive taste.",
+
+    "starbucks parking lot at midnight energy.",
+
+    "very cigarette after crying coded.",
+
+    "main character syndrome approved.",
+
+    "this sounds like somebody texted 'we need to talk'.",
+
+    "pretending to clean your room while spiraling.",
+
+    "you definitely stared at the ceiling to this.",
+
+    "somebody misses their ex.",
+
+    "gym breakup montage music.",
+
+    "coffee shop employee final boss vibes.",
+
+    "absolutely insufferable in the best way.",
+
+    "i support women's rights and women's wrongs for this.",
+
+    "jonathan would probably complain about this one.",
+
+    "very arthoe coded.",
+
+    "this sounds expensive.",
+
+    "indie bisexual council approved.",
+
+    "playlist named 'night drives' detected.",
+
+    "winter depression deluxe edition.",
+
+    "this would've gone platinum on tumblr."
+
+]
 USER3_LINES = [
     "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
     "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!","let's get a matcha girlie","gives me the ick","como jodes!","you're obsessed!", "I love that for you"
@@ -978,7 +1032,41 @@ async def on_message(message: discord.Message):
     if content.strip().startswith("!"):
         await bot.process_commands(message)
         return
+        
+    # Spotify link → Fergie music critic mode
+    if "open.spotify.com" in lower:
+        song_title = None
 
+        if message.embeds:
+            for embed in message.embeds:
+                if embed.title:
+                    song_title = embed.title
+                    break
+
+        if not song_title:
+            song_title = "whatever this is"
+
+        if message.author.id == USER3_ID:
+            verdict = "mother's aux privileges remain undefeated."
+            score = "10"
+        else:
+            verdict = random.choice(FERGIE_MUSIC_VERDICTS)
+            score = f"{random.uniform(7.0, 9.8):.1f}"
+
+        replies = [
+            f"🎧 now spinning:\n\n**{song_title}**\n\n{verdict}\n\n{score}/10",
+
+            f"ugh.\n\n**{song_title}**\n\nthis is giving:\n\n{verdict}\n\n{score}/10",
+
+            f"LISTEN.\n\n**{song_title}**\n\nmy professional coffee girl opinion:\n\n{verdict}\n\nrating: {score}/10"
+        ]
+
+        await message.reply(
+            random.choice(replies),
+            mention_author=False
+        )
+        return
+        
     # Global jump scare trigger (image only, then creepy line), per-user cooldown
     if JUMPSCARE_TRIGGER in lower:
         now = _now()
