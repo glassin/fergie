@@ -815,6 +815,60 @@ Now write Fergie's reaction.
         answer = answer[:900]
 
     return answer
+
+async def ask_gemini_reminder_parse(user_text: str):
+    now_dt = datetime.now(ZoneInfo("America/Los_Angeles"))
+
+    prompt = f"""
+Current date and time:
+{now_dt.strftime("%Y-%m-%d %I:%M %p %Z")}
+
+A Discord user wants Fergie to remind them of something.
+
+User request:
+{user_text}
+
+Return ONLY valid JSON.
+
+Rules:
+- If the reminder time is clear, return:
+{{"ok": true, "text": "reminder text", "remind_at": UNIX_TIMESTAMP}}
+- If the time is unclear, return:
+{{"ok": false, "reason": "short reason"}}
+- Use America/Los_Angeles timezone.
+- For "tomorrow" with no time, use 9:00 AM.
+- For a weekday with no time, use 9:00 AM.
+- For "tonight" with no time, use 8:00 PM.
+- Do not include markdown.
+- Do not include explanation.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    if answer.startswith("Gemini error:") or answer.startswith("error:") or "quota" in answer.lower():
+        return None
+
+    cleaned = answer.strip()
+    cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+
+    try:
+        data = json.loads(cleaned)
+    except Exception:
+        return None
+
+    if not data.get("ok"):
+        return None
+
+    text = str(data.get("text", "")).strip()
+    remind_at = int(data.get("remind_at", 0))
+
+    if not text or remind_at <= int(time.time()):
+        return None
+
+    return remind_at, text
 # ================== Spotify helpers ==================
 _spotify_token = {"access_token": None, "expires_at": 0}
 
@@ -1450,12 +1504,17 @@ async def on_message(message: discord.Message):
 
             parsed = parse_simple_reminder(question)
 
+            if not parsed:
+                parsed = await ask_gemini_reminder_parse(question)
+                
             if parsed:
 
-                seconds, reminder_text = parsed
+                first_value, reminder_text = parsed
 
-                remind_at = int(time.time()) + seconds
-
+                if first_value > 1000000000:
+                    remind_at = first_value
+                else:
+                    remind_at = int(time.time()) + first_value
 
                 data = await load_reminders()
 
