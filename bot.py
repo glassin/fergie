@@ -1204,7 +1204,7 @@ async def fergie_reminders():
             if channel:
                 await channel.send(
                     f"<@{item['user_id']}>\n\n"
-                    f"hey dumbass. remember:\n\n"
+                    f"hey girly. remember:\n\n"
                     f"**{item['text']}**"
                 )
         else:
