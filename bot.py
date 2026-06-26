@@ -1445,7 +1445,7 @@ async def on_message(message: discord.Message):
         recent_chat.reverse()
 
         chat_context = "\n".join(recent_chat)
-                if "remind me in" in question.lower():
+            if "remind me in" in question.lower():
 
             parsed = parse_simple_reminder(question)
 
