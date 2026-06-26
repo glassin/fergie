@@ -1445,62 +1445,77 @@ async def on_message(message: discord.Message):
         recent_chat.reverse()
 
         chat_context = "\n".join(recent_chat)
-            if "remind me in" in question.lower():
+
+        if "remind me in" in question.lower():
 
             parsed = parse_simple_reminder(question)
 
-            if not parsed:
+            if parsed:
+
+                seconds, reminder_text = parsed
+
+                remind_at = int(time.time()) + seconds
+
+
+                data = await load_reminders()
+
+                items = data.get("items", [])
+
+
+                items.append({
+
+                    "user_id": message.author.id,
+
+                    "channel_id": message.channel.id,
+
+                    "text": reminder_text,
+
+                    "remind_at": remind_at
+
+                })
+
+
+                data["items"] = items
+
+                await save_reminders(data)
+
+
                 await message.reply(
-                    "ugh. i can only do reminders like:\n"
-                    "`remind me in 20 minutes to switch laundry`\n"
-                    "`remind me in 3 days to suffer`\n"
-                    "i'm smart but not psychic yet.",
+
+                    f"ugh. fine.\n\n"
+
+                    f"i'll remind you.\n\n"
+
+                    f"**{reminder_text}**",
+
                     mention_author=False
+
                 )
+
+
                 return
-
-
-            seconds, reminder_text = parsed
-
-            remind_at = int(time.time() + seconds)
-
-
-            data = await load_reminders()
-
-            items = data.get("items", [])
-
-
-            items.append({
-
-                "user_id": message.author.id,
-
-                "channel_id": message.channel.id,
-
-                "text": reminder_text,
-
-                "remind_at": remind_at
-
-            })
-
-
-            data["items"] = items
-
-            await save_reminders(data)
 
 
             await message.reply(
 
-                f"ugh. fine.\n\n"
+                "ugh.\n\n"
 
-                f"i'll remind you.\n\n"
+                "try:\n"
 
-                f"**{reminder_text}**",
+                "`remind me in 20 minutes to switch laundry`\n"
+
+                "`remind me in 2 hours to call mom`\n"
+
+                "`remind me in 3 days to suffer`\n\n"
+
+                "i'm smart but not psychic yet.",
 
                 mention_author=False
 
             )
 
-            return
+            return        
+
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
 
