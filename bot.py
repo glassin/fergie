@@ -1500,7 +1500,7 @@ async def on_message(message: discord.Message):
 
         chat_context = "\n".join(recent_chat)
 
-        if "remind me in" in question.lower():
+        if question.lower().startswith("remind me"):
 
             parsed = parse_simple_reminder(question)
 
