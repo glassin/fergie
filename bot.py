@@ -1054,12 +1054,16 @@ async def on_message(message: discord.Message):
             score = f"{random.uniform(7.0, 9.8):.1f}"
 
         replies = [
-            f"🎧 now spinning:\n\n**{song_title}**\n\n{verdict}\n\n{score}/10",
+            
+    f"🎧 now spinning:\n\n**{song_title}**\n\n{verdict}\n\ni support this foolishness.\n\n{score}/10",
 
-            f"ugh.\n\n**{song_title}**\n\nthis is giving:\n\n{verdict}\n\n{score}/10",
+    f"ugh.\n\n**{song_title}**\n\n{verdict}\n\nabsolutely insufferable in the best way.\n\n{score}/10",
 
-            f"LISTEN.\n\n**{song_title}**\n\nmy professional coffee girl opinion:\n\n{verdict}\n\nrating: {score}/10"
-        ]
+    f"LISTEN.\n\n**{song_title}**\n\n{verdict}\n\nvery concerning behavior.\n\nrating: {score}/10",
+
+    f"☕🎧\n\n**{song_title}**\n\n{verdict}\n\nthis is why i need coffee.\n\n{score}/10"
+
+]
 
         await message.reply(
             random.choice(replies),
