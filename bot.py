@@ -1044,10 +1044,10 @@ async def on_message(message: discord.Message):
                     break
 
         if not song_title:
-            song_title = "whatever this is"
+            song_title = "some emotionally expensive song"
 
         if message.author.id == USER3_ID:
-            verdict = "mother's aux privileges remain undefeated."
+            verdict = "mother's aux privies remain undefeated."
             score = "10"
         else:
             verdict = random.choice(FERGIE_MUSIC_VERDICTS)
