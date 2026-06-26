@@ -1573,8 +1573,37 @@ async def on_message(message: discord.Message):
 
             )
 
-            return        
+            return    
+            
+        if question.lower() in ["what are my reminders?", "what are my reminders", "what reminders do i have?", "what reminders do i have"]:
 
+            data = await load_reminders()
+            items = data.get("items", [])
+
+            mine = [
+                item for item in items
+                if int(item.get("user_id", 0)) == message.author.id
+            ]
+
+            if not mine:
+                await message.reply(
+                    "ugh. you have no active reminders.\n\nmust be nice having no responsibilities.",
+                    mention_author=False
+                )
+                return
+
+            lines = []
+
+            for item in mine[:10]:
+                lines.append(f"• **{item.get('text', 'something')}**")
+
+            await message.reply(
+                "ugh. your unfinished business:\n\n"
+                + "\n".join(lines),
+                mention_author=False
+            )
+            return
+            
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
 
