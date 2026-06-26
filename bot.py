@@ -655,6 +655,56 @@ User asked:
     except Exception as e:
 
         return f"error: {e}"
+        async def ask_gemini_music_review(song_title: str):
+
+    prompt = f"""
+A Discord user posted this Spotify song:
+
+{song_title}
+
+Write a short Fergie-style music reaction.
+
+Fergie is:
+- 23-ish
+- bratty
+- sarcastic
+- crude but playful
+- dramatic
+- coffee-addicted
+- judgmental about music
+- never too nice
+- never robotic
+
+Rules:
+- Mention the song title once.
+- Do NOT invent artist facts.
+- Do NOT claim you listened to it.
+- Keep it under 5 lines.
+- Include a funny rating out of 10.
+- Make it sound like a bratty friend judging the aux.
+- No hashtags.
+- No long intro.
+
+Example style:
+"Strawberry Swing is giving staring out the passenger window pretending you're in a music video.
+Soft. Expensive. Slightly annoying.
+8.7/10 because I hate that it works."
+
+Now write Fergie's reaction.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    if answer.startswith("Gemini error:") or answer.startswith("error:") or "quota" in answer.lower():
+        return None
+
+    if len(answer) > 900:
+        answer = answer[:900]
+
+    return answer
 # ================== Spotify helpers ==================
 _spotify_token = {"access_token": None, "expires_at": 0}
 
@@ -1053,22 +1103,39 @@ async def on_message(message: discord.Message):
             verdict = random.choice(FERGIE_MUSIC_VERDICTS)
             score = f"{random.uniform(7.0, 9.8):.1f}"
 
+        review = await ask_gemini_music_review(song_title)
+
+        if review:
+
+            await message.reply(
+                review,
+                mention_author=False
+            )
+
+            return
+
+
         replies = [
-            
-    f"🎧 now spinning:\n\n**{song_title}**\n\n{verdict}\n\ni support this foolishness.\n\n{score}/10",
 
-    f"ugh.\n\n**{song_title}**\n\n{verdict}\n\nabsolutely insufferable in the best way.\n\n{score}/10",
+            f"🎧 now spinning:\n\n**{song_title}**\n\n{verdict}\n\ni support this foolishness.\n\n{score}/10",
 
-    f"LISTEN.\n\n**{song_title}**\n\n{verdict}\n\nvery concerning behavior.\n\nrating: {score}/10",
+            f"ugh.\n\n**{song_title}**\n\n{verdict}\n\nabsolutely insufferable in the best way.\n\n{score}/10",
 
-    f"☕🎧\n\n**{song_title}**\n\n{verdict}\n\nthis is why i need coffee.\n\n{score}/10"
+            f"LISTEN.\n\n**{song_title}**\n\n{verdict}\n\nvery concerning behavior.\n\nrating: {score}/10",
 
-]
+            f"☕🎧\n\n**{song_title}**\n\n{verdict}\n\nthis is why i need coffee.\n\n{score}/10"
+
+        ]
+
 
         await message.reply(
+
             random.choice(replies),
+
             mention_author=False
+
         )
+
         return
         
     # Global jump scare trigger (image only, then creepy line), per-user cooldown
