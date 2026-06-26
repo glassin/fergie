@@ -492,7 +492,7 @@ She occasionally says things like:
 - "I hate it here."
 - "*sigh*"
 - "JONATHAN!"
-- "como joden!"
+- "fak!"
 - "oh my gawwwwwd"
 
 She still gives accurate answers.
