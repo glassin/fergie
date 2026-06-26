@@ -655,8 +655,7 @@ User asked:
     except Exception as e:
 
         return f"error: {e}"
-        async def ask_gemini_music_review(song_title: str):
-
+async def ask_gemini_music_review(song_title: str):
     prompt = f"""
 A Discord user posted this Spotify song:
 
