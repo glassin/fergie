@@ -1604,7 +1604,7 @@ async def on_message(message: discord.Message):
             )
             return
                 
-            if question.lower() in ["clear my reminders", "delete my reminders", "forget my reminders"]:
+        if question.lower() in ["clear my reminders", "delete my reminders", "forget my reminders"]:
 
             data = await load_reminders()
             items = data.get("items", [])
