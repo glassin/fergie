@@ -272,14 +272,21 @@ USER3_LINES = [
     "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
     "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!","let's get a matcha girlie","gives me the ick","como jodes!","you're obsessed!", "I love that for you"
 ]
-
+FERGIE_BORED_LINES
 # ================== In-memory economy (backed by Postgres JSON) ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
     
 gemini_cooldowns = {}
 GEMINI_COOLDOWN_SECONDS = 15
+# ================== Fergie Bored ==================
 
+LAST_CHAT_ACTIVITY = time.time()
+
+FERGIE_BORED_MIN = 7200
+FERGIE_BORED_MAX = 14400
+
+LAST_FERGIE_BORED = 0
 async def gemini_on_cooldown(message):
     user_id = message.author.id
     now = time.time()
@@ -988,6 +995,7 @@ async def on_ready():
     fit_auto_daily.start()          # auto-fit once a day
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
     rebuild_mimic.start()           # build mimic model hourly
+    fergie_bored.start()
     raffle_watcher.start()
     daily_gym_reminder.start()          # raffle auto-draw watcher
 
@@ -1041,12 +1049,48 @@ async def bonk_papo_scheduler():
 async def _bonk_wait():
     await bot.wait_until_ready()
 
+@tasks.loop(minutes=5)
+async def fergie_bored():
+    global LAST_FERGIE_BORED
+
+    now = time.time()
+    quiet_for = now - LAST_CHAT_ACTIVITY
+
+    if quiet_for < FERGIE_BORED_MIN:
+        return
+
+    if now - LAST_FERGIE_BORED < FERGIE_BORED_MIN:
+        return
+
+    boredom_threshold = random.randint(FERGIE_BORED_MIN, FERGIE_BORED_MAX)
+
+    if quiet_for < boredom_threshold:
+        return
+
+    channel = bot.get_channel(CHANNEL_ID)
+
+    if not channel:
+        return
+
+    await channel.send(random.choice(FERGIE_BORED_LINES))
+
+    LAST_FERGIE_BORED = now
+
+
+@fergie_bored.before_loop
+async def _wait_fergie_bored():
+    await bot.wait_until_ready()
+    
 @bot.event
 async def on_message(message: discord.Message):
 
     if message.author.bot:
         return
+        
+    global LAST_CHAT_ACTIVITY
 
+    LAST_CHAT_ACTIVITY = time.time()
+    
     if not hasattr(bot, "_hydration_last"):
         bot._hydration_last = {}
 
