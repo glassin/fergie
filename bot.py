@@ -495,7 +495,45 @@ async def _load_bank():
 async def _save_bank():
     if db_pool:
         await _db_set("economy", economy)
+# ================== Fergie Reminder Helpers ==================
 
+async def load_reminders():
+    data = await _db_get("reminders")
+
+    if not isinstance(data, dict):
+        return {"items": []}
+
+    if "items" not in data:
+        data["items"] = []
+
+    return data
+
+
+async def save_reminders(data: dict):
+    await _db_set("reminders", data)
+
+
+def parse_simple_reminder(text: str):
+    pattern = r"remind me in (\d+) (minute|minutes|min|mins|hour|hours|hr|hrs|day|days) to (.+)"
+    match = re.search(pattern, text.lower().strip())
+
+    if not match:
+        return None
+
+    amount = int(match.group(1))
+    unit = match.group(2)
+    reminder_text = match.group(3).strip()
+
+    if unit in ["minute", "minutes", "min", "mins"]:
+        seconds = amount * 60
+    elif unit in ["hour", "hours", "hr", "hrs"]:
+        seconds = amount * 60 * 60
+    elif unit in ["day", "days"]:
+        seconds = amount * 24 * 60 * 60
+    else:
+        return None
+
+    return seconds, reminder_text
 # ================== Supply helpers (global 1M cap) ==================
 def _total_supply() -> int:
     """Total currency in existence: bank (treasury) + all user balances."""
@@ -1062,6 +1100,7 @@ async def on_ready():
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
     rebuild_mimic.start()           # build mimic model hourly
     fergie_bored.start()
+    fergie_reminders.start()
     raffle_watcher.start()
     daily_gym_reminder.start()          # raffle auto-draw watcher
 
@@ -1146,6 +1185,38 @@ async def fergie_bored():
 @fergie_bored.before_loop
 async def _wait_fergie_bored():
     await bot.wait_until_ready()
+
+@tasks.loop(minutes=1)
+async def fergie_reminders():
+    data = await load_reminders()
+    items = data.get("items", [])
+
+    if not items:
+        return
+
+    now = int(time.time())
+    remaining = []
+
+    for item in items:
+        if int(item.get("remind_at", 0)) <= now:
+            channel = bot.get_channel(int(item["channel_id"]))
+
+            if channel:
+                await channel.send(
+                    f"<@{item['user_id']}>\n\n"
+                    f"hey dumbass. remember:\n\n"
+                    f"**{item['text']}**"
+                )
+        else:
+            remaining.append(item)
+
+    data["items"] = remaining
+    await save_reminders(data)
+
+
+@fergie_reminders.before_loop
+async def _wait_fergie_reminders():
+    await bot.wait_until_ready()  
     
 @bot.event
 async def on_message(message: discord.Message):
@@ -1374,6 +1445,62 @@ async def on_message(message: discord.Message):
         recent_chat.reverse()
 
         chat_context = "\n".join(recent_chat)
+                if "remind me in" in question.lower():
+
+            parsed = parse_simple_reminder(question)
+
+            if not parsed:
+                await message.reply(
+                    "ugh. i can only do reminders like:\n"
+                    "`remind me in 20 minutes to switch laundry`\n"
+                    "`remind me in 3 days to suffer`\n"
+                    "i'm smart but not psychic yet.",
+                    mention_author=False
+                )
+                return
+
+
+            seconds, reminder_text = parsed
+
+            remind_at = int(time.time() + seconds)
+
+
+            data = await load_reminders()
+
+            items = data.get("items", [])
+
+
+            items.append({
+
+                "user_id": message.author.id,
+
+                "channel_id": message.channel.id,
+
+                "text": reminder_text,
+
+                "remind_at": remind_at
+
+            })
+
+
+            data["items"] = items
+
+            await save_reminders(data)
+
+
+            await message.reply(
+
+                f"ugh. fine.\n\n"
+
+                f"i'll remind you.\n\n"
+
+                f"**{reminder_text}**",
+
+                mention_author=False
+
+            )
+
+            return
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
 
