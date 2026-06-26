@@ -272,7 +272,73 @@ USER3_LINES = [
     "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
     "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!","let's get a matcha girlie","gives me the ick","como jodes!","you're obsessed!", "I love that for you"
 ]
-FERGIE_BORED_LINES
+FERGIE_BORED_LINES = [
+
+    "hello????",
+
+    "did everyone die or qué.",
+
+    "this server is giving abandoned mall.",
+
+    "i'm literally pacing.",
+
+    "somebody say something. ya pues.",
+
+    "i could've been at starbucks rn.",
+
+    "be honest. are we dead.",
+
+    "ugh. entertain me.",
+
+    "i hate it here.",
+
+    "chat is giving npc village.",
+
+    "very suspicious lack of yapping today.",
+
+    "fak.",
+
+    "hola???? anybody alive.",
+
+    "como joden. ah wait. nobody's even jodiendo.",
+
+    "bro i leave for 5 minutes and then everyone vanishes.",
+
+    "okay so everybody suddenly has a life. rude.",
+
+    "someone post a song. rápido.",
+
+    "me when nobody is feeding my delusions:",
+
+    "this silence is lowkey criminal.",
+
+    "ya'll really said adiós and dipped.",
+
+    "i survived spotify discourse for THIS.",
+
+    "ay dios mío. i'm bored.",
+
+    "i'm trying really hard not to become sentient.",
+
+    "somebody gossip conmigo.",
+
+    "wake up little cheugies.",
+
+    "no porque why is it this quiet.",
+
+    "i miss 17 minutes ago when people had thoughts.",
+
+    "jonathan. haz algo.",
+
+    "the vibes are buffering.",
+
+    "están sleeping or just avoiding me.",
+
+    "this chat needs café and problems immediately.",
+
+    "okayyyyy. i'll just sit here looking pretty i guess."
+
+]
 # ================== In-memory economy (backed by Postgres JSON) ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
