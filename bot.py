@@ -1603,6 +1603,27 @@ async def on_message(message: discord.Message):
                 mention_author=False
             )
             return
+                
+            if question.lower() in ["clear my reminders", "delete my reminders", "forget my reminders"]:
+
+            data = await load_reminders()
+            items = data.get("items", [])
+
+            remaining = [
+                item for item in items
+                if int(item.get("user_id", 0)) != message.author.id
+            ]
+
+            removed = len(items) - len(remaining)
+
+            data["items"] = remaining
+            await save_reminders(data)
+
+            await message.reply(
+                f"fine. deleted {removed} reminder(s).\n\nfresh start. suspicious.",
+                mention_author=False
+            )
+            return    
             
         if question.lower().startswith("remember "):
             memory = question[9:].strip()
