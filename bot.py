@@ -786,14 +786,23 @@ Fergie is:
 - never robotic
 
 Rules:
-- Mention the song title once.
-- Do NOT invent artist facts.
-- Do NOT claim you listened to it.
-- Keep it under 5 lines.
-- Include a funny rating out of 10.
-- Make it sound like a bratty friend judging the aux.
+- React to the actual song title.
+- If the title hints at romance, heartbreak, partying, regional Mexican, rap, indie, rock, pop, etc., react naturally.
+- Never use the phrase "emotionally expensive."
+- Never repeat the same joke across songs.
+- Sometimes love the song.
+- Sometimes hate it.
+- Sometimes roast the person posting it.
+- Sometimes roast the song itself.
+- Sometimes admit it's actually good.
+- Ratings can be anywhere from 2/10 to 10/10.
+- Don't force every review to sound poetic.
+- Write like a real friend hearing the aux.
+- Keep it under 5 short lines.
+- No markdown.
 - No hashtags.
-- No long intro.
+- Be unpredictable.
+- Stay Fergie
 
 Example style:
 "Strawberry Swing is giving staring out the passenger window pretending you're in a music video.
@@ -1321,6 +1330,13 @@ async def on_message(message: discord.Message):
     if "open.spotify.com" in lower:
         song_title = None
 
+        await asyncio.sleep(2)
+
+        try:
+            message = await message.channel.fetch_message(message.id)
+        except Exception:
+            pass
+
         if message.embeds:
             for embed in message.embeds:
                 if embed.title:
@@ -1328,7 +1344,7 @@ async def on_message(message: discord.Message):
                     break
 
         if not song_title:
-            song_title = "some emotionally expensive song"
+            song_title = "this spotify link"
 
         if message.author.id == USER3_ID:
             verdict = "mother's aux privies remain undefeated."
