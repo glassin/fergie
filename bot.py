@@ -613,7 +613,12 @@ FERGIE_CAST = {
         "traits": [
             "Always needs hydration",
             "Gets bonked constantly",
-            "Bread economy enthusiast"
+            "say's nigga too much",
+            "He's always horny",
+            "Lego master",
+            "conspiracy theorist",
+            "drives a durango",
+            "is guatemalen but thinks he's mexican"
         ]
     },
 
