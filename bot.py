@@ -927,7 +927,7 @@ async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
 # ================== Mimic (USER3 style) ==================
 # NOTE: This block is additive and does not modify any existing behavior.
 TARGET_MIMIC_ID = USER3_ID  # 661077262468382761
-MIMIC_REPLY_CHANCE = 0.28        # chance to reply when USER3 speaks
+MIMIC_REPLY_CHANCE = 0.0        # chance to reply when USER3 speaks
 MIMIC_COOLDOWN_SEC = 75          # cooldown to prevent spam
 MIMIC_CONTEXT_WINDOW_SEC = 120   # window to chime in after USER3 last spoke in channel
 
