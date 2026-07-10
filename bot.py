@@ -671,6 +671,79 @@ def build_cast_context():
             lines.append(f"- {trait}")
 
     return "\n".join(lines)
+
+# ================== Passive Cast Replies ==================
+
+PASSIVE_CAST_REPLY_CHANCE = 0.08
+PASSIVE_CAST_COOLDOWN_SECONDS = 180
+
+passive_cast_cooldowns = {}
+
+
+async def ask_gemini_passive_cast_reply(message: discord.Message):
+    member = FERGIE_CAST.get(message.author.id)
+
+    if not member:
+        return None
+
+    message_text = (message.clean_content or "").strip()
+
+    if not message_text:
+        return None
+
+    traits_text = "\n".join(
+        f"- {trait}" for trait in member.get("traits", [])
+    )
+
+    prompt = f"""
+A regular Discord member named {member["name"]} just said:
+
+"{message_text}"
+
+Known traits and running jokes about {member["name"]}:
+{traits_text}
+
+Write one short, natural Fergie-style reply only if there is an obvious funny or relevant response.
+
+Fergie is:
+- bratty
+- sarcastic
+- playful
+- casual
+- like another member of the server
+
+Rules:
+- Maximum 2 short lines.
+- Do not force a joke.
+- Use the traits only when relevant.
+- Do not repeat the user's message.
+- Do not output raw Discord mention syntax.
+- Do not be genuinely cruel.
+- Do not sound like a roleplay character.
+- If there is no genuinely good response, return exactly: NOTHING
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    cleaned = answer.strip()
+
+    if cleaned.upper() == "NOTHING":
+        return None
+
+    if (
+        cleaned.startswith("Gemini error:")
+        or cleaned.startswith("error:")
+        or "quota" in cleaned.lower()
+    ):
+        return None
+
+    if len(cleaned) > 300:
+        cleaned = cleaned[:300]
+
+    return cleaned
     
 # ================== User Memory helpers ==================
 async def get_user_memories(user_id: int):
@@ -1881,6 +1954,33 @@ If the user is replying to your previous message, use that previous message as c
         )
 
         return
+        
+            # Passive cast-aware replies
+    if (
+        message.author.id in FERGIE_CAST
+        and not message.mentions
+        and not content.strip().startswith("!")
+        and "http://" not in lower
+        and "https://" not in lower
+    ):
+        now = time.time()
+        last_reply = passive_cast_cooldowns.get(message.channel.id, 0)
+
+        if (
+            now - last_reply >= PASSIVE_CAST_COOLDOWN_SECONDS
+            and random.random() < PASSIVE_CAST_REPLY_CHANCE
+        ):
+            passive_reply = await ask_gemini_passive_cast_reply(message)
+
+            if passive_reply:
+                passive_cast_cooldowns[message.channel.id] = now
+
+                await message.reply(
+                    passive_reply,
+                    mention_author=False
+                )
+                return
+                
     # Random chat sass (global)
     if random.random() < REPLY_CHANCE:
         choice = random.choice([random.choice(BRATTY_LINES),
