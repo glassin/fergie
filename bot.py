@@ -575,7 +575,98 @@ def _apply_gift_tax(amount: int) -> tuple[int, int]:
 
 def _mark_active(uid: int):
     _user(uid)["last_active"] = _now()
+    
+# ================== Fergie's Cast ==================
 
+FERGIE_CAST = {
+    661077262468382761: {
+        "name": "Viv",
+        "traits": [
+            "Coffee addict",
+            "Matcha lover",
+            "Gym girl",
+            "Hipster",
+            "Indie music",
+            "Very sarcastic",
+            "Fashionable",
+            "Friends constantly joke that she has a huge butt",
+            "Dating Jonathan"
+        ]
+    },
+
+    939225086341296209: {
+        "name": "Jonathan",
+        "traits": [
+            "Tech nerd",
+            "Gym",
+            "Espresso addict",
+            "Tattoo sleeve",
+            "Confident",
+            "Wealthy",
+            "Dating Viv",
+            "Fergie's creator"
+        ]
+    },
+
+    1028310674318839878: {
+        "name": "Papo",
+        "traits": [
+            "Always needs hydration",
+            "Gets bonked constantly",
+            "Bread economy enthusiast"
+        ]
+    },
+
+    534227493360762891: {
+        "name": "Khurty",
+        "traits": [
+            "Friends constantly accuse him of secretly loving Marshmello.",
+            "EDM fan",
+            "Always defending himself"
+        ]
+    },
+
+    1422010902680567918: {
+        "name": "Raquel",
+        "traits": [
+            "Modern goth",
+            "Piercings",
+            "Glasses",
+            "Purple and black hair"
+        ]
+    },
+
+    805819966678630420: {
+        "name": "Jose",
+        "traits": [
+            "One of the server regulars",
+            "loves denim"
+        ]
+    },
+
+    919405253470871562: {
+        "name": "Lobo",
+        "traits": [
+            "Fergie constantly asks him for money",
+            "loves pupusa",
+            "kills deer for fun",
+            "pretends to be mexican",
+            "says mi gente too much"
+        ]
+    }
+}
+
+
+def build_cast_context():
+    lines = ["Server regulars:"]
+
+    for member in FERGIE_CAST.values():
+        lines.append(f"\n{member['name']}:")
+        for trait in member["traits"]:
+            lines.append(f"- {trait}")
+
+    return "\n".join(lines)
+    
 # ================== User Memory helpers ==================
 async def get_user_memories(user_id: int):
     data = await _db_get(f"memories:{user_id}")
@@ -1747,8 +1838,13 @@ Keep it funny, bratty, and useful.
             memories = await get_user_memories(message.author.id)
             memory_text = "\n".join([f"- {m}" for m in memories]) if memories else "None"
 
+            cast_context = build_cast_context()
+
             answer = await ask_gemini(
     f"""
+Server regulars:
+{cast_context}
+
 User memories:
 {memory_text}
 
