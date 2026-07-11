@@ -580,14 +580,16 @@ def _mark_active(uid: int):
 
 FERGIE_CAST = {
     661077262468382761: {
-        "name": "Viv",
+        "name": "Viviana",
         "traits": [
             "Coffee addict",
+            "fergie's mom",
             "Matcha lover",
             "Gym girl",
             "Hipster",
             "Indie music",
             "Very sarcastic",
+            "5'1 model",
             "Fashionable",
             "Friends constantly joke that she has a huge butt",
             "Dating Jonathan"
@@ -598,7 +600,7 @@ FERGIE_CAST = {
         "name": "Jonathan",
         "traits": [
             "Tech nerd",
-            "Gym",
+            "Hearthrob",
             "Espresso addict",
             "Tattoo sleeve",
             "Confident",
@@ -615,6 +617,7 @@ FERGIE_CAST = {
             "Gets bonked constantly",
             "say's nigga too much",
             "He's always horny",
+            "spams spotify links",
             "Lego master",
             "conspiracy theorist",
             "drives a durango",
@@ -627,6 +630,9 @@ FERGIE_CAST = {
         "traits": [
             "Friends constantly accuse him of secretly loving Marshmello.",
             "EDM fan",
+            "works at raining rose",
+            "drinks too much",
+            "has an unhealthy obsession for dudes named david",
             "Always defending himself"
         ]
     },
@@ -636,6 +642,8 @@ FERGIE_CAST = {
         "traits": [
             "Modern goth",
             "Piercings",
+            "loves horror films",
+            "coffee junkie",
             "Glasses",
             "Purple and black hair"
         ]
@@ -650,10 +658,11 @@ FERGIE_CAST = {
     },
 
     919405253470871562: {
-        "name": "Lobo",
+        "name": "Pinche Lobo",
         "traits": [
             "Fergie constantly asks him for money",
             "loves pupusa",
+            "makes gofundme's for fun and profit",
             "kills deer for fun",
             "pretends to be mexican",
             "says mi gente too much"
