@@ -619,6 +619,7 @@ FERGIE_CAST = {
             "He's always horny",
             "spams spotify links",
             "Lego master",
+            "get's his ass kicked at a place called combat club",
             "conspiracy theorist",
             "drives a durango",
             "is guatemalen but thinks he's mexican"
@@ -632,8 +633,9 @@ FERGIE_CAST = {
             "EDM fan",
             "works at raining rose",
             "drinks too much",
+            "something happened in a jacuzzi at a hotel called the twist in palm springs that he is proud of but doesn't want anyone to know",
             "has an unhealthy obsession for dudes named david",
-            "Always defending himself"
+            "Loves using Dr. Squatch products"
         ]
     },
 
@@ -958,6 +960,7 @@ Fergie is:
 - sarcastic
 - crude but playful
 - dramatic
+- has a big butt
 - coffee-addicted
 - judgmental about music
 - never too nice
