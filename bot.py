@@ -1511,7 +1511,7 @@ async def on_message(message: discord.Message):
     if "open.spotify.com" in lower:
         song_title = None
 
-        await asyncio.sleep(2)
+        await asyncio.sleep(5)
 
         try:
             message = await message.channel.fetch_message(message.id)
