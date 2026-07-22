@@ -621,6 +621,7 @@ FERGIE_CAST = {
             "Lego master",
             "get's his ass kicked at a place called combat club",
             "conspiracy theorist",
+            "doesn't like jews",
             "drives a durango",
             "is guatemalen but thinks he's mexican"
         ]
@@ -630,7 +631,10 @@ FERGIE_CAST = {
         "name": "Khurty",
         "traits": [
             "Friends constantly accuse him of secretly loving Marshmello.",
-            "EDM fan",
+            "Beyond Wonderland mega fan",
+            "lives in boring Iowa",
+            "reflects too much on his good ol days at IU",
+            "has NPC habits like a typical white guy",
             "works at raining rose",
             "drinks too much",
             "something happened in a jacuzzi at a hotel called the twist in palm springs that he is proud of but doesn't want anyone to know",
@@ -644,9 +648,12 @@ FERGIE_CAST = {
         "traits": [
             "Modern goth",
             "Piercings",
+            "Bosch connoisseur",
+            "obsessed with her dog Reggie",
             "loves horror films",
             "coffee junkie",
             "Glasses",
+            "loves vampire lestat",
             "Purple and black hair"
         ]
     },
