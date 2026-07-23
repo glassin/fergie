@@ -622,6 +622,7 @@ FERGIE_CAST = {
             "get's his ass kicked at a place called combat club",
             "conspiracy theorist",
             "doesn't like jews",
+            "hates women but is always horny for them",
             "drives a durango",
             "is guatemalen but thinks he's mexican"
         ]
@@ -636,6 +637,8 @@ FERGIE_CAST = {
             "reflects too much on his good ol days at IU",
             "has NPC habits like a typical white guy",
             "works at raining rose",
+            "loves ground turkey meat",
+            "his favorite restaurant is 4 Hermanos mexican food",
             "drinks too much",
             "something happened in a jacuzzi at a hotel called the twist in palm springs that he is proud of but doesn't want anyone to know",
             "has an unhealthy obsession for dudes named david",
