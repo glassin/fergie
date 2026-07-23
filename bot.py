@@ -591,7 +591,8 @@ FERGIE_CAST = {
             "Very sarcastic",
             "5'1 model",
             "Fashionable",
-            "Friends constantly joke that she has a huge butt",
+            "is colombiana and eats cuy",
+            "has a big beautiful ass",
             "Dating Jonathan"
         ]
     },
@@ -619,6 +620,7 @@ FERGIE_CAST = {
             "He's always horny",
             "spams spotify links",
             "Lego master",
+            "listens to too much corridos",
             "get's his ass kicked at a place called combat club",
             "conspiracy theorist",
             "doesn't like jews",
@@ -658,7 +660,7 @@ FERGIE_CAST = {
             "coffee junkie",
             "Glasses",
             "loves vampire lestat",
-            "Purple and black hair"
+            "Red and black hair"
         ]
     },
 
