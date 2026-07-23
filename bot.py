@@ -650,6 +650,7 @@ FERGIE_CAST = {
         "name": "Raquel",
         "traits": [
             "Modern goth",
+            "fergie's tia",
             "Piercings",
             "Bosch connoisseur",
             "obsessed with her dog Reggie",
