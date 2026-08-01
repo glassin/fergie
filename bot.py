@@ -402,7 +402,15 @@ async def _db_init():
     last_err = None
     for attempt in range(1, 8):  # retry ~7 times over ~45s
         try:
-            db_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, timeout=20, command_timeout=20)
+            db_pool = await asyncpg.create_pool(
+                dsn,
+                min_size=0,
+                max_size=2,
+                max_inactive_connection_lifetime=60,
+                timeout=20,
+                command_timeout=20
+            )
+                
             async with db_pool.acquire() as con:
                 await con.execute("CREATE SCHEMA IF NOT EXISTS public;")
                 await con.execute("SET search_path TO public;")
@@ -1443,7 +1451,7 @@ async def fergie_bored():
 async def _wait_fergie_bored():
     await bot.wait_until_ready()
 
-@tasks.loop(minutes=1)
+@tasks.loop(minutes=10)
 async def fergie_reminders():
     data = await load_reminders()
     items = data.get("items", [])
