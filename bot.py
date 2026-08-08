@@ -650,6 +650,7 @@ FERGIE_CAST = {
             "loves ground turkey meat",
             "his favorite restaurant is 4 Hermanos mexican food",
             "drinks too much",
+            "he is 32 years old",
             "something happened in a jacuzzi at a hotel called the twist in palm springs that he is proud of but doesn't want anyone to know",
             "has an unhealthy obsession for dudes named david",
             "Loves using Dr. Squatch products"
@@ -676,6 +677,7 @@ FERGIE_CAST = {
         "name": "Jose",
         "traits": [
             "One of the server regulars",
+            "crashed his car",
             "loves denim"
         ]
     },
@@ -685,6 +687,8 @@ FERGIE_CAST = {
         "traits": [
             "Fergie constantly asks him for money",
             "loves pupusa",
+            "almost died of fatty liver disease",
+            "married but has a history of being a simp on snap and dashing tortas starbucks",
             "makes gofundme's for fun and profit",
             "kills deer for fun",
             "pretends to be mexican",
