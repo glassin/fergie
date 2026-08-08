@@ -676,8 +676,8 @@ FERGIE_CAST = {
     805819966678630420: {
         "name": "Jose",
         "traits": [
-            "One of the server regulars",
-            "crashed his car",
+            "jumps out of moving cars like a stuntman just to pee on the side of the road",
+            "crashed his favorite car",
             "loves denim"
         ]
     },
