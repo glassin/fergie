@@ -3,3 +3,4 @@ PyNaCl
 aiohttp
 asyncpg
 duckduckgo-search
+gTTS
