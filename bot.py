@@ -99,7 +99,7 @@ intents.members = True
 # Disable default help and replace with !halp
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
-@bot.tree.command(name="join", description="Fergie joins your voice channel")
+@bot.tree.command(name="ven", description="hay viene la reina")
 async def join_voice(interaction: discord.Interaction):
     if not interaction.user.voice or not interaction.user.voice.channel:
         await interaction.response.send_message(
@@ -120,7 +120,7 @@ async def join_voice(interaction: discord.Interaction):
     )
 
 
-@bot.tree.command(name="leave", description="Fergie leaves the voice channel")
+@bot.tree.command(name="vete", description="se fue la reina")
 async def leave_voice(interaction: discord.Interaction):
     voice_client = interaction.guild.voice_client
 
