@@ -13,6 +13,10 @@ import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 TOKEN       = os.getenv("DISCORD_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
+
 CHANNEL_ID  = 1273436116699058290
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
@@ -158,27 +162,59 @@ async def habla(interaction: discord.Interaction):
 
     await interaction.response.defer()
 
-    text = "Oh my gawd. Fine. I can talk now. Are you happy?"
+    text = "Oh my god, are you lot still talking about this? I've been sitting here for five minutes and somehow the conversation has gotten worse."
 
-    filename = "/tmp/fergie_test.mp3"
-
-    tts = gTTS(
-        text=text,
-        lang="en",
-        tld="co.uk"
+    url = (
+        f"https://api.elevenlabs.io/v1/text-to-speech/"
+        f"{ELEVENLABS_VOICE_ID}"
     )
 
-    await asyncio.to_thread(tts.save, filename)
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.45,
+            "similarity_boost": 0.80,
+            "style": 0.35,
+            "use_speaker_boost": True
+        }
+    }
+
+    filename = "/tmp/fergie_voice.mp3"
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            headers=headers,
+            json=payload
+        ) as response:
+
+            if response.status != 200:
+                error = await response.text()
+                await interaction.followup.send(
+                    f"ElevenLabs error: {response.status}"
+                )
+                print("ElevenLabs error:", error)
+                return
+
+            audio = await response.read()
+
+    with open(filename, "wb") as f:
+        f.write(audio)
 
     if voice_client.is_playing():
         voice_client.stop()
 
     source = discord.FFmpegOpusAudio(filename)
-
     voice_client.play(source)
 
     await interaction.followup.send(
-        "ugh. apparently i have a voice now."
+        "ugh. there. happy now? 🙄"
     )
 # ===================== Bread Economy Settings =====================
 # Global hard cap on TOTAL currency in existence (bank + all users).
