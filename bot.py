@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta, time as dtime, timezone
 from zoneinfo import ZoneInfo
 from collections import defaultdict, Counter
 from typing import List, Tuple
+from gtts import gTTS
 
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
@@ -139,7 +140,46 @@ async def leave_voice(interaction: discord.Interaction):
     await interaction.response.send_message(
         "finally. peace and quiet."
     )
+@bot.tree.command(
+    name="habla",
+    description="Fergie dice algo",
+    guild=TEST_GUILD
+)
+async def habla(interaction: discord.Interaction):
 
+    voice_client = interaction.guild.voice_client
+
+    if not voice_client or not voice_client.is_connected():
+        await interaction.response.send_message(
+            "i'm not even in VC. use /ven first 🙄",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer()
+
+    text = "Oh my gawd. Fine. I can talk now. Are you happy?"
+
+    filename = "/tmp/fergie_test.mp3"
+
+    tts = gTTS(
+        text=text,
+        lang="en",
+        tld="co.uk"
+    )
+
+    await asyncio.to_thread(tts.save, filename)
+
+    if voice_client.is_playing():
+        voice_client.stop()
+
+    source = discord.FFmpegPCMAudio(filename)
+
+    voice_client.play(source)
+
+    await interaction.followup.send(
+        "ugh. apparently i have a voice now."
+    )
 # ===================== Bread Economy Settings =====================
 # Global hard cap on TOTAL currency in existence (bank + all users).
 # You can override via env TOTAL_MAX_CURRENCY, but default is 1,000,000.
