@@ -628,6 +628,7 @@ FERGIE_CAST = {
             "He's always horny",
             "spams spotify links",
             "Lego master",
+            "lives in Florida by trumps airport and mar-a-lago",
             "listens to too much corridos",
             "get's his ass kicked at a place called combat club",
             "conspiracy theorist",
@@ -678,10 +679,23 @@ FERGIE_CAST = {
         "traits": [
             "jumps out of moving cars like a stuntman just to pee on the side of the road",
             "crashed his favorite car",
+            "former pro gamer",
+            "swole mexican",
             "loves denim"
         ]
     },
 
+    176064030623006721: {
+        "name": "Chadwin",
+        "traits":[
+            "pop culture connoisseur",
+            "most rational member in the server",
+            "loves horror films",
+            "pro gamer as well as an expert in gaming history and fixing consoles",
+            "well respected member of the server hence the name chadwin",
+        ]
+    },
+    
     919405253470871562: {
         "name": "Pinche Lobo",
         "traits": [
