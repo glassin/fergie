@@ -102,10 +102,12 @@ TEST_GUILD = discord.Object(id=1131572913829580810)
 
 @bot.tree.command(name="ven", description="hay viene la reina", guild=TEST_GUILD)
 async def join_voice(interaction: discord.Interaction):
+
+    await interaction.response.defer()
+
     if not interaction.user.voice or not interaction.user.voice.channel:
-        await interaction.response.send_message(
-            "ugh. get in a voice channel first. 🙄",
-            ephemeral=True
+        await interaction.followup.send(
+            "ugh. get in a voice channel first. 🙄"
         )
         return
 
@@ -116,7 +118,7 @@ async def join_voice(interaction: discord.Interaction):
     else:
         await channel.connect()
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         "ugh. fine. i'm here. don't make this weird."
     )
 
