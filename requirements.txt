@@ -1,4 +1,5 @@
-discord.py
+discord.py[voice]
+PyNaCl
 aiohttp
 asyncpg
 duckduckgo-search
