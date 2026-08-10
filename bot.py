@@ -98,8 +98,9 @@ intents.message_content = True
 intents.members = True
 # Disable default help and replace with !halp
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+TEST_GUILD = discord.Object(id=1131572913829580810)
 
-@bot.tree.command(name="ven", description="hay viene la reina")
+@bot.tree.command(name="ven", description="hay viene la reina", guild=TEST_GUILD)
 async def join_voice(interaction: discord.Interaction):
     if not interaction.user.voice or not interaction.user.voice.channel:
         await interaction.response.send_message(
@@ -120,7 +121,7 @@ async def join_voice(interaction: discord.Interaction):
     )
 
 
-@bot.tree.command(name="vete", description="se fue la reina")
+@bot.tree.command(name="vete", description="se fue la reina", guild=TEST_GUILD)
 async def leave_voice(interaction: discord.Interaction):
     voice_client = interaction.guild.voice_client
 
@@ -1408,7 +1409,7 @@ async def on_ready():
     except Exception as e:
         print("ChatDropCog load error:", e)
     if not getattr(bot, "_slash_synced", False):
-        await bot.tree.sync()
+        await bot.tree.sync(guild=TEST_GUILD)
         bot._slash_synced = True
     
     print(f"Logged in as {bot.user}")
