@@ -1410,9 +1410,8 @@ async def on_ready():
             bot._chatdrop_loaded = True
     except Exception as e:
         print("ChatDropCog load error:", e)
-    if not getattr(bot, "_slash_synced", False):
-        await bot.tree.sync(guild=TEST_GUILD)
-        bot._slash_synced = True
+        
+await bot.tree.sync(guild=TEST_GUILD)
     
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
