@@ -99,6 +99,44 @@ intents.members = True
 # Disable default help and replace with !halp
 bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
 
+@bot.tree.command(name="join", description="Fergie joins your voice channel")
+async def join_voice(interaction: discord.Interaction):
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        await interaction.response.send_message(
+            "ugh. get in a voice channel first. 🙄",
+            ephemeral=True
+        )
+        return
+
+    channel = interaction.user.voice.channel
+
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.move_to(channel)
+    else:
+        await channel.connect()
+
+    await interaction.response.send_message(
+        "ugh. fine. i'm here. don't make this weird."
+    )
+
+
+@bot.tree.command(name="leave", description="Fergie leaves the voice channel")
+async def leave_voice(interaction: discord.Interaction):
+    voice_client = interaction.guild.voice_client
+
+    if not voice_client:
+        await interaction.response.send_message(
+            "i'm literally not even in VC. 😭",
+            ephemeral=True
+        )
+        return
+
+    await voice_client.disconnect()
+
+    await interaction.response.send_message(
+        "finally. peace and quiet."
+    )
+
 # ===================== Bread Economy Settings =====================
 # Global hard cap on TOTAL currency in existence (bank + all users).
 # You can override via env TOTAL_MAX_CURRENCY, but default is 1,000,000.
@@ -1369,7 +1407,9 @@ async def on_ready():
             bot._chatdrop_loaded = True
     except Exception as e:
         print("ChatDropCog load error:", e)
-
+if not getattr(bot, "_slash_synced", False):
+    await bot.tree.sync()
+    bot._slash_synced = True
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
     six_hour_emoji.start()
