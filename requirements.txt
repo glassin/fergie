@@ -4,3 +4,4 @@ aiohttp
 asyncpg
 duckduckgo-search
 gTTS
+discord-ext-voice-recv
