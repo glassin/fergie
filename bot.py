@@ -173,7 +173,7 @@ async def habla(interaction: discord.Interaction):
     if voice_client.is_playing():
         voice_client.stop()
 
-    source = discord.FFmpegPCMAudio(filename)
+    source = discord.FFmpegOpusAudio(filename)
 
     voice_client.play(source)
 
