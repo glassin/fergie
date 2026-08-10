@@ -1411,7 +1411,7 @@ async def on_ready():
     except Exception as e:
         print("ChatDropCog load error:", e)
         
-await bot.tree.sync(guild=TEST_GUILD)
+    await bot.tree.sync(guild=TEST_GUILD)
     
     print(f"Logged in as {bot.user}")
     four_hour_post.start()
