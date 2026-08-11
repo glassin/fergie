@@ -11,6 +11,7 @@ from discord.ext import voice_recv
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
 # Load Opus for Discord voice receiving
+import ctypes
 import ctypes.util
 
 if not discord.opus.is_loaded():
@@ -293,10 +294,251 @@ async def transcribe_vc_audio(user, pcm_audio: bytes):
     except Exception as e:
         print(f"VC TRANSCRIBE EXCEPTION: {type(e).__name__}: {e}")
 
+# ================== VC RAW OPUS -> OGG ==================
 
+_OPUS_LIB = ctypes.CDLL(ctypes.util.find_library("opus"))
+
+_OPUS_LIB.opus_packet_get_nb_samples.argtypes = [
+    ctypes.POINTER(ctypes.c_ubyte),
+    ctypes.c_int32,
+    ctypes.c_int32,
+]
+_OPUS_LIB.opus_packet_get_nb_samples.restype = ctypes.c_int
+
+
+def _opus_packet_samples(packet: bytes) -> int:
+    if not packet:
+        return 0
+
+    buf = (ctypes.c_ubyte * len(packet)).from_buffer_copy(packet)
+
+    samples = _OPUS_LIB.opus_packet_get_nb_samples(
+        buf,
+        len(packet),
+        48000
+    )
+
+    if samples < 0:
+        raise ValueError(f"Bad Opus packet: {samples}")
+
+    return samples
+
+
+def _make_ogg_crc_table():
+    table = []
+    polynomial = 0x04C11DB7
+
+    for i in range(256):
+        value = i << 24
+
+        for _ in range(8):
+            if value & 0x80000000:
+                value = ((value << 1) ^ polynomial) & 0xFFFFFFFF
+            else:
+                value = (value << 1) & 0xFFFFFFFF
+
+        table.append(value)
+
+    return table
+
+
+_OGG_CRC_TABLE = _make_ogg_crc_table()
+
+
+def _ogg_crc(data: bytes) -> int:
+    crc = 0
+
+    for byte in data:
+        crc = (
+            ((crc << 8) & 0xFFFFFFFF)
+            ^ _OGG_CRC_TABLE[((crc >> 24) & 0xFF) ^ byte]
+        )
+
+    return crc
+
+
+def _ogg_lacing(packet_length: int) -> bytes:
+    values = []
+
+    while packet_length >= 255:
+        values.append(255)
+        packet_length -= 255
+
+    values.append(packet_length)
+
+    return bytes(values)
+
+
+def _ogg_page(
+    packet: bytes,
+    serial: int,
+    sequence: int,
+    granule: int,
+    header_type: int
+) -> bytes:
+
+    import struct
+
+    segments = _ogg_lacing(len(packet))
+
+    header = (
+        b"OggS"
+        + bytes([0])
+        + bytes([header_type])
+        + struct.pack("<Q", granule)
+        + struct.pack("<I", serial)
+        + struct.pack("<I", sequence)
+        + b"\x00\x00\x00\x00"
+        + bytes([len(segments)])
+        + segments
+    )
+
+    page = bytearray(header + packet)
+
+    checksum = _ogg_crc(page)
+
+    page[22:26] = struct.pack("<I", checksum)
+
+    return bytes(page)
+
+
+def build_ogg_opus(packets: list[bytes]) -> bytes:
+    import struct
+
+    serial = random.randint(1, 0xFFFFFFFF)
+
+    opus_head = (
+        b"OpusHead"
+        + bytes([1])          # version
+        + bytes([2])          # stereo
+        + struct.pack("<H", 0)
+        + struct.pack("<I", 48000)
+        + struct.pack("<h", 0)
+        + bytes([0])
+    )
+
+    vendor = b"fergie-vc"
+
+    opus_tags = (
+        b"OpusTags"
+        + struct.pack("<I", len(vendor))
+        + vendor
+        + struct.pack("<I", 0)
+    )
+
+    output = bytearray()
+
+    output.extend(
+        _ogg_page(
+            opus_head,
+            serial,
+            0,
+            0,
+            0x02
+        )
+    )
+
+    output.extend(
+        _ogg_page(
+            opus_tags,
+            serial,
+            1,
+            0,
+            0x00
+        )
+    )
+
+    granule = 0
+    sequence = 2
+
+    for index, packet in enumerate(packets):
+        granule += _opus_packet_samples(packet)
+
+        is_last = index == len(packets) - 1
+
+        output.extend(
+            _ogg_page(
+                packet,
+                serial,
+                sequence,
+                granule,
+                0x04 if is_last else 0x00
+            )
+        )
+
+        sequence += 1
+
+    return bytes(output)
+
+
+async def transcribe_vc_opus(user, packets: list[bytes]):
+
+    try:
+        ogg_audio = build_ogg_opus(packets)
+
+    except Exception as e:
+        print(
+            f"VC OGG BUILD ERROR FROM {user}: "
+            f"{type(e).__name__}: {e}"
+        )
+        return
+
+    form = aiohttp.FormData()
+
+    form.add_field(
+        "file",
+        ogg_audio,
+        filename="fergie_vc.ogg",
+        content_type="audio/ogg"
+    )
+
+    form.add_field(
+        "model_id",
+        "scribe_v2"
+    )
+
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+
+            async with session.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers=headers,
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+
+                if response.status != 200:
+                    error = await response.text()
+
+                    print(
+                        f"VC STT ERROR {response.status}: "
+                        f"{error}"
+                    )
+                    return
+
+                result = await response.json()
+
+        text = (result.get("text") or "").strip()
+
+        if text:
+            print(
+                f'VC HEARD {user.display_name}: "{text}"'
+            )
+
+    except Exception as e:
+        print(
+            f"VC STT EXCEPTION: "
+            f"{type(e).__name__}: {e}"
+        )
+        
 class FergieOpusBufferSink(voice_recv.AudioSink):
     def __init__(self):
         super().__init__()
+        self.loop = loop
         self.buffers = {}
         self.lock = threading.Lock()
 
@@ -333,6 +575,10 @@ class FergieOpusBufferSink(voice_recv.AudioSink):
             f"{len(packets)} packets | "
             f"{total_bytes} bytes"
         )
+        asyncio.run_coroutine_threadsafe(
+             transcribe_vc_opus(member, packets),
+             self.loop
+         )
 
     def cleanup(self):
         with self.lock:
@@ -362,7 +608,8 @@ async def escucha(interaction: discord.Interaction):
     if voice_client.is_listening():
         voice_client.stop_listening()
 
-    sink = FergieOpusBufferSink()
+    loop = asyncio.get_running_loop()
+    sink = FergieOpusBufferSink(loop)
 
     voice_client.listen(
         sink,
