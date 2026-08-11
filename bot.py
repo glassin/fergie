@@ -324,6 +324,10 @@ class FergieOpusBufferSink(voice_recv.AudioSink):
 
         total_bytes = sum(len(packet) for packet in packets)
 
+        # Ignore tiny silence/noise bursts
+        if len(packets) < 10 or total_bytes < 500:
+            return
+
         print(
             f"VC RAW UTTERANCE FROM {member} | "
             f"{len(packets)} packets | "
