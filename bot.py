@@ -10,6 +10,14 @@ from discord.ext import voice_recv
 
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
+# Load Opus for Discord voice receiving
+if not discord.opus.is_loaded():
+    try:
+        discord.opus.load_opus("libopus.so.0")
+        print("OPUS LOADED SUCCESSFULLY ✅")
+    except Exception as e:
+        print(f"OPUS LOAD ERROR: {e}")
+        
 # ===================== ENV & CONSTANTS =====================
 TOKEN       = os.getenv("DISCORD_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
