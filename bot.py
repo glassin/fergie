@@ -217,6 +217,41 @@ async def habla(interaction: discord.Interaction):
     await interaction.followup.send(
         "ugh. there. happy now? 🙄"
     )
+
+@bot.tree.command(
+    name="escucha",
+    description="Fergie tests whether she can hear VC audio",
+    guild=TEST_GUILD
+)
+async def escucha(interaction: discord.Interaction):
+
+    voice_client = interaction.guild.voice_client
+
+    if not isinstance(voice_client, voice_recv.VoiceRecvClient):
+        await interaction.response.send_message(
+            "i need to rejoin with /ven first 🙄",
+            ephemeral=True
+        )
+        return
+
+    if voice_client.is_listening():
+        await interaction.response.send_message(
+            "i'm already listening, relax 😭",
+            ephemeral=True
+        )
+        return
+
+    def audio_callback(user, data):
+        if user:
+            print(f"VC AUDIO RECEIVED FROM: {user} | {len(data.pcm)} bytes")
+
+    sink = voice_recv.BasicSink(audio_callback)
+
+    voice_client.listen(sink)
+
+    await interaction.response.send_message(
+        "fine. i'm listening now. say something 👂"
+    )
 # ===================== Bread Economy Settings =====================
 # Global hard cap on TOTAL currency in existence (bank + all users).
 # You can override via env TOTAL_MAX_CURRENCY, but default is 1,000,000.
