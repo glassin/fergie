@@ -1,4 +1,4 @@
-import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io, wave, threading
+import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io, wave, threading, logging
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
@@ -7,6 +7,12 @@ from collections import defaultdict, Counter
 from typing import List, Tuple
 from gtts import gTTS
 from discord.ext import voice_recv
+
+# Silence noisy discord voice-recv internals
+logging.getLogger("discord.ext.voice_recv").setLevel(logging.ERROR)
+logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.ERROR)
+logging.getLogger("discord.ext.voice_recv.opus").setLevel(logging.ERROR)
+logging.getLogger("discord.ext.voice_recv.gateway").setLevel(logging.ERROR)
 
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
