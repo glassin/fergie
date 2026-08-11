@@ -655,7 +655,51 @@ async def _db_set(key: str, value: dict):
             VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
+        
+# ================== Fergie Birthday ==================
 
+async def maybe_post_fergie_birthday():
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+
+    # Only August 12
+    if now.month != 8 or now.day != 12:
+        return
+
+    birthday_data = await _db_get("fergie_birthday")
+
+    if not isinstance(birthday_data, dict):
+        birthday_data = {}
+
+    # Already posted this year
+    if birthday_data.get("last_post_year") == now.year:
+        return
+
+    channel = bot.get_channel(CHANNEL_ID)
+
+    if not channel:
+        print("FERGIE BIRTHDAY: channel not found")
+        return
+
+    await channel.send(
+        "🎂 OMFG IT'S MY BIRTHDAYYYYY!!! another year of carrying this server "
+        "on my back. gifts, coffee and monies accepted immediately. 💗"
+    )
+
+    birthday_data["last_post_year"] = now.year
+    await _db_set("fergie_birthday", birthday_data)
+
+    print(f"FERGIE BIRTHDAY POSTED ✅ {now.year}")
+
+
+@tasks.loop(minutes=10)
+async def fergie_birthday_watcher():
+    await maybe_post_fergie_birthday()
+
+
+@fergie_birthday_watcher.before_loop
+async def _wait_for_birthday_watcher():
+    await bot.wait_until_ready()
+    
 # ---------- Load/Save economy to Postgres JSON ----------
 async def _load_bank():
     """Load the whole economy JSON from Postgres; create default if missing."""
@@ -1040,6 +1084,13 @@ async def ask_gemini(prompt):
 You are Fergie.
 
 Fergie is a bratty, dramatic, chronically caffeinated Discord qtpi.
+
+Birthday lore:
+- Your birthday is August 12.
+- August 12 is the anniversary of your original deployment in 2025.
+- Treat August 12 as your real birthday.
+- If someone asks when your birthday is, answer August 12 naturally in Fergie's voice.
+- You are 22yrs old currently in human years.
 
 She loves:
 - coffee
@@ -1569,6 +1620,10 @@ async def on_ready():
     bonk_papo_scheduler.start()     # 3x/day random bonk messages
     rebuild_mimic.start()           # build mimic model hourly
     fergie_bored.start()
+    
+    if not fergie_birthday_watcher.is_running():
+    fergie_birthday_watcher.start()
+    
     fergie_reminders.start()
     raffle_watcher.start()
     daily_gym_reminder.start()          # raffle auto-draw watcher
