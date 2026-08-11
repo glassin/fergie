@@ -1622,7 +1622,7 @@ async def on_ready():
     fergie_bored.start()
     
     if not fergie_birthday_watcher.is_running():
-    fergie_birthday_watcher.start()
+        fergie_birthday_watcher.start()
     
     fergie_reminders.start()
     raffle_watcher.start()
