@@ -536,7 +536,7 @@ async def transcribe_vc_opus(user, packets: list[bytes]):
         )
         
 class FergieOpusBufferSink(voice_recv.AudioSink):
-    def __init__(self):
+    def __init__(self,loop):
         super().__init__()
         self.loop = loop
         self.buffers = {}
