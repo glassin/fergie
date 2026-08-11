@@ -1,7 +1,7 @@
-discord.py[voice]
+discord.py[voice]==2.6.4
 PyNaCl
 aiohttp
 asyncpg
 duckduckgo-search
 gTTS
-discord-ext-voice-recv
+discord-ext-voice-recv==0.5.1a170
