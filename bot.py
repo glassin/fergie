@@ -234,6 +234,24 @@ async def habla(interaction: discord.Interaction):
         "ugh. there. happy now? 🙄"
     )
 
+class FergieOpusTestSink(voice_recv.AudioSink):
+    def __init__(self):
+        super().__init__()
+
+    def wants_opus(self):
+        return True
+
+    def write(self, user, data):
+        if user and data.opus:
+            print(
+                f"RAW OPUS RECEIVED FROM: {user} | "
+                f"{len(data.opus)} bytes"
+            )
+
+    def cleanup(self):
+        print("RAW OPUS LISTENER CLEANED UP")
+
+
 @bot.tree.command(
     name="escucha",
     description="Fergie tests whether she can hear VC audio",
@@ -251,22 +269,19 @@ async def escucha(interaction: discord.Interaction):
         return
 
     if voice_client.is_listening():
-        await interaction.response.send_message(
-            "i'm already listening, relax 😭",
-            ephemeral=True
+        voice_client.stop_listening()
+
+    sink = FergieOpusTestSink()
+
+    voice_client.listen(
+        sink,
+        after=lambda error: print(
+            f"VOICE LISTENER STOPPED: {error!r}"
         )
-        return
-
-    def audio_callback(user, data):
-        if user:
-            print(f"VC AUDIO RECEIVED FROM: {user} | {len(data.pcm)} bytes")
-
-    sink = voice_recv.BasicSink(audio_callback)
-
-    voice_client.listen(sink)
+    )
 
     await interaction.response.send_message(
-        "fine. i'm listening now. say something 👂"
+        "fine. i'm listening in raw mode now. say something 👂"
     )
 # ===================== Bread Economy Settings =====================
 # Global hard cap on TOTAL currency in existence (bank + all users).
