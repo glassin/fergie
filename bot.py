@@ -457,23 +457,41 @@ def build_ogg_opus(packets: list[bytes]) -> bytes:
     granule = 0
     sequence = 2
 
-    for index, packet in enumerate(packets):
-        granule += _opus_packet_samples(packet)
+   valid_packets = []
 
-        is_last = index == len(packets) - 1
+for packet in packets:
+    try:
+        samples = _opus_packet_samples(packet)
+    except ValueError:
+        continue
 
-        output.extend(
-            _ogg_page(
-                packet,
-                serial,
-                sequence,
-                granule,
-                0x04 if is_last else 0x00
-            )
+    if samples <= 0:
+        continue
+
+    valid_packets.append((packet, samples))
+
+if not valid_packets:
+    raise ValueError("No valid Opus packets found")
+
+for index, (packet, samples) in enumerate(valid_packets):
+    granule += samples
+
+    is_last = index == len(valid_packets) - 1
+
+    output.extend(
+        _ogg_page(
+            packet,
+            serial,
+            sequence,
+            granule,
+            0x04 if is_last else 0x00
         )
+    )
 
-        sequence += 1
-
+    sequence += 1
+print(
+    f"VC OGG BUILT: {len(valid_packets)}/{len(packets)} valid packets"
+)
     return bytes(output)
 
 
