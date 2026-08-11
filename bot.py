@@ -3308,6 +3308,7 @@ async def fit_auto_daily():
 @fit_auto_daily.before_loop
 async def _fit_wait_ready():
     await bot.wait_until_ready()
+    await asyncio.sleep(86400)
 
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
