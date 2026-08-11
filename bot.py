@@ -1,4 +1,4 @@
-import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re
+import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io, wave, threading
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
@@ -234,34 +234,154 @@ async def habla(interaction: discord.Interaction):
         "ugh. there. happy now? 🙄"
     )
 
-class FergieOpusTestSink(voice_recv.AudioSink):
-    def __init__(self):
+async def transcribe_vc_audio(user, pcm_audio: bytes):
+    if not ELEVENLABS_API_KEY:
+        print("VC TRANSCRIBE ERROR: ELEVENLABS_API_KEY missing")
+        return
+
+    # Ignore tiny accidental noises
+    # 48kHz * 2 channels * 2 bytes = 192,000 bytes/sec
+    if len(pcm_audio) < 96000:
+        return
+
+    wav_buffer = io.BytesIO()
+
+    with wave.open(wav_buffer, "wb") as wav_file:
+        wav_file.setnchannels(2)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(48000)
+        wav_file.writeframes(pcm_audio)
+
+    wav_bytes = wav_buffer.getvalue()
+
+    form = aiohttp.FormData()
+    form.add_field(
+        "file",
+        wav_bytes,
+        filename="fergie_vc.wav",
+        content_type="audio/wav"
+    )
+    form.add_field("model_id", "scribe_v2")
+
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers=headers,
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+
+                if response.status != 200:
+                    error = await response.text()
+                    print(
+                        f"VC TRANSCRIBE ERROR {response.status}: {error}"
+                    )
+                    return
+
+                result = await response.json()
+
+        text = (result.get("text") or "").strip()
+
+        if text:
+            print(f'VC HEARD {user.display_name}: "{text}"')
+
+    except Exception as e:
+        print(f"VC TRANSCRIBE EXCEPTION: {type(e).__name__}: {e}")
+
+
+class FergieTranscriptionSink(voice_recv.AudioSink):
+    def __init__(self, loop):
         super().__init__()
+
+        self.loop = loop
+        self.decoders = {}
+        self.buffers = {}
+        self.lock = threading.Lock()
 
     def wants_opus(self):
         return True
 
     def write(self, user, data):
-        if user and data.opus:
-            print(
-                f"RAW OPUS RECEIVED FROM: {user} | "
-                f"{len(data.opus)} bytes"
+        if not user or user.bot or not data.opus:
+            return
+
+        user_id = user.id
+
+        with self.lock:
+            decoder = self.decoders.get(user_id)
+
+            if decoder is None:
+                decoder = discord.opus.Decoder()
+                self.decoders[user_id] = decoder
+
+            try:
+                pcm = decoder.decode(data.opus, fec=False)
+
+            except discord.opus.OpusError as e:
+                # Bad Discord packet: skip it instead of killing the listener
+                print(
+                    f"VC OPUS PACKET SKIPPED FROM {user}: {e}"
+                )
+                return
+
+            if not pcm:
+                return
+
+            buffer = self.buffers.setdefault(user_id, bytearray())
+            buffer.extend(pcm)
+
+    @voice_recv.AudioSink.listener()
+    def on_voice_member_speaking_stop(self, member):
+        if member.bot:
+            return
+
+        with self.lock:
+            pcm_audio = bytes(
+                self.buffers.pop(member.id, bytearray())
             )
 
+            # Fresh decoder for their next sentence
+            self.decoders.pop(member.id, None)
+
+        if not pcm_audio:
+            return
+
+        print(
+            f"VC UTTERANCE READY FROM {member} | "
+            f"{len(pcm_audio)} PCM bytes"
+        )
+
+        asyncio.run_coroutine_threadsafe(
+            transcribe_vc_audio(member, pcm_audio),
+            self.loop
+        )
+
     def cleanup(self):
-        print("RAW OPUS LISTENER CLEANED UP")
+        with self.lock:
+            self.buffers.clear()
+            self.decoders.clear()
+
+        print("FERGIE VC TRANSCRIPTION LISTENER CLEANED UP")
 
 
 @bot.tree.command(
     name="escucha",
-    description="Fergie tests whether she can hear VC audio",
+    description="Fergie tests VC speech transcription",
     guild=TEST_GUILD
 )
 async def escucha(interaction: discord.Interaction):
 
     voice_client = interaction.guild.voice_client
 
-    if not isinstance(voice_client, voice_recv.VoiceRecvClient):
+    if not isinstance(
+        voice_client,
+        voice_recv.VoiceRecvClient
+    ):
         await interaction.response.send_message(
             "i need to rejoin with /ven first 🙄",
             ephemeral=True
@@ -271,7 +391,9 @@ async def escucha(interaction: discord.Interaction):
     if voice_client.is_listening():
         voice_client.stop_listening()
 
-    sink = FergieOpusTestSink()
+    loop = asyncio.get_running_loop()
+
+    sink = FergieTranscriptionSink(loop)
 
     voice_client.listen(
         sink,
@@ -281,7 +403,7 @@ async def escucha(interaction: discord.Interaction):
     )
 
     await interaction.response.send_message(
-        "fine. i'm listening in raw mode now. say something 👂"
+        "fine. i'm actually listening now. say something 👂"
     )
 # ===================== Bread Economy Settings =====================
 # Global hard cap on TOTAL currency in existence (bank + all users).
