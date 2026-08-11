@@ -11,9 +11,17 @@ from discord.ext import voice_recv
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
 # Load Opus for Discord voice receiving
+import ctypes.util
+
 if not discord.opus.is_loaded():
     try:
-        discord.opus.load_opus("libopus.so.0")
+        opus_path = ctypes.util.find_library("opus")
+        print(f"OPUS LIBRARY FOUND AT: {opus_path}")
+
+        if not opus_path:
+            raise RuntimeError("Could not locate the Opus library")
+
+        discord.opus.load_opus(opus_path)
         print("OPUS LOADED SUCCESSFULLY ✅")
     except Exception as e:
         print(f"OPUS LOAD ERROR: {e}")
