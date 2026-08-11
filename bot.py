@@ -294,22 +294,47 @@ async def transcribe_vc_audio(user, pcm_audio: bytes):
         print(f"VC TRANSCRIBE EXCEPTION: {type(e).__name__}: {e}")
 
 
-class FergieOpusTestSink(voice_recv.AudioSink):
+class FergieOpusBufferSink(voice_recv.AudioSink):
     def __init__(self):
         super().__init__()
+        self.buffers = {}
+        self.lock = threading.Lock()
 
     def wants_opus(self):
         return True
 
     def write(self, user, data):
-        if user and not user.bot and data.opus:
-            print(
-                f"RAW OPUS RECEIVED FROM: {user} | "
-                f"{len(data.opus)} bytes"
-            )
+        if not user or user.bot or not data.opus:
+            return
+
+        with self.lock:
+            packet_list = self.buffers.setdefault(user.id, [])
+            packet_list.append(bytes(data.opus))
+
+    @voice_recv.AudioSink.listener()
+    def on_voice_member_speaking_stop(self, member):
+        if member.bot:
+            return
+
+        with self.lock:
+            packets = self.buffers.pop(member.id, [])
+
+        if not packets:
+            return
+
+        total_bytes = sum(len(packet) for packet in packets)
+
+        print(
+            f"VC RAW UTTERANCE FROM {member} | "
+            f"{len(packets)} packets | "
+            f"{total_bytes} bytes"
+        )
 
     def cleanup(self):
-        print("RAW OPUS LISTENER CLEANED UP")
+        with self.lock:
+            self.buffers.clear()
+
+        print("FERGIE RAW OPUS BUFFER CLEANED UP")
 
 @bot.tree.command(
     name="escucha",
@@ -333,7 +358,7 @@ async def escucha(interaction: discord.Interaction):
     if voice_client.is_listening():
         voice_client.stop_listening()
 
-    sink = FergieOpusTestSink()
+    sink = FergieOpusBufferSink()
 
     voice_client.listen(
         sink,
