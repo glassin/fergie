@@ -294,80 +294,22 @@ async def transcribe_vc_audio(user, pcm_audio: bytes):
         print(f"VC TRANSCRIBE EXCEPTION: {type(e).__name__}: {e}")
 
 
-class FergieTranscriptionSink(voice_recv.AudioSink):
-    def __init__(self, loop):
+class FergieOpusTestSink(voice_recv.AudioSink):
+    def __init__(self):
         super().__init__()
-
-        self.loop = loop
-        self.decoders = {}
-        self.buffers = {}
-        self.lock = threading.Lock()
 
     def wants_opus(self):
         return True
 
     def write(self, user, data):
-        if not user or user.bot or not data.opus:
-            return
-
-        user_id = user.id
-
-        with self.lock:
-            decoder = self.decoders.get(user_id)
-
-            if decoder is None:
-                decoder = discord.opus.Decoder()
-                self.decoders[user_id] = decoder
-
-            try:
-                pcm = decoder.decode(data.opus, fec=False)
-
-            except discord.opus.OpusError as e:
-                # Bad Discord packet: skip it instead of killing the listener
-                print(
-                    f"VC OPUS PACKET SKIPPED FROM {user}: {e}"
-                )
-                return
-
-            if not pcm:
-                return
-
-            buffer = self.buffers.setdefault(user_id, bytearray())
-            buffer.extend(pcm)
-
-    @voice_recv.AudioSink.listener()
-    def on_voice_member_speaking_stop(self, member):
-        if member.bot:
-            return
-
-        with self.lock:
-            pcm_audio = bytes(
-                self.buffers.pop(member.id, bytearray())
+        if user and not user.bot and data.opus:
+            print(
+                f"RAW OPUS RECEIVED FROM: {user} | "
+                f"{len(data.opus)} bytes"
             )
 
-            # Fresh decoder for their next sentence
-            self.decoders.pop(member.id, None)
-
-        if not pcm_audio:
-            return
-
-        print(
-            f"VC UTTERANCE READY FROM {member} | "
-            f"{len(pcm_audio)} PCM bytes"
-        )
-
-        asyncio.run_coroutine_threadsafe(
-            transcribe_vc_audio(member, pcm_audio),
-            self.loop
-        )
-
     def cleanup(self):
-        with self.lock:
-            self.buffers.clear()
-            self.decoders.clear()
-
-        print("FERGIE VC TRANSCRIPTION LISTENER CLEANED UP")
-
+        print("RAW OPUS LISTENER CLEANED UP")
 
 @bot.tree.command(
     name="escucha",
@@ -391,9 +333,7 @@ async def escucha(interaction: discord.Interaction):
     if voice_client.is_listening():
         voice_client.stop_listening()
 
-    loop = asyncio.get_running_loop()
-
-    sink = FergieTranscriptionSink(loop)
+    sink = FergieOpusTestSink()
 
     voice_client.listen(
         sink,
