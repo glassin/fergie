@@ -297,29 +297,43 @@ async def transcribe_vc_audio(user, pcm_audio: bytes):
 class FergieTranscriptionSink(voice_recv.AudioSink):
     def __init__(self, loop):
         super().__init__()
+
         self.loop = loop
+        self.decoders = {}
         self.buffers = {}
         self.lock = threading.Lock()
 
     def wants_opus(self):
-        # IMPORTANT:
-        # Let discord-ext-voice-recv decode Opus for us.
-        # Our sink receives ready-to-use PCM.
-        return False
+        return True
 
     def write(self, user, data):
-        if not user or user.bot:
+        if not user or user.bot or not data.opus:
             return
 
-        if not data.pcm:
-            return
+        user_id = user.id
 
         with self.lock:
-            buffer = self.buffers.setdefault(
-                user.id,
-                bytearray()
-            )
-            buffer.extend(data.pcm)
+            decoder = self.decoders.get(user_id)
+
+            if decoder is None:
+                decoder = discord.opus.Decoder()
+                self.decoders[user_id] = decoder
+
+            try:
+                pcm = decoder.decode(data.opus, fec=False)
+
+            except discord.opus.OpusError as e:
+                # Bad Discord packet: skip it instead of killing the listener
+                print(
+                    f"VC OPUS PACKET SKIPPED FROM {user}: {e}"
+                )
+                return
+
+            if not pcm:
+                return
+
+            buffer = self.buffers.setdefault(user_id, bytearray())
+            buffer.extend(pcm)
 
     @voice_recv.AudioSink.listener()
     def on_voice_member_speaking_stop(self, member):
@@ -328,17 +342,17 @@ class FergieTranscriptionSink(voice_recv.AudioSink):
 
         with self.lock:
             pcm_audio = bytes(
-                self.buffers.pop(
-                    member.id,
-                    bytearray()
-                )
+                self.buffers.pop(member.id, bytearray())
             )
+
+            # Fresh decoder for their next sentence
+            self.decoders.pop(member.id, None)
 
         if not pcm_audio:
             return
 
         print(
-            f"VC CLEAN UTTERANCE FROM {member} | "
+            f"VC UTTERANCE READY FROM {member} | "
             f"{len(pcm_audio)} PCM bytes"
         )
 
@@ -350,8 +364,10 @@ class FergieTranscriptionSink(voice_recv.AudioSink):
     def cleanup(self):
         with self.lock:
             self.buffers.clear()
+            self.decoders.clear()
 
         print("FERGIE VC TRANSCRIPTION LISTENER CLEANED UP")
+
 
 @bot.tree.command(
     name="escucha",
