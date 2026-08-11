@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from collections import defaultdict, Counter
 from typing import List, Tuple
 from gtts import gTTS
+from discord.ext import voice_recv
 
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
@@ -121,7 +122,7 @@ async def join_voice(interaction: discord.Interaction):
     if interaction.guild.voice_client:
         await interaction.guild.voice_client.move_to(channel)
     else:
-        await channel.connect()
+        await channel.connect(cls=voice_recv.VoiceRecvClient)
 
     await interaction.followup.send(
         "ugh. fine. i'm here. don't make this weird."
