@@ -42,6 +42,12 @@ try:
     )
 except Exception as e:
     print("libdave package: NOT INSTALLED", repr(e))
+
+try:
+    from discord.voice_state import has_dave
+    print("discord.py DAVE available:", has_dave)
+except Exception as e:
+    print("discord.py DAVE check failed:", repr(e))
     
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
