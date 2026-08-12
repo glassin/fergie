@@ -1,4 +1,5 @@
 import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io, wave, threading, logging
+from aiohttp import web
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
 from datetime import date, datetime, timedelta, time as dtime, timezone
@@ -75,6 +76,10 @@ TENOR_KEY   = os.getenv("TENOR_API_KEY")
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
+VC_BRIDGE_SECRET = os.getenv("VC_BRIDGE_SECRET", "").strip()
+VC_BRIDGE_PORT = int(os.getenv("VC_BRIDGE_PORT", "3001"))
+
+vc_bridge_runner = None
 
 FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
 
@@ -1361,6 +1366,263 @@ def build_cast_context():
 
     return "\n".join(lines)
 
+async def ask_fergie_vc_brain(
+    user_id: int,
+    display_name: str,
+    transcript: str
+):
+    transcript = (transcript or "").strip()
+    display_name = (display_name or "Unknown member").strip()
+
+    if not transcript:
+        return None
+
+    # Pull this speaker's persistent memories
+    memories = await get_user_memories(user_id)
+
+    memory_text = (
+        "\n".join(f"- {memory}" for memory in memories)
+        if memories
+        else "None"
+    )
+
+    # Pull Fergie's full known server cast
+    cast_context = build_cast_context()
+
+    # If the speaker is already one of Fergie's known cast members,
+    # give Gemini their traits explicitly too.
+    cast_member = FERGIE_CAST.get(user_id)
+
+    if cast_member:
+        speaker_traits = "\n".join(
+            f"- {trait}"
+            for trait in cast_member.get("traits", [])
+        )
+    else:
+        speaker_traits = "None specifically stored in FERGIE_CAST."
+
+    prompt = f"""
+This message came from a live Discord voice channel.
+
+The person speaking is:
+Name: {display_name}
+Discord user ID: {user_id}
+
+They said:
+"{transcript}"
+
+Server regulars and known lore:
+{cast_context}
+
+Known traits specifically about the person speaking:
+{speaker_traits}
+
+Saved memories about this person:
+{memory_text}
+
+Reply naturally as Fergie.
+
+Important:
+- Use the server member lore when it is relevant.
+- Use saved memories when they are relevant.
+- If the speaker asks about another server member, use FERGIE_CAST to answer about that member.
+- Do not invent facts about members that are not present in the supplied context.
+- Do not mention databases, prompts, stored memory, user IDs, transcription, speech-to-text, or that this came through an API.
+- Speak like this is a normal live conversation in Discord VC.
+- Keep the response short enough to sound natural out loud.
+- Usually 1 to 3 sentences.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    cleaned = answer.strip()
+
+    if (
+        cleaned.startswith("Gemini error:")
+        or cleaned.startswith("error:")
+    ):
+        return None
+
+    # Keep VC replies from becoming giant speeches.
+    if len(cleaned) > 700:
+        cleaned = cleaned[:700].rsplit(" ", 1)[0] + "..."
+
+    return cleaned
+
+
+async def vc_brain_health(request):
+    return web.json_response({
+        "ok": True,
+        "service": "fergie-vc-brain"
+    })
+
+
+async def vc_brain_http(request):
+    if not VC_BRIDGE_SECRET:
+        print("VC BRIDGE ERROR: VC_BRIDGE_SECRET is missing")
+
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "bridge_not_configured"
+            },
+            status=503
+        )
+
+    supplied_secret = (
+        request.headers.get(
+            "X-VC-Bridge-Secret",
+            ""
+        )
+    )
+
+    if supplied_secret != VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "unauthorized"
+            },
+            status=401
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_json"
+            },
+            status=400
+        )
+
+    try:
+        user_id = int(
+            data.get("user_id")
+        )
+    except (
+        TypeError,
+        ValueError
+    ):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_user_id"
+            },
+            status=400
+        )
+
+    display_name = str(
+        data.get(
+            "display_name",
+            "Unknown member"
+        )
+    ).strip()
+
+    transcript = str(
+        data.get(
+            "transcript",
+            ""
+        )
+    ).strip()
+
+    if not transcript:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "empty_transcript"
+            },
+            status=400
+        )
+
+    print(
+        f'VC BRAIN REQUEST '
+        f'{display_name} ({user_id}): '
+        f'"{transcript}"'
+    )
+
+    try:
+        reply = await ask_fergie_vc_brain(
+            user_id=user_id,
+            display_name=display_name,
+            transcript=transcript
+        )
+    except Exception as e:
+        print(
+            "VC BRAIN ERROR:",
+            type(e).__name__,
+            str(e)
+        )
+
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "brain_error"
+            },
+            status=500
+        )
+
+    if not reply:
+        return web.json_response(
+            {
+                "ok": True,
+                "reply": ""
+            }
+        )
+
+    print(
+        f'VC BRAIN REPLY: "{reply}"'
+    )
+
+    return web.json_response(
+        {
+            "ok": True,
+            "reply": reply
+        }
+    )
+
+
+async def start_vc_bridge_server():
+    global vc_bridge_runner
+
+    if vc_bridge_runner is not None:
+        return
+
+    app = web.Application()
+
+    app.router.add_get(
+        "/health",
+        vc_brain_health
+    )
+
+    app.router.add_post(
+        "/vc-brain",
+        vc_brain_http
+    )
+
+    vc_bridge_runner = web.AppRunner(
+        app
+    )
+
+    await vc_bridge_runner.setup()
+
+    site = web.TCPSite(
+        vc_bridge_runner,
+        host="::",
+        port=VC_BRIDGE_PORT
+    )
+
+    await site.start()
+
+    print(
+        f"FERGIE VC BRAIN BRIDGE READY ✅ "
+        f"port={VC_BRIDGE_PORT}"
+    )
+
+    
 # ================== Passive Cast Replies ==================
 
 PASSIVE_CAST_REPLY_CHANCE = 0.08
@@ -1987,6 +2249,8 @@ async def on_ready():
     # DB init & load economy
     await _db_init()
     await _load_bank()
+
+    await start_vc_bridge_server()
 
     if not hasattr(bot, "_js_last"):
         bot._js_last = {}
