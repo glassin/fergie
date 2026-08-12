@@ -571,24 +571,24 @@ class FergieOpusBufferSink(voice_recv.AudioSink):
         return True
 
     def write(self, user, data):
-    if not user or user.bot or not data.opus:
-        return
+        if not user or user.bot or not data.opus:
+            return
 
-    packet = getattr(data, "packet", None)
+        packet = getattr(data, "packet", None)
 
-    sequence = getattr(packet, "sequence", None)
-    timestamp = getattr(packet, "timestamp", None)
+        sequence = getattr(packet, "sequence", None)
+        timestamp = getattr(packet, "timestamp", None)
 
-    with self.lock:
-        packet_list = self.buffers.setdefault(user.id, [])
+        with self.lock:
+            packet_list = self.buffers.setdefault(user.id, [])
 
-        packet_list.append(
-            (
-                sequence,
-                timestamp,
-                bytes(data.opus)
+            packet_list.append(
+                (
+                    sequence,
+                    timestamp,
+                    bytes(data.opus)
+                )
             )
-        )
         
     @voice_recv.AudioSink.listener()
     def on_voice_member_speaking_stop(self, member):
