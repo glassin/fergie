@@ -602,28 +602,18 @@ class FergieOpusBufferSink(voice_recv.AudioSink):
         self.buffers = {}
         self.lock = threading.Lock()
 
+
     def wants_opus(self):
-        return True
+        return False
 
     def write(self, user, data):
-        if not user or user.bot or not data.opus:
+        if not user or user.bot or not data.pcm:
             return
 
-        packet = getattr(data, "packet", None)
-
-        sequence = getattr(packet, "sequence", None)
-        timestamp = getattr(packet, "timestamp", None)
-
         with self.lock:
-            packet_list = self.buffers.setdefault(user.id, [])
+            pcm_list = self.buffers.setdefault(user.id, [])
+            pcm_list.append(bytes(data.pcm))
 
-            packet_list.append(
-                (
-                    sequence,
-                    timestamp,
-                    bytes(data.opus)
-                )
-            )
         
     @voice_recv.AudioSink.listener()
     def on_voice_member_speaking_stop(self, member):
@@ -631,70 +621,21 @@ class FergieOpusBufferSink(voice_recv.AudioSink):
             return
 
         with self.lock:
-            packet_entries = self.buffers.pop(member.id, [])
+            pcm_chunks = self.buffers.pop(member.id, [])
 
-        if not packet_entries:
+        if not pcm_chunks:
             return
 
-        # Keep only entries that actually have RTP ordering information
-        ordered_entries = [
-            entry
-            for entry in packet_entries
-            if entry[0] is not None and entry[1] is not None
-        ]
-
-        # If packet metadata is available, sort by RTP timestamp + sequence.
-        # Otherwise preserve the original receive order.
-        if ordered_entries:
-            ordered_entries.sort(
-                key=lambda entry: (
-                    entry[1],
-                    entry[0]
-                )
-            )
-
-            # Remove exact duplicate RTP packets
-            seen = set()
-            packets = []
-
-            for sequence, timestamp, opus_data in ordered_entries:
-                key = (sequence, timestamp)
-
-                if key in seen:
-                    continue
-
-                seen.add(key)
-                packets.append(opus_data)
-
-        else:
-            packets = [
-                entry[2]
-                for entry in packet_entries
-            ]
-
-        if not packets:
-            return
-
-        total_bytes = sum(len(packet) for packet in packets)
-
-        # Ignore tiny silence/noise bursts
-        if len(packets) < 10 or total_bytes < 500:
-            return
+        pcm_audio = b"".join(pcm_chunks)
 
         print(
-            f"VC RTP ORDERED {member}: "
-            f"{len(packet_entries)} received -> "
-            f"{len(packets)} unique packets"
-        )
-
-        print(
-            f"VC RAW UTTERANCE FROM {member} | "
-            f"{len(packets)} packets | "
-            f"{total_bytes} bytes"
+            f"VC PCM UTTERANCE FROM {member} | "
+            f"{len(pcm_chunks)} chunks | "
+            f"{len(pcm_audio)} bytes"
         )
 
         asyncio.run_coroutine_threadsafe(
-            transcribe_vc_opus(member, packets),
+            transcribe_vc_audio(member, pcm_audio),
             self.loop
         )
     def cleanup(self):
