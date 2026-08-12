@@ -7,13 +7,34 @@ from collections import defaultdict, Counter
 from typing import List, Tuple
 from gtts import gTTS
 from discord.ext import voice_recv
+import importlib.metadata
 
 # Silence noisy discord voice-recv internals
 logging.getLogger("discord.ext.voice_recv").setLevel(logging.ERROR)
 logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.ERROR)
 logging.getLogger("discord.ext.voice_recv.opus").setLevel(logging.ERROR)
 logging.getLogger("discord.ext.voice_recv.gateway").setLevel(logging.ERROR)
+try:
+    print("discord.py version:", discord.__version__)
+except Exception as e:
+    print("discord.py version check failed:", e)
 
+try:
+    print(
+        "voice-recv version:",
+        importlib.metadata.version("discord-ext-voice-recv")
+    )
+except Exception as e:
+    print("voice-recv version check failed:", e)
+
+try:
+    print(
+        "PyNaCl version:",
+        importlib.metadata.version("PyNaCl")
+    )
+except Exception as e:
+    print("PyNaCl version check failed:", e)
+    
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
 # Load Opus for Discord voice receiving
