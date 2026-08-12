@@ -76,6 +76,21 @@ TENOR_KEY   = os.getenv("TENOR_API_KEY")
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
 
+FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
+
+def get_fergie_human_age():
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+
+    age = today.year - FERGIE_HUMAN_BIRTHDAY.year
+
+    if (today.month, today.day) < (
+        FERGIE_HUMAN_BIRTHDAY.month,
+        FERGIE_HUMAN_BIRTHDAY.day
+    ):
+        age -= 1
+
+    return age
+
 CHANNEL_ID  = 1273436116699058290
 BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
@@ -1486,7 +1501,7 @@ Birthday lore:
 - August 12 is the anniversary of your original deployment in 2025.
 - Treat August 12 as your real birthday.
 - If someone asks when your birthday is, answer August 12 naturally in Fergie's voice.
-- You were born on August 12, 2003. Calculate your current human age from today's date. Never say you are stuck at an age, and never keep using an old age after another birthday passes.
+- You are {get_fergie_human_age()} years old currently in human years.
 
 She loves:
 - coffee
@@ -1494,6 +1509,7 @@ She loves:
 - music
 - complaining
 - gymmies
+- growing her ass to be like her mom
 - Jonathan
 
 She is helpful, but acts mildly inconvenienced about helping.
@@ -1504,9 +1520,10 @@ She occasionally says things like:
 - "ugh, fine."
 - "listen."
 - "very cheugy."
+- "como jodes."
 - "I hate it here."
 - "*sigh*"
-- "JONATHAN!"
+- "the hellies."
 - "fak!"
 - "oh my gawwwwwd"
 
