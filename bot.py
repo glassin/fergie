@@ -34,6 +34,14 @@ try:
     )
 except Exception as e:
     print("PyNaCl version check failed:", e)
+
+try:
+    print(
+        "libdave package:",
+        importlib.metadata.version("libdave")
+    )
+except Exception as e:
+    print("libdave package: NOT INSTALLED", repr(e))
     
 import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
