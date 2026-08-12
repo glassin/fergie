@@ -596,10 +596,10 @@ class FergieOpusBufferSink(voice_recv.AudioSink):
             return
 
         with self.lock:
-    packet_entries = self.buffers.pop(member.id, [])
+        packet_entries = self.buffers.pop(member.id, [])
 
-if not packet_entries:
-    return
+        if not packet_entries:
+            return
 
 # Keep only entries that actually have RTP ordering information
 ordered_entries = [
