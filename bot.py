@@ -571,30 +571,85 @@ class FergieOpusBufferSink(voice_recv.AudioSink):
         return True
 
     def write(self, user, data):
-        if not user or user.bot or not data.opus:
-            return
+    if not user or user.bot or not data.opus:
+        return
 
-        with self.lock:
-            packet_list = self.buffers.setdefault(user.id, [])
-            packet_list.append(bytes(data.opus))
+    packet = getattr(data, "packet", None)
 
+    sequence = getattr(packet, "sequence", None)
+    timestamp = getattr(packet, "timestamp", None)
+
+    with self.lock:
+        packet_list = self.buffers.setdefault(user.id, [])
+
+        packet_list.append(
+            (
+                sequence,
+                timestamp,
+                bytes(data.opus)
+            )
+        )
+        
     @voice_recv.AudioSink.listener()
     def on_voice_member_speaking_stop(self, member):
         if member.bot:
             return
 
         with self.lock:
-            packets = self.buffers.pop(member.id, [])
+    packet_entries = self.buffers.pop(member.id, [])
 
-        if not packets:
-            return
+if not packet_entries:
+    return
 
-        total_bytes = sum(len(packet) for packet in packets)
+# Keep only entries that actually have RTP ordering information
+ordered_entries = [
+    entry
+    for entry in packet_entries
+    if entry[0] is not None and entry[1] is not None
+]
+
+# If packet metadata is available, sort by RTP timestamp + sequence.
+# Otherwise preserve the original receive order.
+if ordered_entries:
+    ordered_entries.sort(
+        key=lambda entry: (
+            entry[1],
+            entry[0]
+        )
+    )
+
+    # Remove exact duplicate RTP packets
+    seen = set()
+    packets = []
+
+    for sequence, timestamp, opus_data in ordered_entries:
+        key = (sequence, timestamp)
+
+        if key in seen:
+            continue
+
+        seen.add(key)
+        packets.append(opus_data)
+
+else:
+    packets = [
+        entry[2]
+        for entry in packet_entries
+    ]
+
+if not packets:
+    return
+
+total_bytes = sum(len(packet) for packet in packets)
 
         # Ignore tiny silence/noise bursts
         if len(packets) < 10 or total_bytes < 500:
             return
-
+        print(
+            f"VC RTP ORDERED {member}: "
+            f"{len(packet_entries)} received -> "
+            f"{len(packets)} unique packets"
+        )
         print(
             f"VC RAW UTTERANCE FROM {member} | "
             f"{len(packets)} packets | "
