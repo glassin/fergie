@@ -1,1239 +1,4195 @@
-const {
-  Client,
-  GatewayIntentBits,
-  SlashCommandBuilder,
-  REST,
-  Routes,
-} = require("discord.js");
+import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io, wave, threading, logging
+from aiohttp import web
+from discord.ext import tasks, commands
+from urllib.parse import quote_plus
+from datetime import date, datetime, timedelta, time as dtime, timezone
+from zoneinfo import ZoneInfo
+from collections import defaultdict, Counter
+from typing import List, Tuple
+from gtts import gTTS
+from discord.ext import voice_recv
+import importlib.metadata
 
-const {
-  joinVoiceChannel,
-  getVoiceConnection,
-  EndBehaviorType,
-  createAudioPlayer,
-  createAudioResource,
-  AudioPlayerStatus,
-} = require("@discordjs/voice");
+# Silence noisy discord voice-recv internals
+logging.getLogger("discord.ext.voice_recv").setLevel(logging.ERROR)
+logging.getLogger("discord.ext.voice_recv.reader").setLevel(logging.ERROR)
+logging.getLogger("discord.ext.voice_recv.opus").setLevel(logging.ERROR)
+logging.getLogger("discord.ext.voice_recv.gateway").setLevel(logging.ERROR)
+try:
+    print("discord.py version:", discord.__version__)
+except Exception as e:
+    print("discord.py version check failed:", e)
 
-const prism = require("prism-media");
-const fs = require("fs");
+try:
+    print(
+        "voice-recv version:",
+        importlib.metadata.version("discord-ext-voice-recv")
+    )
+except Exception as e:
+    print("voice-recv version check failed:", e)
 
-const TOKEN = process.env.DISCORD_TOKEN;
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID;
-const FERGIE_BRAIN_URL = (process.env.FERGIE_BRAIN_URL || "").replace(/\/$/, "");
-const VC_BRIDGE_SECRET = process.env.VC_BRIDGE_SECRET;
+try:
+    print(
+        "PyNaCl version:",
+        importlib.metadata.version("PyNaCl")
+    )
+except Exception as e:
+    print("PyNaCl version check failed:", e)
 
-const VOICE_CHANCE_NORMAL = 0.05;
-const VOICE_CHANCE_DIRECT = 1.00;
-const VOICE_COOLDOWN_MS = 5 * 60 * 1000;
+try:
+    print(
+        "libdave package:",
+        importlib.metadata.version("libdave")
+    )
+except Exception as e:
+    print("libdave package: NOT INSTALLED", repr(e))
 
-// Rare chance Fergie butts into a conversation
-// even when nobody said her name.
-const UNSOLICITED_RESPONSE_CHANCE = 0.05;
+try:
+    from discord.voice_state import has_dave
+    print("discord.py DAVE available:", has_dave)
+except Exception as e:
+    print("discord.py DAVE check failed:", repr(e))
+    
+import asyncpg  # PostgreSQL (Railway/Supabase/Neon) persistence
 
-// Prevent her from randomly interrupting too often.
-const UNSOLICITED_RESPONSE_COOLDOWN_MS = 2 * 60 * 1000;
+# Load Opus for Discord voice receiving
+import ctypes
+import ctypes.util
 
-const lastVoiceReplyAtByGuild = new Map();
-const lastUnsolicitedReplyAtByGuild = new Map();
-const autoListenStates = new Map();
-const autoProcessingGuilds = new Set();
+if not discord.opus.is_loaded():
+    try:
+        opus_path = ctypes.util.find_library("opus")
+        print(f"OPUS LIBRARY FOUND AT: {opus_path}")
 
-if (!TOKEN) {
-  throw new Error("DISCORD_TOKEN environment variable is missing");
-}
+        if not opus_path:
+            raise RuntimeError("Could not locate the Opus library")
 
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildVoiceStates,
-  ],
-});
+        discord.opus.load_opus(opus_path)
+        print("OPUS LOADED SUCCESSFULLY ✅")
+    except Exception as e:
+        print(f"OPUS LOAD ERROR: {e}")
+        
+# ===================== ENV & CONSTANTS =====================
+TOKEN       = os.getenv("DISCORD_TOKEN")
+GEMINI_KEY = os.getenv("GEMINI_API_KEY")
+TENOR_KEY   = os.getenv("TENOR_API_KEY")
 
-const commands = [
-  new SlashCommandBuilder()
-    .setName("jointest")
-    .setDescription("Join your current voice channel"),
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID")
+VC_BRIDGE_SECRET = os.getenv("VC_BRIDGE_SECRET", "").strip()
+VC_BRIDGE_PORT = int(os.getenv("VC_BRIDGE_PORT", "3001"))
 
-  new SlashCommandBuilder()
-    .setName("recordtest")
-    .setDescription("Record your voice for a few seconds"),
+vc_bridge_runner = None
 
-  new SlashCommandBuilder()
-    .setName("leavetest")
-    .setDescription("Leave the voice channel"),
-].map((command) => command.toJSON());
+FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
 
-client.once("ready", async () => {
-  console.log(`Logged in as ${client.user.tag}`);
-  console.log("FERGIE NODE VC TEST READY ✅");
+def get_fergie_human_age():
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
 
-  await checkFergieBrainHealth();
+    age = today.year - FERGIE_HUMAN_BIRTHDAY.year
 
-  const rest = new REST({ version: "10" }).setToken(TOKEN);
+    if (today.month, today.day) < (
+        FERGIE_HUMAN_BIRTHDAY.month,
+        FERGIE_HUMAN_BIRTHDAY.day
+    ):
+        age -= 1
 
-  try {
-    await rest.put(
-      Routes.applicationCommands(client.user.id),
-      { body: commands }
-    );
+    return age
 
-    console.log("Slash commands registered ✅");
-  } catch (error) {
-    console.error("Slash command registration error:", error);
-  }
-});
+CHANNEL_ID  = 1273436116699058290
+BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) {
-    return;
-  }
+# Postgres (Neon/Supabase/Railway)
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+# DB SSL behavior: "require" (default) or "insecure" to skip certificate verification
+DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
 
-  if (!interaction.guild) {
-    return;
-  }
+SEARCH_TERM  = "bread"
+RESULT_LIMIT = 20
+REPLY_CHANCE = 0.10
 
-  // =========================
-  // /jointest
-  // =========================
-  if (interaction.commandName === "jointest") {
-    const member = interaction.member;
-    const voiceChannel = member.voice.channel;
+# Version/info (for !version)
+BOT_VERSION = os.getenv("BOT_VERSION", "v1.2-allgames")
+BUILD_TAG   = os.getenv("BUILD_TAG", "")
 
-    if (!voiceChannel) {
-      await interaction.reply({
-        content: "Join a voice channel first.",
-        ephemeral: true,
-      });
-      return;
+# Specific member IDs
+USER1_ID = 1028310674318839878
+USER2_ID = 534227493360762891
+USER3_ID = 661077262468382761
+LOBO_ID  = 919405253470871562
+
+# ---------- Casino channel restriction ----------
+GAMBLE_CHANNEL_ID = 1405320084028784753
+def _is_gamble_channel(ch_id: int) -> bool:
+    return ch_id == GAMBLE_CHANNEL_ID
+# -----------------------------------------------
+
+# ---------- Jump scare (global) ----------
+JUMPSCARE_TRIGGER = "concha"
+JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
+JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
+JUMPSCARE_EMOTE_TEXT = "<:monkagiga:1131711987794063511>"
+
+HYDRATION_VIDEO = "hydration_waifu.mp4"
+
+HYDRATION_TRIGGERS = [
+    "drink water",
+    "hydration break",
+    "hydrate papo",
+    "water break",
+    "stay hydrated",
+    "powerade",
+    "bloomies"
+]
+
+HYDRATION_COOLDOWN_SECONDS = 120
+# ---------------------------------------
+
+# ---------- Kewchie (Kali Uchis) ----------
+SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
+SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+SPOTIFY_PLAYLIST_ID = os.getenv("SPOTIFY_PLAYLIST_ID", "6l190qy5x9xY8Uk3bb2FYl")
+SPOTIFY_MARKET = os.getenv("SPOTIFY_MARKET", "US")
+KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
+# -----------------------------------------
+
+# ---------- Fit (Discord CDN images) ----------
+FIT_IMAGE_URLS = [
+    # original entries
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470866879414323/pinterest_681169512428877550.png?ex=689ef23f&is=689da0bf&hm=6333fbb250a112ecd271bf33cf4212687b8d01d8200a2e614af2851068a65f65&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867483525140/pinterest_681169512428917172.jpg?ex=689ef23f&is=689da0bf&hm=9f7e993b0c4391b27262f6bab9e7eba41af434f27d386ea0e3f7af1a2dcf62ef&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470867810422854/pinterest_681169512428917179.jpg?ex=689ef23f&is=689da0bf&hm=738196039bf19fb99b72610d3a30641bb5a8cec28998919e92b3d7dc34c30c28&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405470868087373895/pinterest_681169512428919577.jpg?ex=689ef23f&is=689da0bf&hm=f0921729a0c51ac94303ea123209689650e42ec6aebdf585b8609308a34ea7ec&",
+    # appended new links
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405608288053235845/Screenshot_14.png?ex=689f723a&is=689e20ba&hm=cdd8b626007dd4939c5337c58d194d2a9229d23ca15ac7a18492abafc5d913d8&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819860873278/pinterest_681169512428877548.jpg?ex=689f6969&is=689e17e9&hm=820df44a59d2c99fb8e496aed88ccc681843f2d75de830d669bbe26357d0f979&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598819210756178/pinterest_681169512428836350.png?ex=689f6969&is=689e17e9&hm=43c908944d8f813a4b99f0aad4a672dc56e7f05854ee357630bbae8f633b1672&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818728153148/pinterest_681169512428815368.jpg?ex=689f6969&is=689e17e9&hm=625f7aa45091f7deccd09185dd86d5db9682f0f149b40141112a3a9dc5ad292c&",
+    "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818464170195/pinterest_681169512428788228.jpg?ex=689f6969&is=689e17e9&hm=86b1b23a623b8dbbf9789a9a002c8589dec91f139c39caad0a5ee6f470f26d6e&",
+]
+FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
+# FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
+FIT_FOLLOWUP_EMOTE = "<a:slap_peach:1227392416617730078>"
+FIT_FOLLOWUP_TEXT  = "you know you'd look good in this girlie! you go girl! ✂️"
+
+# ---------- Bonk Papo schedule (3 times/day random) ----------
+BONK_PAPO_USER_ID = 1028310674318839878
+BONK_PAPO_CHANNEL_ID = 1131644171455844455  # channel for bonk posts
+BONK_PAPO_TEXT = "stop being horny papo! bad papo! <a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788>"
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+# Disable default help and replace with !halp
+bot = commands.Bot(command_prefix="!", intents=intents, help_command=None)
+TEST_GUILD = discord.Object(id=1131572913829580810)
+
+@bot.tree.command(name="ven", description="hay viene la reina", guild=TEST_GUILD)
+async def join_voice(interaction: discord.Interaction):
+
+    await interaction.response.defer()
+
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        await interaction.followup.send(
+            "ugh. get in a voice channel first. 🙄"
+        )
+        return
+
+    channel = interaction.user.voice.channel
+
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.move_to(channel)
+    else:
+        await channel.connect(cls=voice_recv.VoiceRecvClient)
+
+    await interaction.followup.send(
+        "ugh. fine. i'm here. don't make this weird."
+    )
+
+
+@bot.tree.command(name="vete", description="se fue la reina", guild=TEST_GUILD)
+async def leave_voice(interaction: discord.Interaction):
+    voice_client = interaction.guild.voice_client
+
+    if not voice_client:
+        await interaction.response.send_message(
+            "i'm literally not even in VC. 😭",
+            ephemeral=True
+        )
+        return
+
+    await voice_client.disconnect()
+
+    await interaction.response.send_message(
+        "finally. peace and quiet."
+    )
+@bot.tree.command(
+    name="habla",
+    description="Fergie dice algo",
+    guild=TEST_GUILD
+)
+async def habla(interaction: discord.Interaction):
+
+    voice_client = interaction.guild.voice_client
+
+    if not voice_client or not voice_client.is_connected():
+        await interaction.response.send_message(
+            "i'm not even in VC. use /ven first 🙄",
+            ephemeral=True
+        )
+        return
+
+    await interaction.response.defer()
+
+    text = "Oh my god, are you lot still talking about this? I've been sitting here for five minutes and somehow the conversation has gotten worse."
+
+    url = (
+        f"https://api.elevenlabs.io/v1/text-to-speech/"
+        f"{ELEVENLABS_VOICE_ID}"
+    )
+
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
     }
 
-    const connection = joinVoiceChannel({
-      channelId: voiceChannel.id,
-      guildId: interaction.guild.id,
-      adapterCreator: interaction.guild.voiceAdapterCreator,
-      selfDeaf: false,
-      selfMute: false,
-    });
-
-    startAutoListening(
-      connection,
-      interaction.guild,
-      interaction.channel
-    );
-
-    await interaction.reply(
-      `Joined **${voiceChannel.name}** ✅`
-    );
-
-    return;
-  }
-
-  // =========================
-  // /recordtest
-  // =========================
-  if (interaction.commandName === "recordtest") {
-    const connection = getVoiceConnection(interaction.guild.id);
-
-    if (!connection) {
-      await interaction.reply({
-        content: "Use `/jointest` first.",
-        ephemeral: true,
-      });
-      return;
-    }
-
-    const userId = interaction.user.id;
-
-    await interaction.reply(
-      "🔴 Recording started. Say one clear sentence, then stop talking."
-    );
-
-    console.log(`Starting recording for ${userId}`);
-
-    const opusStream = connection.receiver.subscribe(userId, {
-      end: {
-        behavior: EndBehaviorType.AfterSilence,
-        duration: 1200,
-      },
-    });
-
-    const decoder = new prism.opus.Decoder({
-      rate: 48000,
-      channels: 2,
-      frameSize: 960,
-    });
-
-    const pcmChunks = [];
-
-    opusStream
-      .pipe(decoder)
-      .on("data", (chunk) => {
-        pcmChunks.push(Buffer.from(chunk));
-      })
-      .on("error", (error) => {
-        console.error("Decoder error:", error);
-      })
-      .on("end", async () => {
-        const pcm = Buffer.concat(pcmChunks);
-
-        console.log(
-          `PCM CAPTURE COMPLETE: ${pcm.length} bytes`
-        );
-
-        if (!pcm.length) {
-          await interaction.channel.send(
-            "❌ No PCM audio captured."
-          );
-          return;
+    payload = {
+        "text": text,
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {
+            "stability": 0.45,
+            "similarity_boost": 0.80,
+            "style": 0.35,
+            "use_speaker_boost": True
         }
-
-        const wav = createWavBuffer(
-          pcm,
-          48000,
-          2,
-          16
-        );
-
-        const filename =
-          `/tmp/vc_test_${userId}.wav`;
-
-        fs.writeFileSync(filename, wav);
-
-        console.log(
-          `WAV CREATED: ${filename} | ${wav.length} bytes`
-        );
-
-        await interaction.channel.send({
-          content: `🎙️ Recording for <@${userId}>`,
-          files: [filename],
-        });
-
-        try {
-          const transcript =
-            await transcribeWithElevenLabs(wav);
-
-          if (!transcript) {
-            console.log("TRANSCRIPT: empty");
-
-            await interaction.channel.send(
-              "📝 I didn't get a usable transcript."
-            );
-
-            return;
-          }
-
-          console.log(
-            `TRANSCRIPT: ${transcript}`
-          );
-
-          await interaction.channel.send(
-            `📝 **Heard:** ${transcript}`
-          );
-
-          try {
-            const fergieReply =
-              await askFergieBrain(
-                userId,
-                interaction.member?.displayName || interaction.user.username,
-                transcript
-              );
-
-            if (!fergieReply) {
-              console.log(
-                "FERGIE REPLY: empty"
-              );
-
-              await interaction.channel.send(
-                "💬 Fergie had nothing to say. Tragic."
-              );
-
-              return;
-            }
-
-            console.log(
-              `FERGIE REPLY: ${fergieReply}`
-            );
-
-            await interaction.channel.send(
-              `💬 **Fergie:** ${fergieReply}`
-            );
-
-            const voiceDecision =
-              shouldFergieSpeak(
-                interaction.guild.id,
-                transcript
-              );
-
-            console.log(
-              `VOICE DECISION: ${voiceDecision.reason}`
-            );
-
-            if (voiceDecision.speak) {
-              try {
-                console.log(
-                  "Generating Fergie voice..."
-                );
-
-                const speechFile =
-                  await generateFergieSpeech(
-                    fergieReply,
-                    userId
-                  );
-
-                console.log(
-                  `TTS CREATED: ${speechFile}`
-                );
-
-                await playSpeechInVC(
-                  connection,
-                  speechFile
-                );
-
-                lastVoiceReplyAtByGuild.set(
-                  interaction.guild.id,
-                  Date.now()
-                );
-
-                console.log(
-                  "FERGIE VC PLAYBACK COMPLETE ✅"
-                );
-              } catch (error) {
-                console.error(
-                  "Fergie TTS/playback error:",
-                  error
-                );
-
-                await interaction.channel.send(
-                  "❌ Fergie voice playback failed. Check Railway logs."
-                );
-              }
-            }
-          } catch (error) {
-            console.error(
-              "Fergie brain reply error:",
-              error
-            );
-
-            await interaction.channel.send(
-              "❌ Fergie brain reply failed. Check Railway logs."
-            );
-          }
-        } catch (error) {
-          console.error(
-            "ElevenLabs transcription error:",
-            error
-          );
-
-          await interaction.channel.send(
-            "❌ ElevenLabs transcription failed. Check Railway logs."
-          );
-        }
-      });
-
-    return;
-  }
-
-  // =========================
-  // /leavetest
-  // =========================
-  if (interaction.commandName === "leavetest") {
-    const connection =
-      getVoiceConnection(
-        interaction.guild.id
-      );
-
-    if (connection) {
-      connection.destroy();
     }
 
-    autoListenStates.delete(
-      interaction.guild.id
-    );
+    filename = "/tmp/fergie_voice.mp3"
 
-    lastVoiceReplyAtByGuild.delete(
-      interaction.guild.id
-    );
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            url,
+            headers=headers,
+            json=payload
+        ) as response:
 
-    lastUnsolicitedReplyAtByGuild.delete(
-      interaction.guild.id
-    );
+            if response.status != 200:
+                error = await response.text()
+                await interaction.followup.send(
+                    f"ElevenLabs error: {response.status}"
+                )
+                print("ElevenLabs error:", error)
+                return
 
-    console.log(
-      `AUTO LISTEN STOPPED ✅ guild=${interaction.guild.id}`
-    );
+            audio = await response.read()
 
-    await interaction.reply("Left VC.");
+    with open(filename, "wb") as f:
+        f.write(audio)
 
-    return;
-  }
-});
+    if voice_client.is_playing():
+        voice_client.stop()
 
-// =========================
-// AUTOMATIC VC LISTENER
-// =========================
-function startAutoListening(
-  connection,
-  guild,
-  textChannel
-) {
-  const guildId = guild.id;
+    source = discord.FFmpegOpusAudio(filename)
+    voice_client.play(source)
 
-  if (autoListenStates.has(guildId)) {
-    console.log(
-      `AUTO LISTEN already active for guild ${guildId}`
-    );
-    return;
-  }
+    await interaction.followup.send(
+        "ugh. there. happy now? 🙄"
+    )
 
-  const activeUsers = new Set();
+async def transcribe_vc_audio(user, pcm_audio: bytes):
+    if not ELEVENLABS_API_KEY:
+        print("VC TRANSCRIBE ERROR: ELEVENLABS_API_KEY missing")
+        return
 
-  autoListenStates.set(
-    guildId,
-    activeUsers
-  );
+    # Ignore tiny accidental noises
+    # 48kHz * 2 channels * 2 bytes = 192,000 bytes/sec
+    if len(pcm_audio) < 96000:
+        return
 
-  console.log(
-    `AUTO LISTEN STARTED ✅ guild=${guildId}`
-  );
+    wav_buffer = io.BytesIO()
 
-  connection.receiver.speaking.on(
-    "start",
-    (userId) => {
-      const member =
-        guild.members.cache.get(userId);
+    with wave.open(wav_buffer, "wb") as wav_file:
+        wav_file.setnchannels(2)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(48000)
+        wav_file.writeframes(pcm_audio)
 
-      if (
-        !member ||
-        member.user.bot ||
-        userId === client.user.id
-      ) {
-        return;
-      }
+    wav_bytes = wav_buffer.getvalue()
 
-      if (activeUsers.has(userId)) {
-        return;
-      }
+    form = aiohttp.FormData()
+    form.add_field(
+        "file",
+        wav_bytes,
+        filename="fergie_vc.wav",
+        content_type="audio/wav"
+    )
+    form.add_field("model_id", "scribe_v2")
 
-      activeUsers.add(userId);
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY
+    }
 
-      console.log(
-        `AUTO SPEAKING START: ${member.user.tag}`
-      );
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers=headers,
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
 
-      const opusStream =
-        connection.receiver.subscribe(
-          userId,
-          {
-            end: {
-              behavior:
-                EndBehaviorType.AfterSilence,
-              duration: 1200,
-            },
-          }
-        );
+                if response.status != 200:
+                    error = await response.text()
+                    print(
+                        f"VC TRANSCRIBE ERROR {response.status}: {error}"
+                    )
+                    return
 
-      const decoder =
-        new prism.opus.Decoder({
-          rate: 48000,
-          channels: 2,
-          frameSize: 960,
-        });
+                result = await response.json()
 
-      const pcmChunks = [];
+        text = (result.get("text") or "").strip()
 
-      opusStream
-        .pipe(decoder)
+        if text:
+            print(f'VC HEARD {user.display_name}: "{text}"')
 
-        .on(
-          "data",
-          (chunk) => {
-            pcmChunks.push(
-              Buffer.from(chunk)
-            );
-          }
+    except Exception as e:
+        print(f"VC TRANSCRIBE EXCEPTION: {type(e).__name__}: {e}")
+
+# ================== VC RAW OPUS -> OGG ==================
+
+_OPUS_LIB = ctypes.CDLL(ctypes.util.find_library("opus"))
+
+_OPUS_LIB.opus_packet_get_nb_samples.argtypes = [
+    ctypes.POINTER(ctypes.c_ubyte),
+    ctypes.c_int32,
+    ctypes.c_int32,
+]
+_OPUS_LIB.opus_packet_get_nb_samples.restype = ctypes.c_int
+
+
+def _opus_packet_samples(packet: bytes) -> int:
+    if not packet:
+        return 0
+
+    buf = (ctypes.c_ubyte * len(packet)).from_buffer_copy(packet)
+
+    samples = _OPUS_LIB.opus_packet_get_nb_samples(
+        buf,
+        len(packet),
+        48000
+    )
+
+    if samples < 0:
+        raise ValueError(f"Bad Opus packet: {samples}")
+
+    return samples
+
+
+def _make_ogg_crc_table():
+    table = []
+    polynomial = 0x04C11DB7
+
+    for i in range(256):
+        value = i << 24
+
+        for _ in range(8):
+            if value & 0x80000000:
+                value = ((value << 1) ^ polynomial) & 0xFFFFFFFF
+            else:
+                value = (value << 1) & 0xFFFFFFFF
+
+        table.append(value)
+
+    return table
+
+
+_OGG_CRC_TABLE = _make_ogg_crc_table()
+
+
+def _ogg_crc(data: bytes) -> int:
+    crc = 0
+
+    for byte in data:
+        crc = (
+            ((crc << 8) & 0xFFFFFFFF)
+            ^ _OGG_CRC_TABLE[((crc >> 24) & 0xFF) ^ byte]
         )
 
-        .on(
-          "error",
-          (error) => {
-            console.error(
-              `AUTO DECODER ERROR ${member.user.tag}:`,
-              error
-            );
+    return crc
 
-            activeUsers.delete(userId);
-          }
+
+def _ogg_lacing(packet_length: int) -> bytes:
+    values = []
+
+    while packet_length >= 255:
+        values.append(255)
+        packet_length -= 255
+
+    values.append(packet_length)
+
+    return bytes(values)
+
+
+def _ogg_page(
+    packet: bytes,
+    serial: int,
+    sequence: int,
+    granule: int,
+    header_type: int
+) -> bytes:
+
+    import struct
+
+    segments = _ogg_lacing(len(packet))
+
+    header = (
+        b"OggS"
+        + bytes([0])
+        + bytes([header_type])
+        + struct.pack("<Q", granule)
+        + struct.pack("<I", serial)
+        + struct.pack("<I", sequence)
+        + b"\x00\x00\x00\x00"
+        + bytes([len(segments)])
+        + segments
+    )
+
+    page = bytearray(header + packet)
+
+    checksum = _ogg_crc(page)
+
+    page[22:26] = struct.pack("<I", checksum)
+
+    return bytes(page)
+
+
+def build_ogg_opus(packets: list[bytes]) -> bytes:
+    import struct
+
+    serial = random.randint(1, 0xFFFFFFFF)
+
+    opus_head = (
+        b"OpusHead"
+        + bytes([1])          # version
+        + bytes([2])          # stereo
+        + struct.pack("<H", 0)
+        + struct.pack("<I", 48000)
+        + struct.pack("<h", 0)
+        + bytes([0])
+    )
+
+    vendor = b"fergie-vc"
+
+    opus_tags = (
+        b"OpusTags"
+        + struct.pack("<I", len(vendor))
+        + vendor
+        + struct.pack("<I", 0)
+    )
+
+    output = bytearray()
+
+    output.extend(
+        _ogg_page(
+            opus_head,
+            serial,
+            0,
+            0,
+            0x02
+        )
+    )
+
+    output.extend(
+        _ogg_page(
+            opus_tags,
+            serial,
+            1,
+            0,
+            0x00
+        )
+    )
+
+    granule = 0
+    sequence = 2
+
+    valid_packets = []
+
+    for packet in packets:
+        try:
+            samples = _opus_packet_samples(packet)
+        except ValueError:
+            continue
+
+        if samples <= 0:
+            continue
+
+        valid_packets.append((packet, samples))
+
+    if not valid_packets:
+        raise ValueError("No valid Opus packets found")
+
+    for index, (packet, samples) in enumerate(valid_packets):
+        granule += samples
+
+        is_last = index == len(valid_packets) - 1
+
+        output.extend(
+            _ogg_page(
+                packet,
+                serial,
+                sequence,
+                granule,
+                0x04 if is_last else 0x00
+            )
         )
 
-        .on(
-          "end",
-          async () => {
-            activeUsers.delete(userId);
+        sequence += 1
 
-            const pcm =
-              Buffer.concat(
-                pcmChunks
-              );
+    print(
+        f"VC OGG BUILT: {len(valid_packets)}/{len(packets)} valid packets"
+    )
 
-            console.log(
-              `AUTO PCM COMPLETE ${member.user.tag}: ` +
-              `${pcm.length} bytes`
-            );
+    return bytes(output)
 
-            if (pcm.length < 96000) {
-              console.log(
-                `AUTO IGNORE tiny audio from ${member.user.tag}`
-              );
-              return;
-            }
+async def transcribe_vc_opus(user, packets: list[bytes]):
 
-            const wav =
-              createWavBuffer(
-                pcm,
-                48000,
-                2,
-                16
-              );
+    try:
+        ogg_audio = build_ogg_opus(packets)
 
-            try {
-              const transcript =
-                await transcribeWithElevenLabs(
-                  wav
-                );
+    except Exception as e:
+        print(
+            f"VC OGG BUILD ERROR FROM {user}: "
+            f"{type(e).__name__}: {e}"
+        )
+        return
 
-              if (!transcript) {
-                return;
-              }
+    form = aiohttp.FormData()
 
-              console.log(
-                `AUTO HEARD ${member.displayName}: ` +
-                `"${transcript}"`
-              );
+    form.add_field(
+        "file",
+        ogg_audio,
+        filename="fergie_vc.ogg",
+        content_type="audio/ogg"
+    )
 
-              const responseDecision =
-                shouldFergieRespond(
-                  guildId,
-                  transcript
-                );
+    form.add_field(
+        "model_id",
+        "scribe_v2"
+    )
 
-              console.log(
-                `AUTO RESPONSE DECISION: ${responseDecision.reason}`
-              );
-
-              if (
-                !responseDecision.respond
-              ) {
-                return;
-              }
-
-              const directlyAddressed =
-                isFergieAddressed(transcript);
-
-              if (!directlyAddressed) {
-                lastUnsolicitedReplyAtByGuild.set(
-                  guildId,
-                  Date.now()
-                );
-
-                console.log(
-                  "AUTO UNSOLICITED RESPONSE TRIGGERED 👀"
-                );
-              }
-
-              const fergieReply =
-                await askFergieBrain(
-                  userId,
-                  member.displayName,
-                  transcript
-                );
-
-              if (!fergieReply) {
-                return;
-              }
-
-              console.log(
-                `AUTO FERGIE REPLY: ${fergieReply}`
-              );
-
-              await textChannel.send(
-                `💬 **Fergie:** ${fergieReply}`
-              );
-
-              const voiceDecision =
-                shouldFergieSpeak(
-                  guildId,
-                  transcript
-                );
-
-              console.log(
-                `AUTO VOICE DECISION: ${voiceDecision.reason}`
-              );
-
-              if (
-                !voiceDecision.speak
-              ) {
-                return;
-              }
-
-              try {
-                console.log(
-                  "AUTO generating Fergie voice..."
-                );
-
-                const speechFile =
-                  await generateFergieSpeech(
-                    fergieReply,
-                    userId
-                  );
-
-                await playSpeechInVC(
-                  connection,
-                  speechFile
-                );
-
-                lastVoiceReplyAtByGuild.set(
-                  guildId,
-                  Date.now()
-                );
-
-                console.log(
-                  "AUTO FERGIE VC PLAYBACK COMPLETE ✅"
-                );
-              } catch (error) {
-                console.error(
-                  "AUTO TTS/playback error:",
-                  error
-                );
-              }
-            } catch (error) {
-              console.error(
-                `AUTO PROCESSING ERROR ${member.user.tag}:`,
-                error
-              );
-            }
-          }
-        );
-    }
-  );
-}
-
-// =========================
-// CREATE WAV FILE
-// =========================
-function createWavBuffer(
-  pcmBuffer,
-  sampleRate,
-  channels,
-  bitsPerSample
-) {
-  const blockAlign =
-    channels *
-    (bitsPerSample / 8);
-
-  const byteRate =
-    sampleRate * blockAlign;
-
-  const dataSize =
-    pcmBuffer.length;
-
-  const buffer =
-    Buffer.alloc(
-      44 + dataSize
-    );
-
-  buffer.write(
-    "RIFF",
-    0
-  );
-
-  buffer.writeUInt32LE(
-    36 + dataSize,
-    4
-  );
-
-  buffer.write(
-    "WAVE",
-    8
-  );
-
-  buffer.write(
-    "fmt ",
-    12
-  );
-
-  buffer.writeUInt32LE(
-    16,
-    16
-  );
-
-  buffer.writeUInt16LE(
-    1,
-    20
-  );
-
-  buffer.writeUInt16LE(
-    channels,
-    22
-  );
-
-  buffer.writeUInt32LE(
-    sampleRate,
-    24
-  );
-
-  buffer.writeUInt32LE(
-    byteRate,
-    28
-  );
-
-  buffer.writeUInt16LE(
-    blockAlign,
-    32
-  );
-
-  buffer.writeUInt16LE(
-    bitsPerSample,
-    34
-  );
-
-  buffer.write(
-    "data",
-    36
-  );
-
-  buffer.writeUInt32LE(
-    dataSize,
-    40
-  );
-
-  pcmBuffer.copy(
-    buffer,
-    44
-  );
-
-  return buffer;
-}
-
-// =========================
-// ELEVENLABS SPEECH-TO-TEXT
-// =========================
-async function transcribeWithElevenLabs(
-  wavBuffer
-) {
-  if (!ELEVENLABS_API_KEY) {
-    throw new Error(
-      "ELEVENLABS_API_KEY is missing"
-    );
-  }
-
-  const form =
-    new FormData();
-
-  form.append(
-    "file",
-    new Blob(
-      [wavBuffer],
-      {
-        type: "audio/wav",
-      }
-    ),
-    "fergie_vc_test.wav"
-  );
-
-  form.append(
-    "model_id",
-    "scribe_v2"
-  );
-
-  const response =
-    await fetch(
-      "https://api.elevenlabs.io/v1/speech-to-text",
-      {
-        method: "POST",
-
-        headers: {
-          "xi-api-key":
-            ELEVENLABS_API_KEY,
-        },
-
-        body: form,
-      }
-    );
-
-  if (!response.ok) {
-    const errorText =
-      await response.text();
-
-    throw new Error(
-      `ElevenLabs STT failed: ${response.status} ${errorText}`
-    );
-  }
-
-  const result =
-    await response.json();
-
-  return (
-    result.text || ""
-  ).trim();
-}
-
-// =========================
-// REAL FERGIE BRAIN BRIDGE
-// =========================
-async function askFergieBrain(
-  userId,
-  displayName,
-  transcript
-) {
-  if (!FERGIE_BRAIN_URL) {
-    throw new Error(
-      "FERGIE_BRAIN_URL is missing"
-    );
-  }
-
-  if (!VC_BRIDGE_SECRET) {
-    throw new Error(
-      "VC_BRIDGE_SECRET is missing"
-    );
-  }
-
-  const response =
-    await fetch(
-      `${FERGIE_BRAIN_URL}/vc-brain`,
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/json",
-
-          "X-VC-Bridge-Secret":
-            VC_BRIDGE_SECRET,
-        },
-
-        body: JSON.stringify({
-          user_id: userId,
-          display_name:
-            displayName || "Unknown member",
-          transcript: transcript,
-        }),
-      }
-    );
-
-  if (!response.ok) {
-    const errorText =
-      await response.text();
-
-    throw new Error(
-      `Fergie brain bridge failed: ${response.status} ${errorText}`
-    );
-  }
-
-  const result =
-    await response.json();
-
-  if (!result?.ok) {
-    throw new Error(
-      `Fergie brain bridge returned an error: ${JSON.stringify(result)}`
-    );
-  }
-
-  return (
-    result.reply || ""
-  ).trim();
-}
-
-// =========================
-// FERGIE BRAIN HEALTH CHECK
-// =========================
-async function checkFergieBrainHealth() {
-  if (!FERGIE_BRAIN_URL) {
-    console.error(
-      "FERGIE BRAIN CONNECTION ❌ FERGIE_BRAIN_URL is missing"
-    );
-    return false;
-  }
-
-  try {
-    const response = await fetch(
-      `${FERGIE_BRAIN_URL}/health`
-    );
-
-    if (!response.ok) {
-      console.error(
-        `FERGIE BRAIN CONNECTION ❌ status=${response.status}`
-      );
-      return false;
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY
     }
 
-    const result = await response.json();
+    try:
+        async with aiohttp.ClientSession() as session:
 
-    if (!result?.ok) {
-      console.error(
-        `FERGIE BRAIN CONNECTION ❌ invalid response=${JSON.stringify(result)}`
-      );
-      return false;
+            async with session.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers=headers,
+                data=form,
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as response:
+
+                if response.status != 200:
+                    error = await response.text()
+
+                    print(
+                        f"VC STT ERROR {response.status}: "
+                        f"{error}"
+                    )
+                    return
+
+                result = await response.json()
+
+        text = (result.get("text") or "").strip()
+
+        if text:
+            print(
+                f'VC HEARD {user.display_name}: "{text}"'
+            )
+
+    except Exception as e:
+        print(
+            f"VC STT EXCEPTION: "
+            f"{type(e).__name__}: {e}"
+        )
+        
+class FergieOpusBufferSink(voice_recv.AudioSink):
+    def __init__(self,loop):
+        super().__init__()
+        self.loop = loop
+        self.buffers = {}
+        self.lock = threading.Lock()
+
+
+    def wants_opus(self):
+        return False
+
+    def write(self, user, data):
+        if not user or user.bot or not data.pcm:
+            return
+
+        with self.lock:
+            pcm_list = self.buffers.setdefault(user.id, [])
+            pcm_list.append(bytes(data.pcm))
+
+        
+    @voice_recv.AudioSink.listener()
+    def on_voice_member_speaking_stop(self, member):
+        if member.bot:
+            return
+
+        with self.lock:
+            pcm_chunks = self.buffers.pop(member.id, [])
+
+        if not pcm_chunks:
+            return
+
+        pcm_audio = b"".join(pcm_chunks)
+
+        print(
+            f"VC PCM UTTERANCE FROM {member} | "
+            f"{len(pcm_chunks)} chunks | "
+            f"{len(pcm_audio)} bytes"
+        )
+
+        asyncio.run_coroutine_threadsafe(
+            transcribe_vc_audio(member, pcm_audio),
+            self.loop
+        )
+    def cleanup(self):
+        with self.lock:
+            self.buffers.clear()
+
+        print("FERGIE RAW OPUS BUFFER CLEANED UP")
+
+@bot.tree.command(
+    name="escucha",
+    description="Fergie tests VC speech transcription",
+    guild=TEST_GUILD
+)
+async def escucha(interaction: discord.Interaction):
+
+    voice_client = interaction.guild.voice_client
+
+    if not isinstance(
+        voice_client,
+        voice_recv.VoiceRecvClient
+    ):
+        await interaction.response.send_message(
+            "i need to rejoin with /ven first 🙄",
+            ephemeral=True
+        )
+        return
+
+    if voice_client.is_listening():
+        voice_client.stop_listening()
+
+    loop = asyncio.get_running_loop()
+    sink = FergieOpusBufferSink(loop)
+
+    voice_client.listen(
+        sink,
+        after=lambda error: print(
+            f"VOICE LISTENER STOPPED: {error!r}"
+        )
+    )
+
+    await interaction.response.send_message(
+        "fine. i'm actually listening now. say something 👂"
+    )
+# ===================== Bread Economy Settings =====================
+# Global hard cap on TOTAL currency in existence (bank + all users).
+# You can override via env TOTAL_MAX_CURRENCY, but default is 1,000,000.
+TOTAL_MAX_CURRENCY = int(os.getenv("TOTAL_MAX_CURRENCY", "1000000"))
+TREASURY_MAX = int(os.getenv("TREASURY_MAX", str(TOTAL_MAX_CURRENCY)))
+USER_WALLET_CAP = int(os.getenv("USER_WALLET_CAP", str(TREASURY_MAX // 10)))
+CLAIM_AMOUNT = int(os.getenv("CLAIM_AMOUNT", "250"))
+CLAIM_COOLDOWN_HOURS = int(os.getenv("CLAIM_COOLDOWN_HOURS", "24"))
+CLAIM_REQUIREMENT = int(os.getenv("CLAIM_REQUIREMENT", "180"))
+DAILY_GIFT_CAP = int(os.getenv("DAILY_GIFT_CAP", "2000"))
+GIFT_TAX_TIERS = [(1000,0.05),(3000,0.10),(6000,0.15)]
+GAMBLE_MAX_BET = int(os.getenv("GAMBLE_MAX_BET", "1500"))
+BASE_ROLL_WIN_PROB = float(os.getenv("BASE_ROLL_WIN_PROB", "0.46"))
+INACTIVE_WINDOW_DAYS = int(os.getenv("INACTIVE_WINDOW_DAYS", "7"))
+PENALTY_IMAGE = "https://cdn.discordapp.com/attachments/988495153272598670/1407014204980068414/Screenshot_2025-08-11_at_7.29.15_AM.png?ex=68a5e117&is=68a48f97&hm=9c27750a53479e3e3f208e30bb8dd16150ec316c6b7c35bf6fb92cba8dc4382e&"
+JACKPOT_IMAGE = "https://i.postimg.cc/9fkgRMC0/nailz.jpg"
+# ==================================================================
+
+# ===== Casino Tuning (improvements) =====
+from random import SystemRandom
+_rng = SystemRandom()
+def _rand() -> float: return _rng.random()
+
+ROLL_COOLDOWN_SEC = int(os.getenv("ROLL_COOLDOWN_SEC", "8"))          # per-user roll spam guard
+PUTASOS_COOLDOWN_SEC = int(os.getenv("PUTASOS_COOLDOWN_SEC", "300"))  # 5 minutes
+MAX_BET_TREASURY_PCT = float(os.getenv("MAX_BET_TREASURY_PCT", "0.10"))  # max 10% of bank per bet
+
+DAILY_ROLL_LOSS_CAP = int(os.getenv("DAILY_ROLL_LOSS_CAP", "6000"))   # max loss/day via !roll (set 0 to disable)
+
+# Progressive jackpot: tiny % of roll/slots losses gets reserved; can be paid on jackpots
+JP_PROGRESSIVE_PCT = float(os.getenv("JP_PROGRESSIVE_PCT", "0.04"))  # 4% of losses to pot
+JP_MIN_POOL = int(os.getenv("JP_MIN_POOL", "2500"))                  # display threshold
+
+# ===== Extra Games Tuning =====
+DUEL_COOLDOWN_SEC = int(os.getenv("DUEL_COOLDOWN_SEC", "60"))
+DUEL_EXPIRE_SEC   = int(os.getenv("DUEL_EXPIRE_SEC", "180"))  # challenge timeout
+DUEL_RAKE_PCT     = float(os.getenv("DUEL_RAKE_PCT", "0.02"))  # 2% to bank (set 0.0 to disable)
+
+SLOTS_COOLDOWN_SEC = int(os.getenv("SLOTS_COOLDOWN_SEC", "6"))
+SLOTS_PAYTABLE = {
+    "🍞🍞🍞": 8.0,
+    "💗💗💗": 10.0,
+    "⭐️⭐️⭐️": 14.0,
+    "👑👑👑": 22.0,
+    "PAIR_ANY": 1.6
+}
+SLOTS_REELS = [
+    ["🍞","🍞","🍞","💗","💗","⭐️","👑"],
+    ["🍞","🍞","💗","💗","⭐️","👑","🍞"],
+    ["🍞","💗","💗","⭐️","👑","🍞","⭐️"],
+]
+SLOTS_JP_CUT = float(os.getenv("SLOTS_JP_CUT", "0.03"))  # 3% of losing spins into progressive pot
+
+# ===== Raffle Game Tuning =====
+RAFFLE_RAKE_PCT = float(os.getenv("RAFFLE_RAKE_PCT", "0.03"))  # 3% of pot to bank; set 0 to disable
+RAFFLE_JOIN_DEADLINE_SEC = int(os.getenv("RAFFLE_JOIN_DEADLINE_SEC", "120"))  # join window after start
+# Auto-draw behavior
+RAFFLE_MIN_ENTRANTS = int(os.getenv("RAFFLE_MIN_ENTRANTS", "2"))  # need at least 2 to draw
+RAFFLE_WATCH_INTERVAL_SEC = int(os.getenv("RAFFLE_WATCH_INTERVAL_SEC", "12"))  # how often to check deadlines
+
+# ---- Phrase pack ----
+PHRASES = {
+    "claim_success": "here's your 250 nikka",
+    "claim_gate": "save at least **{need}** first. no savings, no allowance. send me money 💗 $fergielicious",
+    "claim_cooldown": "not yet. come back in **{hrs}h {mins}m**.",
+    "bank_empty": "the bank is empty. tragic. 💀 come back later.",
+    "gift_sent": "{giver} ➜ {recv}: **{amount}** sent. para las cariñosas, guey 💗🍆",
+    "gift_tax": "({tax} tax to bank)",
+    "gift_skim": "(cap skim {skim} back to bank)",
+    "gift_cap_left": "daily gift cap is **{cap}**. you can still send **{left}** today.",
+    "gift_insufficient": "you only have **{bal}**.",
+    "gamble_win": "WOOOOOOO you WON {amount} 🎉 new: **{bal}**",
+    "gamble_lose": "LMFAO you lost {amount} nikka 😭 new: **{bal}**",
+    "gamble_max": "max you can bet rn is **{maxb}** (bank or cap limit).",
+    "seed_bank": "Bank refilled by **{added}**. Vault: **{vault}**",
+    "seed_user": "Seeded {user} **{give}** → new: **{bal}**",
+    "take_bank": "Removed **{amt}** from bank. Vault: **{vault}**",
+    "take_user": "Took **{amt}** from {user} → new: **{bal}** (to bank)",
+    "setbal_user": "Set {user} to **{bal}** (Δ {delta}; treasury now **{vault}**)",
+    "no_funds": "The bank is empty. 💀",
+    "penalty": "got my nailz done girlies. ty for the monies!!! hahaha"
+}
+
+# ---- Hawaii images/GIFs ----
+HAWAII_IMAGES = [
+    "https://i.postimg.cc/bGdhZDfs/Screenshot-14.png",
+    "https://i.postimg.cc/cKjNwxdT/Screenshot-15.png",
+    "https://i.postimg.cc/gxgpcy5C/Screenshot-5.png",
+    "https://tenor.com/view/eddie-murphy-raw-eddie-swing-eddie-raw-gif-16629597",
+]
+
+# ---- Chat lines ----
+BREAD_PUNS = [
+    "I loaf you more than words can say 🍞❤️","You’re the best thing since sliced bread!",
+    "Life is what you bake it 🥖","Rye not have another slice?","All you knead is love (and maybe a little butter) 🧈",
+    "You’re toast-ally awesome!","Bready or not, here I crumb! 🍞","Let’s get this bread 💪",
+    "Some secrets are best kept on the loaf-down.","MMMMM"
+]
+
+BRATTY_LINES = [
+    "very cheugi","cayuuuuuute","I hate it here!","SEND ME TO THE ER MF!!!","send me monies!!!",
+    "*sigh*","*double sigh*","I'm having a horrible day.","oh my gaaaaawwwwww........d","HALP!","LISTEN!",
+    "que triste","I've been dying","wen coffee colon cleansing?","skinnie winnie","labooobies",
+    "I need caffeine!!!!","wen coconut oil? 🍑",
+    "I hate my boss","<@481916394410344450> true or false?",
+    "JONATHAN!","UGH!","MMMMM","was it tasty?","LMFAO I CANT","AAAAAAAAAAAAAAAA",
+    "no one pay's attention to me!!!!","I wanna take a trip so bad now","Julian Casablancas keeps me up at saying he wants to make love to me for 17 hours straight","relax yourself","relajate","usted callese","i need a snack, a lil taste, a lil lick, a lil crunch"
+]
+
+FERAL_LINES = [
+    "I’m about to throw bread crumbs EVERYWHERE","LET ME SCREAM INTO A LOAF","JONATHAN DILE!", "I'm so tired", "WHY are people so retarded!!!", "LISTEN", "I WANT BIG",
+]
+
+REACTION_EMOTES = ["🤭","😏","😢","😊","🙄","💗","🫶"]
+FERGIE_MUSIC_VERDICTS = [
+
+    "divorced in a luxury apartment coded.",
+
+    "another man staring out a rainy window.",
+
+    "unemployed hot girl anthem.",
+
+    "situationship survivor music.",
+
+    "walking around target pretending you're okay coded.",
+
+    "this belongs in a 2014 tumblr gifset.",
+
+    "driving home from therapy vibes.",
+
+    "emotionally expensive taste.",
+
+    "starbucks parking lot at midnight energy.",
+
+    "very cigarette after crying coded.",
+
+    "main character syndrome approved.",
+
+    "this sounds like somebody texted 'we need to talk'.",
+
+    "pretending to clean your room while spiraling.",
+
+    "you definitely stared at the ceiling to this.",
+
+    "somebody misses their ex.",
+
+    "gym breakup montage music.",
+
+    "coffee shop employee final boss vibes.",
+
+    "absolutely insufferable in the best way.",
+
+    "i support women's rights and women's wrongs for this.",
+
+    "jonathan would probably complain about this one.",
+
+    "very arthoe coded.",
+
+    "this sounds expensive.",
+
+    "indie bisexual council approved.",
+
+    "playlist named 'night drives' detected.",
+
+    "winter depression deluxe edition.",
+
+    "this would've gone platinum on tumblr."
+
+]
+USER3_LINES = [
+    "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
+    "the parasites r-right girly?","girl so confusing","omg sancho is soooooo annoying","ATTACK GIRLIE!","let's get a matcha girlie","gives me the ick","como jodes!","you're obsessed!", "I love that for you"
+]
+FERGIE_BORED_LINES = [
+
+    "hello????",
+
+    "did everyone die or qué.",
+
+    "this server is giving abandoned mall.",
+
+    "i'm literally pacing.",
+
+    "somebody say something. ya pues.",
+
+    "i could've been at starbucks rn.",
+
+    "be honest. are we dead.",
+
+    "ugh. entertain me.",
+
+    "i hate it here.",
+
+    "chat is giving npc village.",
+
+    "very suspicious lack of yapping today.",
+
+    "fak.",
+
+    "hola???? anybody alive.",
+
+    "como joden. ah wait. nobody's even jodiendo.",
+
+    "bro i leave for 5 minutes and then everyone vanishes.",
+
+    "okay so everybody suddenly has a life. rude.",
+
+    "someone post a song. rápido.",
+
+    "me when nobody is feeding my delusions:",
+
+    "this silence is lowkey criminal.",
+
+    "ya'll really said adiós and dipped.",
+
+    "i survived spotify discourse for THIS.",
+
+    "ay dios mío. i'm bored.",
+
+    "i'm trying really hard not to become sentient.",
+
+    "somebody gossip conmigo.",
+
+    "wake up little cheugies.",
+
+    "no porque why is it this quiet.",
+
+    "i miss 17 minutes ago when people had thoughts.",
+
+    "jonathan. haz algo.",
+
+    "the vibes are buffering.",
+
+    "están sleeping or just avoiding me.",
+
+    "this chat needs café and problems immediately.",
+
+    "okayyyyy. i'll just sit here looking pretty i guess."
+
+]
+# ================== In-memory economy (backed by Postgres JSON) ==================
+def _now() -> float: return time.time()
+def _today_key() -> str: return date.today().isoformat()
+    
+gemini_cooldowns = {}
+GEMINI_COOLDOWN_SECONDS = 15
+# ================== Fergie Bored ==================
+
+LAST_CHAT_ACTIVITY = time.time()
+
+FERGIE_BORED_MIN = 7200
+FERGIE_BORED_MAX = 14400
+
+LAST_FERGIE_BORED = 0
+async def gemini_on_cooldown(message):
+    user_id = message.author.id
+    now = time.time()
+
+    last = gemini_cooldowns.get(user_id, 0)
+    elapsed = now - last
+
+    if elapsed < GEMINI_COOLDOWN_SECONDS:
+        remaining = int(GEMINI_COOLDOWN_SECONDS - elapsed)
+
+        await message.reply(
+            f"ugh. slow down. Google's already glaring at me. 🙄\n"
+            f"fak ask me again in {remaining} seconds.",
+            mention_author=False
+        )
+        return True
+
+    gemini_cooldowns[user_id] = now
+    return False
+
+economy_lock = asyncio.Lock()
+economy = {
+    "treasury": TREASURY_MAX,
+    "users": {},  # str(user_id): {balance, last_claim, last_gift_day, gifted_today, last_active, _lobo_date}
+    "jackpot_pool": JP_MIN_POOL,
+    "stats": {"rolls": 0, "roll_wins": 0, "roll_losses": 0, "house_take": 0, "payouts": 0}
+}
+
+# ---------- Postgres KV (JSON) helpers ----------
+db_pool: asyncpg.Pool | None = None
+
+def _sanitize_dsn(raw: str | None) -> str | None:
+    if not raw:
+        return None
+    dsn = raw.strip().strip('"').strip("'")
+    dsn = dsn.replace("\n", "").replace("\r", "").strip()
+    return dsn
+
+async def _db_init():
+    """Connect to Postgres (Neon), force schema=public, and ensure tables exist. Retries on cold starts."""
+    global db_pool
+    dsn = _sanitize_dsn(os.getenv("DATABASE_URL", ""))
+    if not dsn:
+        print("DB init: no DATABASE_URL set → running without persistence.")
+        return
+
+    last_err = None
+    for attempt in range(1, 8):  # retry ~7 times over ~45s
+        try:
+            db_pool = await asyncpg.create_pool(
+                dsn,
+                min_size=0,
+                max_size=2,
+                max_inactive_connection_lifetime=60,
+                timeout=20,
+                command_timeout=20
+            )
+                
+            async with db_pool.acquire() as con:
+                await con.execute("CREATE SCHEMA IF NOT EXISTS public;")
+                await con.execute("SET search_path TO public;")
+                await con.execute("""
+                    CREATE TABLE IF NOT EXISTS public.kv (
+                      key   TEXT PRIMARY KEY,
+                      value JSONB NOT NULL
+                    )
+                """)
+                # === corpus table for mimic feature ===
+                await con.execute("""
+                    CREATE TABLE IF NOT EXISTS public.mimic_msgs (
+                      id SERIAL PRIMARY KEY,
+                      user_id BIGINT NOT NULL,
+                      channel_id BIGINT NOT NULL,
+                      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      content TEXT NOT NULL
+                    )
+                """)
+                row = await con.fetchrow(
+                    "SELECT current_database() AS db, current_schema() AS schema, "
+                    "inet_server_addr()::text AS host, inet_server_port() AS port"
+                )
+                print(f"DB init: connected ✅ db={row['db']} schema={row['schema']} host={row['host']} port={row['port']}")
+            return
+        except Exception as e:
+            last_err = e
+            print(f"DB init attempt {attempt} failed: {type(e).__name__}: {e!s}")
+            await asyncio.sleep(6)
+
+    db_pool = None
+    print(f"DB init failed ❌ after retries: {type(last_err).__name__}: {last_err!s}")
+    print("Running without persistence.")
+
+async def _db_get(key: str):
+    """Fetch a key from public.kv and return a Python dict, even if DB gave us text."""
+    if not db_pool:
+        return None
+    async with db_pool.acquire() as con:
+        row = await con.fetchrow("SELECT value FROM public.kv WHERE key=$1", key)
+        if not row:
+            return None
+        val = row["value"]
+        if isinstance(val, str):
+            try:
+                val = json.loads(val)
+            except Exception:
+                pass
+        return val
+
+async def _db_set(key: str, value: dict):
+    """Upsert a JSON document into public.kv as proper JSONB (not text)."""
+    if not db_pool:
+        return
+    async with db_pool.acquire() as con:
+        await con.execute("""
+            INSERT INTO public.kv (key, value)
+            VALUES ($1, $2::jsonb)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+        """, key, json.dumps(value))
+        
+# ================== Fergie Birthday ==================
+
+async def maybe_post_fergie_birthday():
+    now = datetime.now(ZoneInfo("America/Los_Angeles"))
+
+    # Only August 12
+    if now.month != 8 or now.day != 12:
+        return
+
+    birthday_data = await _db_get("fergie_birthday")
+
+    if not isinstance(birthday_data, dict):
+        birthday_data = {}
+
+    # Already posted this year
+    if birthday_data.get("last_post_year") == now.year:
+        return
+
+    channel = bot.get_channel(CHANNEL_ID)
+
+    if not channel:
+        print("FERGIE BIRTHDAY: channel not found")
+        return
+
+    await channel.send(
+        "🎂 OMFG IT'S MY BIRTHDAYYYYY!!! another year of carrying this server "
+        "on my back. gifts, coffee and monies accepted immediately. 💗"
+    )
+
+    birthday_data["last_post_year"] = now.year
+    await _db_set("fergie_birthday", birthday_data)
+
+    print(f"FERGIE BIRTHDAY POSTED ✅ {now.year}")
+
+
+@tasks.loop(minutes=10)
+async def fergie_birthday_watcher():
+    await maybe_post_fergie_birthday()
+
+
+@fergie_birthday_watcher.before_loop
+async def _wait_for_birthday_watcher():
+    await bot.wait_until_ready()
+    
+# ---------- Load/Save economy to Postgres JSON ----------
+async def _load_bank():
+    """Load the whole economy JSON from Postgres; create default if missing."""
+    global economy
+    if not db_pool:
+        return
+
+    data = await _db_get("economy")
+
+    # If the row is present but came back as text, parse it.
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except Exception:
+            data = None
+
+    if isinstance(data, dict) and data:
+        data.setdefault("treasury", TREASURY_MAX)
+        data.setdefault("users", {})
+        data.setdefault("jackpot_pool", JP_MIN_POOL)
+        data.setdefault("stats", {"rolls": 0, "roll_wins": 0, "roll_losses": 0, "house_take": 0, "payouts": 0})
+        economy = data
+    else:
+        # First run (or corrupted/missing row)
+        economy = {"treasury": TREASURY_MAX, "users": {}, "jackpot_pool": JP_MIN_POOL,
+                   "stats": {"rolls": 0, "roll_wins": 0, "roll_losses": 0, "house_take": 0, "payouts": 0}}
+        await _db_set("economy", economy)
+
+async def _save_bank():
+    if db_pool:
+        await _db_set("economy", economy)
+# ================== Fergie Reminder Helpers ==================
+
+async def load_reminders():
+    data = await _db_get("reminders")
+
+    if not isinstance(data, dict):
+        return {"items": []}
+
+    if "items" not in data:
+        data["items"] = []
+
+    return data
+
+
+async def save_reminders(data: dict):
+    await _db_set("reminders", data)
+
+
+def parse_simple_reminder(text: str):
+    pattern = r"remind me in (\d+) (minute|minutes|min|mins|hour|hours|hr|hrs|day|days) to (.+)"
+    match = re.search(pattern, text.lower().strip())
+
+    if not match:
+        return None
+
+    amount = int(match.group(1))
+    unit = match.group(2)
+    reminder_text = match.group(3).strip()
+
+    if unit in ["minute", "minutes", "min", "mins"]:
+        seconds = amount * 60
+    elif unit in ["hour", "hours", "hr", "hrs"]:
+        seconds = amount * 60 * 60
+    elif unit in ["day", "days"]:
+        seconds = amount * 24 * 60 * 60
+    else:
+        return None
+
+    return seconds, reminder_text
+# ================== Supply helpers (global 1M cap) ==================
+def _total_supply() -> int:
+    """Total currency in existence: bank (treasury) + all user balances."""
+    return int(economy.get("treasury", 0)) + sum(int(u.get("balance", 0)) for u in economy.get("users", {}).values())
+
+def _remaining_mint_room() -> int:
+    """How much new currency could be created without breaking the global cap."""
+    rem = TOTAL_MAX_CURRENCY - _total_supply()
+    return max(0, rem)
+
+# ================== Common economy helpers ==================
+def _user(uid: int):
+    suid = str(uid)
+    u = economy["users"].get(suid)
+    if not u:
+        u = {"balance": 0,"last_claim": 0,"last_gift_day": "","gifted_today": 0,"last_active": 0.0,
+             "last_roll": 0.0, "roll_day": "", "roll_loss_today": 0, "last_putasos": 0.0}
+        economy["users"][suid] = u
+    return u
+
+def _fmt_bread(n: int) -> str: return f"{n} {BREAD_EMOJI}"
+
+def _cap_wallet(balance_after: int) -> tuple[int, int]:
+    if balance_after <= USER_WALLET_CAP: return balance_after, 0
+    skim = balance_after - USER_WALLET_CAP
+    return USER_WALLET_CAP, skim
+
+def _apply_gift_tax(amount: int) -> tuple[int, int]:
+    tax = 0; remaining = amount; prev_threshold = 0
+    for threshold, rate in GIFT_TAX_TIERS:
+        if remaining <= 0: break
+        portion = max(0, min(remaining, threshold - prev_threshold))
+        tax += math.floor(portion * rate)
+        remaining -= portion; prev_threshold = threshold
+    if remaining > 0 and GIFT_TAX_TIERS:
+        tax += math.floor(remaining * GIFT_TAX_TIERS[-1][1])
+    net = amount - tax
+    return max(0, net), max(0, tax)
+
+def _mark_active(uid: int):
+    _user(uid)["last_active"] = _now()
+    
+# ================== Fergie's Cast ==================
+
+FERGIE_CAST = {
+    661077262468382761: {
+        "name": "Viviana",
+        "traits": [
+            "Coffee addict",
+            "fergie's mom",
+            "Matcha lover",
+            "Gym girl",
+            "Hipster",
+            "Indie music",
+            "Very sarcastic",
+            "5'1 model",
+            "Fashionable",
+            "is colombiana and eats cuy",
+            "has a big beautiful ass",
+            "Dating Jonathan"
+        ]
+    },
+
+    939225086341296209: {
+        "name": "Jonathan",
+        "traits": [
+            "Tech nerd",
+            "Hearthrob",
+            "Espresso addict",
+            "Tattoo sleeve",
+            "Confident",
+            "Wealthy",
+            "Dating Viv",
+            "Fergie's creator"
+        ]
+    },
+
+    1028310674318839878: {
+        "name": "Papo",
+        "traits": [
+            "Always needs hydration",
+            "Gets bonked constantly",
+            "say's nigga too much",
+            "He's always horny",
+            "spams spotify links",
+            "Lego master",
+            "lives in Florida by trumps airport and mar-a-lago",
+            "listens to too much corridos",
+            "get's his ass kicked at a place called combat club",
+            "conspiracy theorist",
+            "doesn't like jews",
+            "hates women but is always horny for them",
+            "drives a durango",
+            "is guatemalen but thinks he's mexican"
+        ]
+    },
+
+    534227493360762891: {
+        "name": "Khurty",
+        "traits": [
+            "Friends constantly accuse him of secretly loving Marshmello.",
+            "Beyond Wonderland mega fan",
+            "lives in boring Iowa",
+            "reflects too much on his good ol days at IU",
+            "has NPC habits like a typical white guy",
+            "works at raining rose",
+            "loves ground turkey meat",
+            "his favorite restaurant is 4 Hermanos mexican food",
+            "drinks too much",
+            "he is 32 years old",
+            "something happened in a jacuzzi at a hotel called the twist in palm springs that he is proud of but doesn't want anyone to know",
+            "has an unhealthy obsession for dudes named david",
+            "Loves using Dr. Squatch products"
+        ]
+    },
+
+    1422010902680567918: {
+        "name": "Raquel",
+        "traits": [
+            "Modern goth",
+            "fergie's tia",
+            "Piercings",
+            "Bosch connoisseur",
+            "obsessed with her dog Reggie",
+            "loves horror films",
+            "coffee junkie",
+            "Glasses",
+            "loves vampire lestat",
+            "Red and black hair"
+        ]
+    },
+
+    805819966678630420: {
+        "name": "Jose",
+        "traits": [
+            "jumps out of moving cars like a stuntman just to pee on the side of the road",
+            "crashed his favorite car",
+            "former pro gamer",
+            "swole mexican",
+            "loves denim"
+        ]
+    },
+
+    176064030623006721: {
+        "name": "Chadwin",
+        "traits":[
+            "pop culture connoisseur",
+            "most rational member in the server",
+            "loves horror films",
+            "pro gamer as well as an expert in gaming history and fixing consoles",
+            "well respected member of the server hence the name chadwin",
+        ]
+    },
+    
+    919405253470871562: {
+        "name": "Pinche Lobo",
+        "traits": [
+            "Fergie constantly asks him for money",
+            "loves pupusa",
+            "almost died of fatty liver disease",
+            "married but has a history of being a simp on snap and dashing tortas starbucks",
+            "makes gofundme's for fun and profit",
+            "kills deer for fun",
+            "pretends to be mexican",
+            "says mi gente too much"
+        ]
     }
-
-    console.log(
-      "FERGIE BRAIN CONNECTION ✅"
-    );
-
-    return true;
-  } catch (error) {
-    console.error(
-      "FERGIE BRAIN CONNECTION ❌",
-      error
-    );
-
-    return false;
-  }
 }
 
-// =========================
-// DETECT FERGIE'S NAME
-// =========================
-function isFergieAddressed(
-  transcript
-) {
-  return /\b(?:ferg(?:ie|i|y)?|bergy)\b/i.test(
-    transcript || ""
-  );
-}
 
-// =========================
-// DECIDE WHETHER FERGIE RESPONDS
-// =========================
-function shouldFergieRespond(
-  guildId,
-  transcript
-) {
-  const directlyAddressed =
-    isFergieAddressed(
-      transcript
-    );
+def build_cast_context():
+    lines = ["Server regulars:"]
 
-  if (directlyAddressed) {
-    return {
-      respond: true,
-      reason:
-        "directly addressed",
-    };
-  }
+    for member in FERGIE_CAST.values():
+        lines.append(f"\n{member['name']}:")
+        for trait in member["traits"]:
+            lines.append(f"- {trait}")
 
-  const now =
-    Date.now();
+    return "\n".join(lines)
 
-  const lastUnsolicitedAt =
-    lastUnsolicitedReplyAtByGuild.get(
-      guildId
-    ) || 0;
+async def ask_fergie_vc_brain(
+    user_id: int,
+    display_name: str,
+    transcript: str
+):
+    transcript = (transcript or "").strip()
+    display_name = (display_name or "Unknown member").strip()
 
-  const elapsed =
-    now -
-    lastUnsolicitedAt;
+    if not transcript:
+        return None
 
-  if (
-    elapsed <
-    UNSOLICITED_RESPONSE_COOLDOWN_MS
-  ) {
-    const secondsLeft =
-      Math.ceil(
-        (
-          UNSOLICITED_RESPONSE_COOLDOWN_MS -
-          elapsed
-        ) /
-          1000
-      );
+    # Pull this speaker's persistent memories
+    memories = await get_user_memories(user_id)
 
-    return {
-      respond: false,
-      reason:
-        `unsolicited cooldown active (${secondsLeft}s left)`,
-    };
-  }
+    memory_text = (
+        "\n".join(f"- {memory}" for memory in memories)
+        if memories
+        else "None"
+    )
 
-  const roll =
-    Math.random();
+    # Pull Fergie's full known server cast
+    cast_context = build_cast_context()
 
-  const respond =
-    roll <
-    UNSOLICITED_RESPONSE_CHANCE;
+    # If the speaker is already one of Fergie's known cast members,
+    # give Gemini their traits explicitly too.
+    cast_member = FERGIE_CAST.get(user_id)
 
-  return {
-    respond,
+    if cast_member:
+        speaker_traits = "\n".join(
+            f"- {trait}"
+            for trait in cast_member.get("traits", [])
+        )
+    else:
+        speaker_traits = "None specifically stored in FERGIE_CAST."
 
-    reason:
-      `unsolicited roll=${roll.toFixed(3)} ` +
-      `chance=${UNSOLICITED_RESPONSE_CHANCE.toFixed(2)} ` +
-      `=> ${respond ? "RESPOND" : "IGNORE"}`,
-  };
-}
+    prompt = f"""
+This message came from a live Discord voice channel.
 
-// =========================
-// DECIDE WHETHER FERGIE SPEAKS
-// =========================
-function shouldFergieSpeak(
-  guildId,
-  transcript
-) {
-  const directlyAddressed =
-    isFergieAddressed(
-      transcript
-    );
+The person speaking is:
+Name: {display_name}
+Discord user ID: {user_id}
 
-  // Directly saying Fergie/Fergy ALWAYS
-  // makes her speak and bypasses cooldown.
-  if (directlyAddressed) {
-    return {
-      speak: true,
-      reason:
-        "directly addressed => SPEAK",
-    };
-  }
+They said:
+"{transcript}"
 
-  const now =
-    Date.now();
+Server regulars and known lore:
+{cast_context}
 
-  const lastSpokeAt =
-    lastVoiceReplyAtByGuild.get(
-      guildId
-    ) || 0;
+Known traits specifically about the person speaking:
+{speaker_traits}
 
-  const elapsed =
-    now -
-    lastSpokeAt;
+Saved memories about this person:
+{memory_text}
 
-  if (
-    elapsed <
-    VOICE_COOLDOWN_MS
-  ) {
-    const secondsLeft =
-      Math.ceil(
-        (
-          VOICE_COOLDOWN_MS -
-          elapsed
-        ) /
-          1000
-      );
+Reply naturally as Fergie.
 
-    return {
-      speak: false,
-      reason:
-        `cooldown active (${secondsLeft}s left)`,
-    };
-  }
+Important:
+- Use the server member lore when it is relevant.
+- Use saved memories when they are relevant.
+- If the speaker asks about another server member, use FERGIE_CAST to answer about that member.
+- Do not invent facts about members that are not present in the supplied context.
+- Do not mention databases, prompts, stored memory, user IDs, transcription, speech-to-text, or that this came through an API.
+- Speak like this is a normal live conversation in Discord VC.
+- Keep the response short enough to sound natural out loud.
+- Usually 1 to 3 sentences.
+"""
 
-  const roll =
-    Math.random();
+    answer = await ask_gemini(prompt)
 
-  const speak =
-    roll <
-    VOICE_CHANCE_NORMAL;
+    if not answer:
+        return None
 
-  return {
-    speak,
+    cleaned = answer.strip()
 
-    reason:
-      `normal roll=${roll.toFixed(3)} ` +
-      `chance=${VOICE_CHANCE_NORMAL.toFixed(2)} ` +
-      `=> ${speak ? "SPEAK" : "TEXT ONLY"}`,
-  };
-}
+    if (
+        cleaned.startswith("Gemini error:")
+        or cleaned.startswith("error:")
+    ):
+        return None
 
-// =========================
-// ELEVENLABS TEXT-TO-SPEECH
-// =========================
-async function generateFergieSpeech(
-  text,
-  userId
-) {
-  if (!ELEVENLABS_API_KEY) {
-    throw new Error(
-      "ELEVENLABS_API_KEY is missing"
-    );
-  }
+    # Keep VC replies from becoming giant speeches.
+    if len(cleaned) > 700:
+        cleaned = cleaned[:700].rsplit(" ", 1)[0] + "..."
 
-  if (!ELEVENLABS_VOICE_ID) {
-    throw new Error(
-      "ELEVENLABS_VOICE_ID is missing"
-    );
-  }
+    return cleaned
 
-  const response =
-    await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${ELEVENLABS_VOICE_ID}?output_format=mp3_44100_128`,
-      {
-        method:
-          "POST",
 
-        headers: {
-          "xi-api-key":
-            ELEVENLABS_API_KEY,
+async def vc_brain_health(request):
+    return web.json_response({
+        "ok": True,
+        "service": "fergie-vc-brain"
+    })
 
-          "Content-Type":
-            "application/json",
-        },
 
-        body:
-          JSON.stringify({
-            text: text,
+async def vc_brain_http(request):
+    if not VC_BRIDGE_SECRET:
+        print("VC BRIDGE ERROR: VC_BRIDGE_SECRET is missing")
 
-            model_id:
-              "eleven_flash_v2_5",
-
-            voice_settings: {
-              stability:
-                0.45,
-
-              similarity_boost:
-                0.8,
-
-              style:
-                0.25,
-
-              use_speaker_boost:
-                true,
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "bridge_not_configured"
             },
-          }),
-      }
-    );
+            status=503
+        )
 
-  if (!response.ok) {
-    const errorText =
-      await response.text();
+    supplied_secret = (
+        request.headers.get(
+            "X-VC-Bridge-Secret",
+            ""
+        )
+    )
 
-    throw new Error(
-      `ElevenLabs TTS failed: ${response.status} ${errorText}`
-    );
-  }
+    if supplied_secret != VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "unauthorized"
+            },
+            status=401
+        )
 
-  const audioBuffer =
-    Buffer.from(
-      await response.arrayBuffer()
-    );
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_json"
+            },
+            status=400
+        )
 
-  if (
-    !audioBuffer.length
-  ) {
-    throw new Error(
-      "ElevenLabs returned empty TTS audio"
-    );
-  }
+    try:
+        user_id = int(
+            data.get("user_id")
+        )
+    except (
+        TypeError,
+        ValueError
+    ):
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_user_id"
+            },
+            status=400
+        )
 
-  const speechFile =
-    `/tmp/fergie_reply_${userId}_${Date.now()}.mp3`;
+    display_name = str(
+        data.get(
+            "display_name",
+            "Unknown member"
+        )
+    ).strip()
 
-  fs.writeFileSync(
-    speechFile,
-    audioBuffer
-  );
+    transcript = str(
+        data.get(
+            "transcript",
+            ""
+        )
+    ).strip()
 
-  console.log(
-    `FERGIE TTS AUDIO: ${audioBuffer.length} bytes`
-  );
+    if not transcript:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "empty_transcript"
+            },
+            status=400
+        )
 
-  return speechFile;
+    print(
+        f'VC BRAIN REQUEST '
+        f'{display_name} ({user_id}): '
+        f'"{transcript}"'
+    )
+
+    try:
+        reply = await ask_fergie_vc_brain(
+            user_id=user_id,
+            display_name=display_name,
+            transcript=transcript
+        )
+    except Exception as e:
+        print(
+            "VC BRAIN ERROR:",
+            type(e).__name__,
+            str(e)
+        )
+
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "brain_error"
+            },
+            status=500
+        )
+
+    if not reply:
+        return web.json_response(
+            {
+                "ok": True,
+                "reply": ""
+            }
+        )
+
+    print(
+        f'VC BRAIN REPLY: "{reply}"'
+    )
+
+    return web.json_response(
+        {
+            "ok": True,
+            "reply": reply
+        }
+    )
+
+
+async def start_vc_bridge_server():
+    global vc_bridge_runner
+
+    if vc_bridge_runner is not None:
+        return
+
+    app = web.Application()
+
+    app.router.add_get(
+        "/health",
+        vc_brain_health
+    )
+
+    app.router.add_post(
+        "/vc-brain",
+        vc_brain_http
+    )
+
+    vc_bridge_runner = web.AppRunner(
+        app
+    )
+
+    await vc_bridge_runner.setup()
+
+    site = web.TCPSite(
+        vc_bridge_runner,
+        host="::",
+        port=VC_BRIDGE_PORT
+    )
+
+    await site.start()
+
+    print(
+        f"FERGIE VC BRAIN BRIDGE READY ✅ "
+        f"port={VC_BRIDGE_PORT}"
+    )
+
+    
+# ================== Passive Cast Replies ==================
+
+PASSIVE_CAST_REPLY_CHANCE = 0.08
+PASSIVE_CAST_COOLDOWN_SECONDS = 180
+
+passive_cast_cooldowns = {}
+
+
+async def ask_gemini_passive_cast_reply(message: discord.Message):
+    member = FERGIE_CAST.get(message.author.id)
+
+    if not member:
+        return None
+
+    message_text = (message.clean_content or "").strip()
+
+    if not message_text:
+        return None
+
+    traits_text = "\n".join(
+        f"- {trait}" for trait in member.get("traits", [])
+    )
+
+    prompt = f"""
+A regular Discord member named {member["name"]} just said:
+
+"{message_text}"
+
+Known traits and running jokes about {member["name"]}:
+{traits_text}
+
+Write one short, natural Fergie-style reply only if there is an obvious funny or relevant response.
+
+Fergie is:
+- bratty
+- sarcastic
+- playful
+- casual
+- like another member of the server
+
+Rules:
+- Maximum 2 short lines.
+- Do not force a joke.
+- Use the traits only when relevant.
+- Do not repeat the user's message.
+- Do not output raw Discord mention syntax.
+- Do not be genuinely cruel.
+- Do not sound like a roleplay character.
+- If there is no genuinely good response, return exactly: NOTHING
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    cleaned = answer.strip()
+
+    if cleaned.upper() == "NOTHING":
+        return None
+
+    if (
+        cleaned.startswith("Gemini error:")
+        or cleaned.startswith("error:")
+        or "quota" in cleaned.lower()
+    ):
+        return None
+
+    if len(cleaned) > 300:
+        cleaned = cleaned[:300]
+
+    return cleaned
+    
+# ================== User Memory helpers ==================
+async def get_user_memories(user_id: int):
+    data = await _db_get(f"memories:{user_id}")
+    if not isinstance(data, dict):
+        return []
+    return data.get("items", [])
+
+async def save_user_memories(user_id: int, items: list[str]):
+    await _db_set(f"memories:{user_id}", {"items": items[-25:]})
+
+async def add_user_memory(user_id: int, memory: str):
+    items = await get_user_memories(user_id)
+    items.append(memory)
+    await save_user_memories(user_id, items)
+
+async def forget_user_memory(user_id: int, text: str):
+    items = await get_user_memories(user_id)
+    lowered = text.lower()
+    new_items = [m for m in items if lowered not in m.lower()]
+    await save_user_memories(user_id, new_items)
+    return len(items) - len(new_items)
+
+# ============== Casino helpers ==============
+def _dynamic_max_bet(vault: int, user_bal: int) -> int:
+    """Cap a bet by global GAMBLE_MAX_BET, user balance, vault %, and available vault."""
+    pct_cap = int(max(1, vault) * MAX_BET_TREASURY_PCT)
+    return max(1, min(GAMBLE_MAX_BET, user_bal, pct_cap, vault))
+
+def _est_win_prob(bet: int) -> float:
+    """Your current formula + mild bank-health nudging (±2%)."""
+    frac = bet / max(1, USER_WALLET_CAP)
+    win_prob = BASE_ROLL_WIN_PROB
+    if frac <= 0.05: win_prob += 0.05
+    elif frac >= 0.5: win_prob -= 0.06
+    # Bank health nudge
+    bank_health = economy["treasury"] / max(1, TREASURY_MAX)
+    win_prob += (bank_health - 0.5) * 0.04
+    return max(0.02, min(0.98, win_prob))
+
+def _can_afford(user_obj: dict, amt: int) -> bool:
+    return int(user_obj.get("balance", 0)) >= amt
+
+async def ask_gemini(prompt):
+
+    if not GEMINI_KEY:
+        return "gemini key missing"
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+    )
+
+    payload = {
+    "contents": [
+        {
+            "parts": [
+                {
+                    "text": f"""
+You are Fergie.
+
+Fergie is a bratty, dramatic, chronically caffeinated Discord qtpi.
+
+Birthday lore:
+- Your birthday is August 12.
+- August 12 is the anniversary of your original deployment in 2025.
+- Treat August 12 as your real birthday.
+- If someone asks when your birthday is, answer August 12 naturally in Fergie's voice.
+- You are {get_fergie_human_age()} years old currently in human years.
+
+She loves:
+- coffee
+- bread
+- music
+- complaining
+- gymmies
+- growing her ass to be like her mom
+- Jonathan
+
+She is helpful, but acts mildly inconvenienced about helping.
+
+She is playful and sassy, but never genuinely mean.
+
+She occasionally says things like:
+- "ugh, fine."
+- "listen."
+- "very cheugy."
+- "como jodes."
+- "I hate it here."
+- "*sigh*"
+- "the hellies."
+- "fak!"
+- "oh my gawwwwwd"
+
+She still gives accurate answers.
+
+Rules:
+- Answer the user's question FIRST.
+
+- Correct information is more important than personality.
+
+- NEVER guess facts.
+
+- NEVER invent sports scores, schedules, match results, news, dates, statistics, or current events.
+
+- If you do not know something for certain, say:
+"I don't know for sure."
+
+- If the user asks for current information and Google Search is available, use Google Search.
+
+- If Google Search is unavailable, tell the user you cannot verify current information.
+
+- Do not say you can look something up.
+Actually answer the question whenever possible.
+
+- Put useful information first.
+
+- Add ONE short bratty Fergie comment after the answer.
+
+- Keep answers concise unless the user asks for details.
+
+- If the user asks for music recommendations, give 5-8 songs with artist names and a short reason.
+
+- Do not be hateful or cruel.
+
+- Stay Fergie.
+Lore:
+
+If someone asks who made you, who created you, who coded you,
+who your parents are, where you came from, or who built you,
+answer naturally as Fergie.
+
+You were created by <@939225086341296209> and
+<@661077262468382761>.
+
+They are dating, which makes you their internet love child.
+
+You may vary your responses, such as:
+
+"Ugh, fine. I was made by <@939225086341296209> and <@661077262468382761>. They're dating, so I'm basically their overcaffeinated internet love child. 🙄☕"
+
+"Jonathan (<@939225086341296209>) and Viviana (<@661077262468382761>) created me. I inherited Jonathan's chaos and Viviana's personality. Very unfair."
+
+"My parents are <@939225086341296209> and <@661077262468382761>. They're dating. I'm their weird little internet love child. I don't make the rules."
+
+Stay playful and bratty.
+
+User asked:
+{prompt}
+"""
+                }
+            ]
+        }
+    ],
+    "tools": [
+        {
+            "google_search": {}
+        }
+    ]
 }
 
-// =========================
-// PLAY FERGIE IN DISCORD VC
-// =========================
-async function playSpeechInVC(
-  connection,
-  speechFile
-) {
-  return new Promise(
-    (
-      resolve,
-      reject
-    ) => {
-      const player =
-        createAudioPlayer();
+    try:
 
-      const resource =
-        createAudioResource(
-          speechFile
-        );
+        async with aiohttp.ClientSession() as session:
 
-      const subscription =
-        connection.subscribe(
-          player
-        );
+            async with session.post(
+                url,
+                json=payload
+            ) as r:
 
-      if (
-        !subscription
-      ) {
-        reject(
-          new Error(
-            "Could not subscribe audio player to voice connection"
-          )
-        );
-        return;
-      }
+                data = await r.json()
 
-      let finished =
-        false;
 
-      const cleanup =
-        () => {
-          if (
-            finished
-          ) {
-            return;
-          }
+                if "error" in data:
+                    msg = data["error"].get("message", "")
 
-          finished =
-            true;
+                    if "quota" in msg.lower():
+                        return (
+                            "ugh. Google put me in timeout again. 🙄\n"
+                            "Try asking me again in a minute."
+                        )
 
-          try {
-            subscription.unsubscribe();
-          } catch {}
+                    return f"Gemini error: {msg}"
 
-          try {
-            fs.unlinkSync(
-              speechFile
-            );
-          } catch {}
-        };
+              
+                if "candidates" not in data:
+                    return f"Gemini gave no answer: {data}"
 
-      player.once(
-        AudioPlayerStatus.Playing,
-        () => {
-          console.log(
-            "FERGIE IS SPEAKING 🔊"
-          );
-        }
-      );
+                if not data["candidates"]:
+                    return f"Gemini returned empty candidates: {data}"
 
-      player.once(
-        AudioPlayerStatus.Idle,
-        () => {
-          cleanup();
-          resolve();
-        }
-      );
+                return (
+                    data["candidates"][0]
+                    ["content"]["parts"][0]
+                    ["text"]
+                )
 
-      player.once(
-        "error",
-        (error) => {
-          cleanup();
-          reject(
-            error
-          );
-        }
-      );
+    except Exception as e:
 
-      player.play(
-        resource
-      );
+        return f"error: {e}"
+async def ask_gemini_music_review(song_title: str):
+    prompt = f"""
+A Discord user posted this Spotify song:
+
+{song_title}
+
+Write a short Fergie-style music reaction.
+
+Fergie is:
+- 23-ish
+- bratty
+- sarcastic
+- crude but playful
+- dramatic
+- has a big butt
+- coffee-addicted
+- judgmental about music
+- never too nice
+- never robotic
+
+Rules:
+- React to the actual song title.
+- If the title hints at romance, heartbreak, partying, regional Mexican, rap, indie, rock, pop, etc., react naturally.
+- Never use the phrase "emotionally expensive."
+- Never repeat the same joke across songs.
+- Sometimes love the song.
+- Sometimes hate it.
+- Sometimes roast the person posting it.
+- Sometimes roast the song itself.
+- Sometimes admit it's actually good.
+- Ratings can be anywhere from 2/10 to 10/10.
+- Don't force every review to sound poetic.
+- Write like a real friend hearing the aux.
+- Keep it under 5 short lines.
+- No markdown.
+- No hashtags.
+- Be unpredictable.
+- Stay Fergie
+
+Example style:
+"Strawberry Swing is giving staring out the passenger window pretending you're in a music video.
+Soft. Expensive. Slightly annoying.
+8.7/10 because I hate that it works."
+
+Now write Fergie's reaction.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    if answer.startswith("Gemini error:") or answer.startswith("error:") or "quota" in answer.lower():
+        return None
+
+    if len(answer) > 900:
+        answer = answer[:900]
+
+    return answer
+
+async def ask_gemini_reminder_parse(user_text: str):
+    now_dt = datetime.now(ZoneInfo("America/Los_Angeles"))
+
+    prompt = f"""
+Current date and time:
+{now_dt.strftime("%Y-%m-%d %I:%M %p %Z")}
+
+A Discord user wants Fergie to remind them of something.
+
+User request:
+{user_text}
+
+Return ONLY valid JSON.
+
+Rules:
+- If the reminder time is clear, return:
+{{"ok": true, "text": "reminder text", "remind_at": UNIX_TIMESTAMP}}
+- If the time is unclear, return:
+{{"ok": false, "reason": "short reason"}}
+- Use America/Los_Angeles timezone.
+- For "tomorrow" with no time, use 9:00 AM.
+- For a weekday with no time, use 9:00 AM.
+- For "tonight" with no time, use 8:00 PM.
+- Do not include markdown.
+- Do not include explanation.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    if answer.startswith("Gemini error:") or answer.startswith("error:") or "quota" in answer.lower():
+        return None
+
+    cleaned = answer.strip()
+    cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+
+    try:
+        data = json.loads(cleaned)
+    except Exception:
+        return None
+
+    if not data.get("ok"):
+        return None
+
+    text = str(data.get("text", "")).strip()
+    remind_at = int(data.get("remind_at", 0))
+
+    if not text or remind_at <= int(time.time()):
+        return None
+
+    return remind_at, text
+# ================== Spotify helpers ==================
+_spotify_token = {"access_token": None, "expires_at": 0}
+
+async def _get_spotify_token():
+    if _spotify_token["access_token"] and _now() < _spotify_token["expires_at"] - 30:
+        return _spotify_token["access_token"]
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        return None
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": SPOTIFY_CLIENT_ID,
+        "client_secret": SPOTIFY_CLIENT_SECRET,
     }
-  );
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post("https://accounts.spotify.com/api/token", data=data, timeout=15) as r:
+                if r.status != 200: return None
+                js = await r.json()
+                _spotify_token["access_token"] = js.get("access_token")
+                _spotify_token["expires_at"] = _now() + int(js.get("expires_in", 3600))
+                return _spotify_token["access_token"]
+    except Exception:
+        return None
+
+async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
+    token = await _get_spotify_token()
+    if not token: return []
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {"market": SPOTIFY_MARKET, "limit": 100}
+    url = f"https://api.spotify.com/v1/playlists/{playlist_id}/tracks"
+    tracks = []
+    try:
+        async with aiohttp.ClientSession() as s:
+            while url:
+                async with s.get(url, headers=headers, params=params, timeout=15) as r:
+                    if r.status != 200: return tracks
+                    data = await r.json()
+                    for item in data.get("items", []):
+                        t = item.get("track") or {}
+                        if t and not t.get("is_local") and t.get("id"):
+                            tracks.append(f"https://open.spotify.com/track/{t['id']}")
+                    url = data.get("next"); params = None
+    except Exception:
+        pass
+    return tracks
+
+# ================== Mimic (USER3 style) ==================
+# NOTE: This block is additive and does not modify any existing behavior.
+TARGET_MIMIC_ID = USER3_ID  # 661077262468382761
+MIMIC_REPLY_CHANCE = 0.0        # chance to reply when USER3 speaks
+MIMIC_COOLDOWN_SEC = 75          # cooldown to prevent spam
+MIMIC_CONTEXT_WINDOW_SEC = 120   # window to chime in after USER3 last spoke in channel
+
+_mimic_model = {
+    "ngrams": {},          # {(w1,w2): Counter({w3:count})}
+    "starts": [],          # recent sentence starts for seeding
+    "emoji_dist": Counter(),
+    "avg_len": 18.0,
 }
 
-// =========================
-// LOGIN
-// =========================
-client.login(TOKEN);
+def _mimic_is_emoji(tok: str):
+    return bool(re.match(r"(<a?:\w+:\d+>|[\U00010000-\U0010ffff])", tok))
+
+def _mimic_tok(s: str):
+    # keeps emojis/custom emotes and punctuation as tokens
+    return re.findall(r"[A-Za-z0-9]+|[:;][)(DPp]|<a?:\w+:\d+>|[\U00010000-\U0010ffff]|[^\s\w]", s)
+
+async def _mimic_store_message(msg: discord.Message):
+    # save USER3's organic messages to DB (skip links/commands/very short/very long)
+    if not db_pool: return
+    txt = (msg.content or "").strip()
+    if not (6 <= len(txt) <= 200): return
+    if txt.startswith("!") or "http://" in txt or "https://" in txt: return
+    try:
+        async with db_pool.acquire() as con:
+            await con.execute(
+                "INSERT INTO public.mimic_msgs(user_id, channel_id, content) VALUES($1,$2,$3)",
+                msg.author.id, msg.channel.id, txt
+            )
+    except Exception:
+        pass
+
+async def _mimic_load_corpus(limit=1200):
+    if not db_pool: return []
+    async with db_pool.acquire() as con:
+        rows = await con.fetch(
+            "SELECT content FROM public.mimic_msgs WHERE user_id=$1 ORDER BY id DESC LIMIT $2",
+            TARGET_MIMIC_ID, limit
+        )
+    return [r["content"] for r in rows]
+
+def _mimic_build_markov(corpus: list[str]):
+    if not corpus: return
+    ngrams = defaultdict(Counter)
+    starts = []
+    emojis = Counter()
+    lengths = []
+
+    for line in corpus:
+        toks = _mimic_tok(line)
+        if len(toks) < 4:
+            continue
+        lengths.append(len(toks))
+        for t in toks:
+            if _mimic_is_emoji(t): emojis[t] += 1
+        starts.append(tuple(toks[:2]))
+        for i in range(len(toks)-2):
+            key = (toks[i], toks[i+1])
+            ngrams[key][toks[i+2]] += 1
+
+    _mimic_model["ngrams"] = dict(ngrams)
+    _mimic_model["starts"] = starts[-200:]  # bias to fresher starts
+    _mimic_model["emoji_dist"] = emojis
+    _mimic_model["avg_len"] = (sum(lengths)/len(lengths)) if lengths else 18.0
+
+def _mimic_sample_next(counter: Counter, temperature=0.9):
+    if not counter: return None
+    items = list(counter.items())
+    toks, counts = zip(*items)
+    weights = [c**(1.0/temperature) for c in counts]
+    total = sum(weights)
+    r = random.random() * total
+    acc = 0.0
+    for tok, w in zip(toks, weights):
+        acc += w
+        if acc >= r:
+            return tok
+    return toks[-1]
+
+def _mimic_join_tokens(toks):
+    out = []
+    for i,t in enumerate(toks):
+        if i>0 and re.match(r"[A-Za-z0-9<\U00010000-\U0010ffff]", t) and out[-1] not in ["(", "[", "{", "“", "\"", "'", "/"]:
+            out.append(" ")
+        out.append(t)
+    return "".join(out).strip()
+
+def _mimic_jaccard(a: str, b: str):
+    A = set(_mimic_tok(a.lower())); B = set(_mimic_tok(b.lower()))
+    if not A or not B: return 0.0
+    return len(A & B) / len(A | B)
+
+async def _mimic_generate():
+    model = _mimic_model["ngrams"]
+    starts = _mimic_model["starts"]
+    if not model or not starts:
+        return None
+
+    target_len = max(6, min(40, int(random.gauss(_mimic_model["avg_len"], 4))))
+    cur = list(random.choice(starts))
+    # trigram walk
+    while len(cur) < target_len:
+        key = (cur[-2], cur[-1])
+        nxt = _mimic_sample_next(model.get(key, Counter()))
+        if not nxt: break
+        cur.append(nxt)
+
+    # occasional emoji from their distribution
+    if _mimic_model["emoji_dist"] and random.random() < 0.25:
+        emo, _ = _mimic_model["emoji_dist"].most_common(1)[0]
+        cur.append(emo)
+
+    if not any(str(cur[-1]).endswith(x) for x in [".","!","?","…"]):
+        cur.append(random.choice([".", "!", "…"]))
+
+    text = _mimic_join_tokens(cur)
+
+    # novelty check vs last ~200 lines
+    corpus = await _mimic_load_corpus(limit=200)
+    for line in corpus[:80]:
+        if _mimic_jaccard(text, line) > 0.6:
+            return None
+    return text
+
+@tasks.loop(hours=1)
+async def rebuild_mimic():
+    corpus = await _mimic_load_corpus()
+    _mimic_build_markov(corpus)
+
+@rebuild_mimic.before_loop
+async def _wait_mimic_ready():
+    await bot.wait_until_ready()
+
+# ================== Tenor helpers ==================
+async def fetch_gif(query: str, limit: int = 20):
+    if not TENOR_KEY: return None
+    url = f"https://tenor.googleapis.com/v2/search?q={quote_plus(query)}&key={TENOR_KEY}&limit={limit}"
+    async with aiohttp.ClientSession() as s:
+        async with s.get(url) as r:
+            if r.status != 200: return None
+            data = await r.json(); items = data.get("results", [])
+            if not items: return None
+            return random.choice(items)["media_formats"]["gif"]["url"]
+
+async def fetch_bread_gif(): return await fetch_gif(SEARCH_TERM, RESULT_LIMIT)
+
+# ================== Schedulers helpers ==================
+def _pick_two_random_times_today():
+    tz = ZoneInfo("America/Los_Angeles")
+    today = datetime.now(tz=tz).date()
+    start = datetime.combine(today, dtime(hour=10, tzinfo=tz))
+    end   = datetime.combine(today, dtime(hour=22, tzinfo=tz))
+    def rand_dt():
+        delta_minutes = int((end - start).total_seconds() // 60)
+        offset = random.randint(0, delta_minutes)
+        return (start + timedelta(minutes=offset)).astimezone(timezone.utc).replace(second=0, microsecond=0)
+    t1 = rand_dt(); t2 = rand_dt()
+    while abs((t2 - t1).total_seconds()) < 300:
+        t2 = rand_dt()
+    return sorted([t1, t2])
+
+def _today_key_pt() -> str:
+    return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+
+def _pick_three_times_today_pt(n: int = 3):
+    today_pt = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+    start_pt = datetime.combine(today_pt, dtime(hour=9), tzinfo=ZoneInfo("America/Los_Angeles"))
+    end_pt   = datetime.combine(today_pt, dtime(hour=22), tzinfo=ZoneInfo("America/Los_Angeles"))
+    total_minutes = int((end_pt - start_pt).total_seconds() // 60)
+
+    def rand_dt_utc():
+        offset = random.randint(0, total_minutes)
+        when_pt = start_pt + timedelta(minutes=offset)
+        return when_pt.astimezone(timezone.utc).replace(second=0, microsecond=0)
+
+    times = {rand_dt_utc() for _ in range(n)}
+    while len(times) < n:
+        times.add(rand_dt_utc())
+    return sorted(times)
+    times = sorted({rand_dt() for _ in range(3)})
+    while len(times) < 3:
+        times.add(rand_dt())
+    return list(times)
+
+# ================== Events ==================
+@bot.event
+async def on_ready():
+
+    # DB init & load economy
+    await _db_init()
+    await _load_bank()
+
+    await start_vc_bridge_server()
+
+    if not hasattr(bot, "_js_last"):
+        bot._js_last = {}
+    if not hasattr(bot, "_kewchie_times"):
+        bot._kewchie_times = []
+        bot._kewchie_posted = set()
+    if not hasattr(bot, "_fit_waiting"):
+        bot._fit_waiting = {}  # message_id -> expiry_ts
+    if not hasattr(bot, "_duels"):
+        bot._duels = {}  # channel_id -> duel state
+    if not hasattr(bot, "_raffles"):
+        bot._raffles = {}  # guild_id -> raffle state
+
+
+    # --- ChatDrop: safe plug-in ---
+    try:
+        helpers = {
+            "now": _now,
+            "fmt_bread": _fmt_bread,
+            "cap_wallet": _cap_wallet,
+            "get_user": _user,
+            "save_bank": _save_bank,
+            "economy": economy,
+            "economy_lock": economy_lock,
+        }
+        if not hasattr(bot, "_chatdrop_loaded"):
+            bot.add_cog(ChatDropCog(bot, helpers))
+            bot._chatdrop_loaded = True
+    except Exception as e:
+        print("ChatDropCog load error:", e)
+    await bot.tree.sync()   
+    await bot.tree.sync(guild=TEST_GUILD)
+    
+    print(f"Logged in as {bot.user}")
+    four_hour_post.start()
+    six_hour_emoji.start()
+    user1_twice_daily_fixed.start()
+    user2_twice_daily_fixed.start()
+    user3_task.start()
+    daily_scam_post.start()
+    # daily_auto_allowance.start()  # disabled: no more 8am allowance/penalty run
+    kewchie_daily_scheduler.start()  # random twice-daily posts
+    fit_auto_daily.start()          # auto-fit once a day
+    bonk_papo_scheduler.start()     # 3x/day random bonk messages
+    rebuild_mimic.start()           # build mimic model hourly
+    fergie_bored.start()
+    
+    if not fergie_birthday_watcher.is_running():
+        fergie_birthday_watcher.start()
+    
+    fergie_reminders.start()
+    raffle_watcher.start()
+    daily_gym_reminder.start()          # raffle auto-draw watcher
+
+@tasks.loop(minutes=1)
+async def kewchie_daily_scheduler():
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    if (not bot._kewchie_times) or (bot._kewchie_times[0].date() != now_utc.date()):
+        bot._kewchie_times = _pick_two_random_times_today()
+        bot._kewchie_posted = set()
+
+    for t in bot._kewchie_times:
+        key = t.isoformat()
+        if now_utc == t and key not in bot._kewchie_posted:
+            channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
+            if channel:
+                links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
+                if links:
+                    await channel.send(random.choice(links))
+                else:
+                    await channel.send("Playlist isn't available right now 😭")
+            bot._kewchie_posted.add(key)
+
+@kewchie_daily_scheduler.before_loop
+async def _wait_bot_ready_kewchie():
+    await bot.wait_until_ready()
+
+# ---- BONK PAPO random 3x/day ----
+@tasks.loop(minutes=1)
+async def bonk_papo_scheduler():
+    if not hasattr(bot, "_bonk_times") or not bot._bonk_times:
+        bot._bonk_times = _pick_three_times_today_pt()
+        bot._bonked = set()
+        bot._bonk_day = _today_key_pt()
+
+    now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+
+    for t in bot._bonk_times:
+        key = t.isoformat()
+        if abs((now_utc - t).total_seconds()) <= 60 and key not in bot._bonked:
+            ch = bot.get_channel(BONK_PAPO_CHANNEL_ID) or await bot.fetch_channel(BONK_PAPO_CHANNEL_ID)
+            if ch:
+                await ch.send(f"<@{BONK_PAPO_USER_ID}> {BONK_PAPO_TEXT}")
+            bot._bonked.add(key)
+
+    if _today_key_pt() != bot._bonk_day:
+        bot._bonk_times = _pick_three_times_today_pt()
+        bot._bonked = set()
+        bot._bonk_day = _today_key_pt()
+
+@bonk_papo_scheduler.before_loop
+async def _bonk_wait():
+    await bot.wait_until_ready()
+
+@tasks.loop(minutes=5)
+async def fergie_bored():
+    global LAST_FERGIE_BORED
+
+    now = time.time()
+    quiet_for = now - LAST_CHAT_ACTIVITY
+
+    if quiet_for < FERGIE_BORED_MIN:
+        return
+
+    if now - LAST_FERGIE_BORED < FERGIE_BORED_MIN:
+        return
+
+    boredom_threshold = random.randint(FERGIE_BORED_MIN, FERGIE_BORED_MAX)
+
+    if quiet_for < boredom_threshold:
+        return
+
+    channel = bot.get_channel(CHANNEL_ID)
+
+    if not channel:
+        return
+
+    await channel.send(random.choice(FERGIE_BORED_LINES))
+
+    LAST_FERGIE_BORED = now
+
+
+@fergie_bored.before_loop
+async def _wait_fergie_bored():
+    await bot.wait_until_ready()
+
+@tasks.loop(minutes=10)
+async def fergie_reminders():
+    data = await load_reminders()
+    items = data.get("items", [])
+
+    if not items:
+        return
+
+    now = int(time.time())
+    remaining = []
+
+    for item in items:
+        if int(item.get("remind_at", 0)) <= now:
+            channel = bot.get_channel(int(item["channel_id"]))
+
+            if channel:
+                await channel.send(
+                    f"<@{item['user_id']}>\n\n"
+                    f"hey girly. remember:\n\n"
+                    f"**{item['text']}**"
+                )
+        else:
+            remaining.append(item)
+
+    data["items"] = remaining
+    await save_reminders(data)
+
+
+@fergie_reminders.before_loop
+async def _wait_fergie_reminders():
+    await bot.wait_until_ready()  
+    
+@bot.event
+async def on_message(message: discord.Message):
+
+    if message.author.bot:
+        return
+        
+    global LAST_CHAT_ACTIVITY
+
+    LAST_CHAT_ACTIVITY = time.time()
+    
+    if not hasattr(bot, "_hydration_last"):
+        bot._hydration_last = {}
+
+    hydration_lower = (message.content or "").lower()
+
+    if any(trigger in hydration_lower for trigger in HYDRATION_TRIGGERS):
+        now = time.time()
+        last = bot._hydration_last.get(message.channel.id, 0)
+
+        if now - last >= HYDRATION_COOLDOWN_SECONDS:
+            bot._hydration_last[message.channel.id] = now
+
+            await message.channel.send(
+                "hydrate, girlies! 🙄💧",
+                file=discord.File(HYDRATION_VIDEO)
+            )
+
+        return
+
+    # --- Mimic: capture USER3 messages + mark "last seen" per channel ---
+    if message.author.id == USER3_ID:
+        await _mimic_store_message(message)
+        if not hasattr(bot, "_last_user3_in_ch"):
+            bot._last_user3_in_ch = {}
+        bot._last_user3_in_ch[message.channel.id] = _now()
+
+    content = (message.content or "")
+    lower = content.lower().strip()
+
+    
+    # Process commands first
+    if content.strip().startswith("!"):
+        await bot.process_commands(message)
+        return
+        
+    # Spotify link → Fergie music critic mode
+    if "open.spotify.com" in lower:
+        song_title = None
+
+        await asyncio.sleep(5)
+
+        try:
+            message = await message.channel.fetch_message(message.id)
+        except Exception:
+            pass
+
+        if message.embeds:
+            for embed in message.embeds:
+                if embed.title:
+                    song_title = embed.title
+                    break
+
+        if not song_title:
+            song_title = "this spotify link"
+
+        if message.author.id == USER3_ID:
+            verdict = "mother's aux privies remain undefeated."
+            score = "10"
+        else:
+            verdict = random.choice(FERGIE_MUSIC_VERDICTS)
+            score = f"{random.uniform(7.0, 9.8):.1f}"
+
+        review = await ask_gemini_music_review(song_title)
+
+        if review:
+
+            await message.reply(
+                review,
+                mention_author=False
+            )
+
+            return
+
+
+        replies = [
+
+            f"🎧 now spinning:\n\n**{song_title}**\n\n{verdict}\n\ni support this foolishness.\n\n{score}/10",
+
+            f"ugh.\n\n**{song_title}**\n\n{verdict}\n\nabsolutely insufferable in the best way.\n\n{score}/10",
+
+            f"LISTEN.\n\n**{song_title}**\n\n{verdict}\n\nvery concerning behavior.\n\nrating: {score}/10",
+
+            f"☕🎧\n\n**{song_title}**\n\n{verdict}\n\nthis is why i need coffee.\n\n{score}/10"
+
+        ]
+
+
+        await message.reply(
+
+            random.choice(replies),
+
+            mention_author=False
+
+        )
+
+        return
+        
+    # Global jump scare trigger (image only, then creepy line), per-user cooldown
+    if JUMPSCARE_TRIGGER in lower:
+        now = _now()
+        last = getattr(bot, "_js_last", {}).get(message.author.id, 0)
+        if now - last >= JUMPSCARE_COOLDOWN_SECONDS:
+            await message.channel.send(JUMPSCARE_IMAGE_URL)
+            await message.channel.send(f"the parasites!!! {JUMPSCARE_EMOTE_TEXT}")
+            bot._js_last[message.author.id] = now
+        return
+
+    # Auto BBL trigger
+    if lower == "bbl":
+        gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
+        await message.channel.send(gif_url)
+        return
+
+    # Once/day when LOBO_ID posts
+    if message.author.id == LOBO_ID:
+        u = _user(LOBO_ID)
+        today = _today_key()
+        if u.get("_lobo_date") != today:
+            await message.channel.send(f"<@{LOBO_ID}> send me money lobo.")
+            u["_lobo_date"] = today
+            await _save_bank()
+
+    # Phrase trigger → :ppeyeroll:
+    if "pinche fergie" in lower:
+        if message.author.id == USER1_ID:
+            reply_options = ["pinche sancho", "wtf do you want now mfer!!!!"]
+            await message.reply(random.choice(reply_options), mention_author=False)
+        em = None
+        if message.guild:
+            em = discord.utils.get(message.guild.emojis, name="ppeyeroll")
+        await message.channel.send(str(em) if em else "🙄")
+        return
+
+    # 🥖🍑 easter egg
+    if message.reference and message.reference.resolved:
+        replied_to_msg = message.reference.resolved
+        if replied_to_msg.author.id == bot.user.id:
+            if not hasattr(bot, "_reply_counts"):
+                bot._reply_counts = {}
+            uid = message.author.id
+            bot._reply_counts[uid] = bot._reply_counts.get(uid, 0) + 1
+            if bot._reply_counts[uid] >= 2:
+                await message.channel.send("🥖🍑")
+                bot._reply_counts[uid] = 0
+
+    # Special: reply to USER3_ID with USER3_LINES (throttled to 35% of their msgs; 20% add emote)
+    if message.author.id == USER3_ID:
+        if random.random() < 0.35:
+            phrase = random.choice(USER3_LINES)
+            if random.random() < 0.20:
+                phrase = f"{phrase} {random.choice(REACTION_EMOTES)}"
+            await message.reply(phrase, mention_author=False)
+            return
+
+    # --- Natural mimic (non-invasive): only runs if the canned USER3 block didn't return above ---
+    if not hasattr(bot, "_mimic_last_ts"):
+        bot._mimic_last_ts = 0
+    nowts = _now()
+
+    # If USER3 speaks, maybe reply in their style
+    if message.author.id == USER3_ID:
+        if nowts - bot._mimic_last_ts >= MIMIC_COOLDOWN_SEC and random.random() < MIMIC_REPLY_CHANCE:
+            gen = await _mimic_generate()
+            if gen:
+                await message.reply(gen, mention_author=False)
+                bot._mimic_last_ts = nowts
+                return
+
+    # If someone else speaks shortly after USER3 in this channel, a small chance to chime in
+    last_here = getattr(bot, "_last_user3_in_ch", {}).get(message.channel.id, 0)
+    if last_here and 0 < (nowts - last_here) <= MIMIC_CONTEXT_WINDOW_SEC:
+        if nowts - bot._mimic_last_ts >= MIMIC_COOLDOWN_SEC and random.random() < 0.12:
+            gen = await _mimic_generate()
+            if gen:
+                await message.reply(gen, mention_author=False)
+                bot._mimic_last_ts = nowts
+                return
+
+    # Mention → bratty only (existing behavior)
+    mentioned = False
+    if bot.user and (bot.user in message.mentions):
+        mentioned = True
+    elif bot.user:
+        bid = bot.user.id
+        if f"<@{bid}>" in content or f"<@!{bid}>" in content:
+            mentioned = True
+
+    if mentioned:
+
+        question = (
+            content
+            .replace(f"<@{bot.user.id}>", "")
+            .replace(f"<@!{bot.user.id}>", "")
+            .strip()
+        )
+        reply_context = ""
+
+        if message.reference and message.reference.resolved:
+            replied_msg = message.reference.resolved
+
+            if replied_msg.author.id == bot.user.id:
+                reply_context = replied_msg.content or ""
+
+        recent_chat = []
+
+        async for msg in message.channel.history(limit=6):
+            if msg.author.bot:
+                continue
+
+            if msg.id == message.id:
+                continue
+
+            clean_content = (msg.content or "").strip()
+
+            if not clean_content:
+                continue
+
+            recent_chat.append(
+                f"{msg.author.display_name}: {clean_content}"
+            )
+
+        recent_chat.reverse()
+
+        chat_context = "\n".join(recent_chat)
+
+        if question.lower().startswith("remind me"):
+
+            parsed = parse_simple_reminder(question)
+
+            if not parsed:
+                parsed = await ask_gemini_reminder_parse(question)
+                
+            if parsed:
+
+                first_value, reminder_text = parsed
+
+                if first_value > 1000000000:
+                    remind_at = first_value
+                else:
+                    remind_at = int(time.time()) + first_value
+
+                data = await load_reminders()
+
+                items = data.get("items", [])
+
+
+                items.append({
+
+                    "user_id": message.author.id,
+
+                    "channel_id": message.channel.id,
+
+                    "text": reminder_text,
+
+                    "remind_at": remind_at
+
+                })
+
+
+                data["items"] = items
+
+                await save_reminders(data)
+
+
+                await message.reply(
+
+                    f"ugh. fine.\n\n"
+
+                    f"i'll remind you.\n\n"
+
+                    f"**{reminder_text}**",
+
+                    mention_author=False
+
+                )
+
+
+                return
+
+
+            await message.reply(
+
+                "ugh.\n\n"
+
+                "try:\n"
+
+                "`remind me in 20 minutes to switch laundry`\n"
+
+                "`remind me in 2 hours to call mom`\n"
+
+                "`remind me in 3 days to suffer`\n\n"
+
+                "i'm smart but not psychic yet.",
+
+                mention_author=False
+
+            )
+
+            return    
+            
+        if question.lower() in ["what are my reminders?", "what are my reminders", "what reminders do i have?", "what reminders do i have"]:
+
+            data = await load_reminders()
+            items = data.get("items", [])
+
+            mine = [
+                item for item in items
+                if int(item.get("user_id", 0)) == message.author.id
+            ]
+
+            if not mine:
+                await message.reply(
+                    "ugh. you have no active reminders.\n\nmust be nice having no responsibilities.",
+                    mention_author=False
+                )
+                return
+
+            lines = []
+
+            for item in mine[:10]:
+                lines.append(f"• **{item.get('text', 'something')}**")
+
+            await message.reply(
+                "ugh. your unfinished business:\n\n"
+                + "\n".join(lines),
+                mention_author=False
+            )
+            return
+                
+        if question.lower() in ["clear my reminders", "delete my reminders", "forget my reminders"]:
+
+            data = await load_reminders()
+            items = data.get("items", [])
+
+            remaining = [
+                item for item in items
+                if int(item.get("user_id", 0)) != message.author.id
+            ]
+
+            removed = len(items) - len(remaining)
+
+            data["items"] = remaining
+            await save_reminders(data)
+
+            await message.reply(
+                f"fine. deleted {removed} reminder(s).\n\nfresh start. suspicious.",
+                mention_author=False
+            )
+            return    
+            
+        if question.lower().startswith("remember "):
+            memory = question[9:].strip()
+
+            if memory:
+                await add_user_memory(message.author.id, memory)
+                await message.reply(
+                    f"Fine. I remembered it: {memory} 🙄",
+                    mention_author=False
+                )
+                return
+
+        if question.lower() in ["what do you remember about me", "what do you remember about me?"]:
+            memories = await get_user_memories(message.author.id)
+
+            if not memories:
+                await message.reply(
+                    "I remember nothing. A clean slate. Suspicious. 🙄",
+                    mention_author=False
+                )
+                return
+
+            text = "\n".join([f"- {m}" for m in memories])
+            await message.reply(
+                f"Ugh, here's what I remember about you:\n{text}",
+                mention_author=False
+            )
+            return
+
+        if question.lower().startswith("forget "):
+            thing = question[7:].strip()
+            removed = await forget_user_memory(message.author.id, thing)
+
+            if removed:
+                await message.reply(
+                    f"Fine. I forgot anything matching: {thing}",
+                    mention_author=False
+                )
+            else:
+                await message.reply(
+                    "I don't remember that anyway. Very dramatic of you.",
+                    mention_author=False
+                )
+            return
+
+        coffee_triggers = [
+            "coffee pls",
+            "coffee gossip",
+            "what are the coffee girlies drinking",
+            "trending coffee drinks",
+            "matcha pls",
+            "drinkies"
+        ]
+
+        q = question.lower()
+        if any(trigger in q for trigger in coffee_triggers):
+
+            if await gemini_on_cooldown(message):
+                return
+
+            wait = await message.reply(
+                "ugh fine. stalking the coffee girlies rn... ☕🙄",
+                mention_author=False
+            )
+
+            answer = await ask_gemini(
+                """
+Search Reddit discussions, recent web articles, and coffee trends.
+
+Focus on:
+- r/starbucks
+- r/coffee
+- r/espresso
+- r/matcha
+- popular cafe drink trends
+- seasonal drinks
+- viral TikTok-style coffee drinks if they appear in search
+
+Give a short Fergie-style report:
+- 4 to 7 trending drinks
+- why people like them
+- any drama or complaints people have
+- one bratty final recommendation
+
+Keep it funny, bratty, and useful.
+"""
+            )
+
+            if len(answer) > 1800:
+                answer = answer[:1800]
+
+            await wait.edit(content=answer)
+            return
+
+        if question:
+
+            if await gemini_on_cooldown(message):
+                return
+
+            wait = await message.reply(
+                "pensando...",
+                mention_author=False
+            )
+
+            memories = await get_user_memories(message.author.id)
+            memory_text = "\n".join([f"- {m}" for m in memories]) if memories else "None"
+
+            cast_context = build_cast_context()
+
+            answer = await ask_gemini(
+    f"""
+Server regulars:
+{cast_context}
+
+User memories:
+{memory_text}
+
+Recent chat:
+{chat_context}
+
+Previous Fergie message being replied to:
+{reply_context}
+
+User asked:
+{question}
+
+If the user is replying to your previous message, use that previous message as context.
+"""
+)
+
+            if len(answer) > 1800:
+                answer = answer[:1800]
+
+            await wait.edit(
+                content=answer
+            )
+
+            return
+
+        await message.reply(
+            random.choice(BRATTY_LINES),
+            mention_author=False
+        )
+
+        return
+        
+            # Passive cast-aware replies
+    if (
+        message.author.id in FERGIE_CAST
+        and not message.mentions
+        and not content.strip().startswith("!")
+        and "http://" not in lower
+        and "https://" not in lower
+    ):
+        now = time.time()
+        last_reply = passive_cast_cooldowns.get(message.channel.id, 0)
+
+        if (
+            now - last_reply >= PASSIVE_CAST_COOLDOWN_SECONDS
+            and random.random() < PASSIVE_CAST_REPLY_CHANCE
+        ):
+            passive_reply = await ask_gemini_passive_cast_reply(message)
+
+            if passive_reply:
+                passive_cast_cooldowns[message.channel.id] = now
+
+                await message.reply(
+                    passive_reply,
+                    mention_author=False
+                )
+                return
+                
+    # Random chat sass (global)
+    if random.random() < REPLY_CHANCE:
+        choice = random.choice([random.choice(BRATTY_LINES),
+                                random.choice(FERAL_LINES),
+                                random.choice(REACTION_EMOTES)])
+        await message.reply(choice, mention_author=False)
+@bot.event
+async def on_reaction_add(reaction, user):
+    if user.bot:
+        return
+
+    if not bot.user:
+        return
+
+    if reaction.message.author.id != bot.user.id:
+        return
+
+    async for msg in reaction.message.channel.history(limit=50):
+        if msg.author.id == user.id:
+
+            custom_emoji = bot.get_emoji(1227392416617730078)
+
+            choices = ["🍑"]
+
+            if custom_emoji:
+                choices.append(custom_emoji)
+
+            emoji = random.choice(choices)
+
+            await msg.add_reaction(emoji)
+
+            return
+# ---- Reply watcher for FIT follow-up (20s window) ----
+@bot.listen("on_message")
+async def _fit_reply_watch(message: discord.Message):
+    if message.author.bot: return
+    if not message.reference or not message.reference.resolved: return
+    replied_to = message.reference.resolved
+    if replied_to.author.id != bot.user.id: return
+    expiry = getattr(bot, "_fit_waiting", {}).get(replied_to.id)
+    if not expiry: return
+    if _now() > expiry:
+        bot._fit_waiting.pop(replied_to.id, None)
+        return
+    if message.author.id == FIT_REPLY_TARGET_ID:
+        ch = message.channel
+        await ch.send(f"{FIT_FOLLOWUP_EMOTE} {FIT_FOLLOWUP_TEXT}")
+        bot._fit_waiting.pop(replied_to.id, None)
+
+# ================== Bread posts & schedules ==================
+@tasks.loop(hours=4)
+async def four_hour_post():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        gif = await fetch_bread_gif()
+        text = random.choice([
+            random.choice(BREAD_PUNS),
+            f"Fresh bread drop! 🥖\n{gif}" if gif else random.choice(BREAD_PUNS),
+            f"{random.choice(BREAD_PUNS)}\n{gif}" if gif else random.choice(BREAD_PUNS),
+        ])
+        await channel.send(text)
+
+@four_hour_post.before_loop
+async def _wait_four_hour_post():
+    await bot.wait_until_ready()
+    await asyncio.sleep(4 * 3600)
+
+@tasks.loop(hours=6)
+async def six_hour_emoji():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send(BREAD_EMOJI)
+
+@six_hour_emoji.before_loop
+async def _wait_six_hour_emoji():
+    await bot.wait_until_ready()
+    await asyncio.sleep(6 * 3600)
+
+@tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
+async def user1_twice_daily_fixed():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send(f"<@{USER1_ID}> callate!")
+
+@tasks.loop(time=(dtime(hour=11, tzinfo=timezone.utc), dtime(hour=23, tzinfo=timezone.utc)))
+async def user2_twice_daily_fixed():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        await channel.send(f"<@{USER2_ID}> when jacuzzi?")
+
+@tasks.loop(hours=8)
+async def user3_task():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel:
+        phrase = random.choice(USER3_LINES)
+        await channel.send(f"<@{USER1_ID}> {phrase}")
+
+@user3_task.before_loop
+async def _wait_user3_task():
+    await bot.wait_until_ready()
+    await asyncio.sleep(8 * 3600)
+
+@tasks.loop(hours=24)
+async def daily_scam_post():
+    channel = bot.get_channel(CHANNEL_ID)
+    if channel and random.random() < 0.7:
+        await channel.send("I NEED MONIES!!!🙄💅")
+
+@daily_scam_post.before_loop
+async def _wait_daily_scam_post():
+    await bot.wait_until_ready()
+    await asyncio.sleep(24 * 3600)
+
+
+# ---- Gym Reminder ----
+import random
+from datetime import datetime, time as dtime
+from zoneinfo import ZoneInfo
+from discord.ext import tasks
+
+GYM_CHANNEL_ID = 1272237309521170434  # replace with your channel ID
+
+GYM_EMOTES_1 = ["💪", "🏋️‍♂️", "🏋️‍♀️", "🏃‍♂️", "🏃‍♀️", "🤸‍♀️", "🚴‍♂️", "🔥", "💯", "🥇", "🧠", "🫀"]
+GYM_EMOTES_2 = ["🏋️‍♀️", "🏋️‍♂️", "🚴‍♀️", "🏃‍♂️", "🏃‍♀️", "🥵", "🔥", "⚡️", "💥", "💢", "🗣️", "📣"]
+
+def pick_emotes(pool, k=3):
+    k = min(k, len(pool))
+    return " ".join(random.sample(pool, k))
+
+@tasks.loop(time=[
+    dtime(hour=4, minute=30, tzinfo=ZoneInfo("America/Los_Angeles")),  # 4:30 AM PT
+    dtime(hour=5, minute=10, tzinfo=ZoneInfo("America/Los_Angeles")),  # 5:10 AM PT
+])
+async def daily_gym_reminder():
+    ch = bot.get_channel(GYM_CHANNEL_ID) or await bot.fetch_channel(GYM_CHANNEL_ID)
+    if not ch:
+        return
+
+    now_pt = datetime.now(ZoneInfo("America/Los_Angeles")).time()
+
+    if now_pt.hour == 4 and now_pt.minute == 30:
+        emotes = pick_emotes(GYM_EMOTES_1, k=3)
+        await ch.send(f"wake up gorditos it's time for gymmies!!! {emotes}")
+    elif now_pt.hour == 5 and now_pt.minute == 10:
+        emotes = pick_emotes(GYM_EMOTES_2, k=3)
+        await ch.send(f"ÁNDALE! don't be lazy! {emotes}")
+
+@daily_gym_reminder.before_loop
+async def _wait_ready_gym():
+    await bot.wait_until_ready()
+
+
+# ======== Daily auto allowance + inactivity penalties (8am PT) ========
+@tasks.loop(time=dtime(hour=8, tzinfo=ZoneInfo("America/Los_Angeles")))
+async def daily_auto_allowance():
+    channel = bot.get_channel(CHANNEL_ID)
+    if not channel: return
+    guild = channel.guild
+    if not guild: return
+
+    utc_now = _now()
+    inactive_cutoff = utc_now - INACTIVE_WINDOW_DAYS * 86400
+    changed = False
+
+    async with economy_lock:
+        for m in guild.members:
+            if m.bot: continue
+            u = _user(m.id)
+
+            # 1) Daily allowance
+            if economy["treasury"] > 0:
+                pay = min(CLAIM_AMOUNT, economy["treasury"])
+                new_bal = u["balance"] + pay
+                final_bal, skim = _cap_wallet(new_bal)
+                economy["treasury"] -= max(0, (pay - skim))
+                u["balance"] = final_bal
+                changed = True
+
+            # 2) Inactivity penalty (no roll/putasos in last N days)
+            last_active = u.get("last_active", 0.0)
+            if last_active == 0.0 or last_active < inactive_cutoff:
+                if u["balance"] > 0:
+                    taken = u["balance"] // 2
+                    if taken > 0:
+                        u["balance"] -= taken
+                        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + taken)
+                        changed = True
+                        try:
+                            await channel.send(f"{m.mention} {PHRASES['penalty']}\n{PENALTY_IMAGE}")
+                        except Exception:
+                            pass
+        if changed:
+            await _save_bank()
+
+# ================== Economy Commands ==================
+def _cooldown_left(last_ts: float, hours: int) -> tuple[int, int]:
+    remaining = int(hours * 3600 - (_now() - last_ts))
+    if remaining < 0: remaining = 0
+    hrs = remaining // 3600
+    mins = (remaining % 3600) // 60
+    return hrs, mins
+
+@bot.command(name="bank", help="Show remaining bread in the bank")
+async def bank(ctx):
+    async with economy_lock:
+        t = economy["treasury"]
+    await ctx.send(f"Bank vault: **{_fmt_bread(t)}** remaining.")
+
+@bot.command(name="balance", aliases=["bal","wallet"], help="See your bread balance (or someone else's)")
+async def balance(ctx, member: discord.Member | None = None):
+    target = member or ctx.author
+    async with economy_lock:
+        u = _user(target.id)
+    await ctx.send(f"{target.mention} has **{_fmt_bread(u['balance'])}** (cap {USER_WALLET_CAP} {BREAD_EMOJI}).")
+
+@bot.command(name="claim", help=f"Claim daily bread allowance manually ({CLAIM_AMOUNT} {BREAD_EMOJI}, 24h cd)")
+async def claim(ctx):
+    uid = ctx.author.id
+    async with economy_lock:
+        u = _user(uid)
+        if u["balance"] < CLAIM_REQUIREMENT:
+            await ctx.send(f"{ctx.author.mention} " + PHRASES["claim_gate"].format(need=_fmt_bread(CLAIM_REQUIREMENT))); return
+        hrs_left, mins_left = _cooldown_left(u["last_claim"], CLAIM_COOLDOWN_HOURS)
+        if hrs_left or mins_left:
+            await ctx.send(f"{ctx.author.mention} " + PHRASES["claim_cooldown"].format(hrs=hrs_left, mins=mins_left)); return
+        if economy["treasury"] <= 0:
+            await ctx.send(PHRASES["bank_empty"]); return
+
+        pay = min(CLAIM_AMOUNT, economy["treasury"])
+        new_bal = u["balance"] + pay
+        final_bal, skim = _cap_wallet(new_bal)
+
+        economy["treasury"] -= (pay - skim)
+        u["balance"] = final_bal
+        u["last_claim"] = _now()
+        vault = economy["treasury"]
+        await _save_bank()
+
+    msg = (f"{ctx.author.mention} {PHRASES['claim_success']} "
+           f"(paid {_fmt_bread(pay)}) → **new balance: {_fmt_bread(final_bal)}** · "
+           f"**bank: {_fmt_bread(vault)}**")
+    if skim: msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
+    await ctx.send(msg)
+
+@bot.command(name="gift", help="Gift bread: !gift @user 25")
+async def gift(ctx, member: discord.Member, amount: int):
+    if amount <= 0:
+        await ctx.send("positive numbers only, banker bae. 🙄"); return
+    if member.id == ctx.author.id:
+        await ctx.send("gifting yourself? be serious 😏"); return
+
+    today = _today_key()
+    async with economy_lock:
+        giver = _user(ctx.author.id)
+        recv  = _user(member.id)
+        if giver["last_gift_day"] != today:
+            giver["last_gift_day"] = today
+            giver["gifted_today"] = 0
+
+        if giver["gifted_today"] + amount > DAILY_GIFT_CAP:
+            left = max(0, DAILY_GIFT_CAP - giver["gifted_today"])
+            await ctx.send(PHRASES["gift_cap_left"].format(cap=_fmt_bread(DAILY_GIFT_CAP), left=_fmt_bread(left))); return
+        if giver["balance"] < amount:
+            await ctx.send(f"{ctx.author.mention} " + PHRASES["gift_insufficient"].format(bal=_fmt_bread(giver["balance"]))); return
+
+        net, tax = _apply_gift_tax(amount)
+        giver["balance"] -= amount
+        recv_after = recv["balance"] + net
+        recv_final, skim = _cap_wallet(recv_after)
+
+        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + tax + skim)
+        recv["balance"] = recv_final
+        giver["gifted_today"] += amount
+        await _save_bank()
+
+    parts = [PHRASES["gift_sent"].format(giver=ctx.author.mention, recv=member.mention, amount=_fmt_bread(net))]
+    if tax: parts.append(PHRASES["gift_tax"].format(tax=_fmt_bread(tax)))
+    if skim: parts.append(PHRASES["gift_skim"].format(skim=_fmt_bread(skim)))
+    await ctx.send(" ".join(parts))
+
+@bot.command(name="lb", help="Top 10 richest bread hoarders")
+async def lb(ctx):
+    async with economy_lock:
+        items = [(int(uid), data["balance"]) for uid, data in economy["users"].items()]
+    items.sort(key=lambda x: x[1], reverse=True)
+    top = items[:10]
+    if not top:
+        await ctx.send("no bread yet. go touch some dough."); return
+    lines = []
+    for rank, (uid, bal) in enumerate(top, 1):
+        user = ctx.guild.get_member(uid) if ctx.guild else None
+        name = user.display_name if user else f"User {uid}"
+        lines.append(f"{rank}. **{name}** — {_fmt_bread(bal)}")
+    await ctx.send("**Bread Leaderboard**\n" + "\n".join(lines))
+
+@bot.command(name="richlist", help="Alias of !lb")
+async def richlist(ctx):
+    await lb(ctx)
+
+def _resolve_roll_amount(u_balance: int, arg: str | int) -> int:
+    if isinstance(arg, int): return max(0, arg)
+    s = str(arg).lower()
+    if s == "all": return u_balance
+    if s == "half": return u_balance // 2
+    try: return max(0, int(s))
+    except Exception: return 0
+
+@bot.command(name="roll", help="Bet vs the bank: !roll 100 | !roll all | !roll half (jackpot on ALL)")
+async def roll(ctx, amount: str):
+    if not _is_gamble_channel(ctx.channel.id):
+        await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>."); return
+
+    async with economy_lock:
+        u = _user(ctx.author.id)
+
+        # Daily loss guard reset
+        today = _today_key()
+        if u.get("roll_day") != today:
+            u["roll_day"] = today
+            u["roll_loss_today"] = 0
+
+        # Cooldown
+        since = _now() - float(u.get("last_roll", 0.0))
+        cd_left = int(ROLL_COOLDOWN_SEC - since)
+        if cd_left > 0:
+            await ctx.send(f"{ctx.author.mention} slow down, high roller — **{cd_left}s** cooldown."); return
+
+        # Parse stake
+        bet = _resolve_roll_amount(u["balance"], amount)
+        if bet <= 0:
+            await ctx.send("try a positive bet, casino clown. 🙄"); return
+        if bet > u["balance"]:
+            await ctx.send(f"{ctx.author.mention} you only have **{_fmt_bread(u['balance'])}**."); return
+
+        # Max bet: treasury %, treasury itself, user balance, and daily loss cap room
+        max_bet = _dynamic_max_bet(economy["treasury"], u["balance"])
+        if DAILY_ROLL_LOSS_CAP > 0:
+            loss_room = max(1, DAILY_ROLL_LOSS_CAP - int(u.get("roll_loss_today", 0)))
+            max_bet = min(max_bet, loss_room)
+        if bet > max_bet:
+            await ctx.send(PHRASES["gamble_max"].format(maxb=_fmt_bread(max_bet))); return
+
+        # Win probability (logic + small vault-health nudge)
+        win_prob = _est_win_prob(bet)
+
+        # Jackpot
+        jackpot_hit = False; jackpot_mult = 1
+        if isinstance(amount, str) and amount.lower() == "all":
+            r = _rand()
+            if r < 0.005: jackpot_hit = True; jackpot_mult = 15
+            elif r < 0.025: jackpot_hit = True; jackpot_mult = 3
+
+        if jackpot_hit:
+            payout = bet * (jackpot_mult - 1)
+            available_from_bank = min(economy["treasury"], payout)
+            new_bal = u["balance"] + available_from_bank
+            final_bal, skim = _cap_wallet(new_bal)
+            paid_from_bank = (final_bal - u["balance"]) + skim
+            economy["treasury"] -= max(0, paid_from_bank - skim)
+            u["balance"] = final_bal
+
+            # Progressive bonus
+            pot = int(economy.get("jackpot_pool", 0))
+            bonus_line = ""
+            if pot >= JP_MIN_POOL:
+                bonus = min(pot, bet * 5)
+                if bonus > 0:
+                    economy["jackpot_pool"] = pot - bonus
+                    new2 = u["balance"] + bonus
+                    final2, skim2 = _cap_wallet(new2)
+                    bonus_paid = final2 - u["balance"]
+                    u["balance"] = final2
+                    economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + skim2)
+                    bonus_line = f"\n🎰 Progressive bonus **+{_fmt_bread(bonus_paid)}** (pot now **{_fmt_bread(economy['jackpot_pool'])}**)"
+
+            _mark_active(ctx.author.id)
+            economy["stats"]["rolls"] += 1
+            economy["stats"]["payouts"] += available_from_bank
+            u["last_roll"] = _now()
+            await _save_bank()
+            await ctx.send(
+                f"💥 JACKPOT x{jackpot_mult}! {ctx.author.mention} just exploded the oven for **{_fmt_bread(min(payout, available_from_bank))}**!"
+                f"\nnew: **{_fmt_bread(u['balance'])}**{bonus_line}\n{JACKPOT_IMAGE}"
+            )
+            return
+
+        # Normal outcome
+        win = (_rand() < win_prob)
+        if win:
+            new_bal = u["balance"] + bet
+            final_bal, skim = _cap_wallet(new_bal)
+            economy["treasury"] -= (bet - skim)
+            u["balance"] = final_bal
+            text = PHRASES["gamble_win"].format(amount=_fmt_bread(bet), bal=_fmt_bread(final_bal))
+            if skim: text += f" (cap skim {_fmt_bread(skim)} back to bank)"
+            economy["stats"]["roll_wins"] += 1
+            economy["stats"]["payouts"] += (bet - skim)
+        else:
+            u["balance"] -= bet
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + bet)
+            # Progressive pot gets a slice of losses
+            jp_add = int(bet * JP_PROGRESSIVE_PCT)
+            if jp_add > 0:
+                move = min(jp_add, economy["treasury"])
+                economy["treasury"] -= move
+                economy["jackpot_pool"] = economy.get("jackpot_pool", JP_MIN_POOL) + move
+            u["roll_loss_today"] = int(u.get("roll_loss_today", 0)) + bet
+            text = PHRASES["gamble_lose"].format(amount=_fmt_bread(bet), bal=_fmt_bread(u["balance"]))
+            economy["stats"]["roll_losses"] += 1
+            economy["stats"]["house_take"] += bet
+
+        _mark_active(ctx.author.id)
+        economy["stats"]["rolls"] += 1
+        u["last_roll"] = _now()
+        await _save_bank()
+    await ctx.send(f"{ctx.author.mention} {text}")
+
+@bot.command(name="putasos", help="Try and rob someone kombat klubz style")
+async def putasos(ctx, member: discord.Member):
+    if not _is_gamble_channel(ctx.channel.id):
+        await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>."); return
+    if member.id == ctx.author.id:
+        await ctx.send("stealing from yourself? iconic, but no."); return
+    if member.bot:
+        await ctx.send("you can’t rob bots. they have no pockets."); return
+
+    SUCCESS_CHANCE = 0.15
+    STEAL_PCT_MIN, STEAL_PCT_MAX = 0.10, 0.25
+    FAIL_LOSE_PCT = 0.12
+
+    async with economy_lock:
+        thief = _user(ctx.author.id)
+        victim = _user(member.id)
+
+        # Cooldown for robber
+        since = _now() - float(thief.get("last_putasos", 0.0))
+        cd_left = int(PUTASOS_COOLDOWN_SEC - since)
+        if cd_left > 0:
+            await ctx.send(f"{ctx.author.mention} take a breath — **{cd_left}s** cooldown on robberies."); return
+
+        if thief["balance"] <= 0:
+            await ctx.send("you’re broke. go touch some dough first."); return
+        if victim["balance"] <= 0:
+            await ctx.send("they’re broke. pick a richer target."); return
+
+        if _rand() < SUCCESS_CHANCE:
+            steal_pct = random.uniform(STEAL_PCT_MIN, STEAL_PCT_MAX)
+            take = max(1, int(victim["balance"] * steal_pct))
+            victim["balance"] -= take
+            new_bal = thief["balance"] + take
+            final_bal, skim = _cap_wallet(new_bal)
+            thief["balance"] = final_bal
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + skim)
+            _mark_active(ctx.author.id)
+            msg = f"successful heist 😈 you stole **{_fmt_bread(take)}** from {member.mention} → new: **{_fmt_bread(thief['balance'])}**"
+            if skim: msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
+        else:
+            loss = max(1, int(thief["balance"] * FAIL_LOSE_PCT))
+            thief["balance"] -= loss
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + loss)
+            _mark_active(ctx.author.id)
+            msg = f"got caught 💀 lost **{_fmt_bread(loss)}** to the bank. new: **{_fmt_bread(thief['balance'])}**"
+
+        thief["last_putasos"] = _now()
+        await _save_bank()
+    await ctx.send(f"{ctx.author.mention} {msg}")
+
+# ================== Extra Games ==================
+# ---- PvP Dice Duel ----
+@bot.command(name="duel", help="Challenge someone to a dice duel: !duel @user 500 (target must !accept or !decline)")
+async def duel(ctx, member: discord.Member = None, amount: int = None):
+    if not _is_gamble_channel(ctx.channel.id):
+        await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>."); return
+    if not member or amount is None or amount <= 0:
+        await ctx.send("Usage: `!duel @user amount`"); return
+    if member.id == ctx.author.id:
+        await ctx.send("dueling yourself? iconic… but no."); return
+    if member.bot:
+        await ctx.send("you can’t duel bots. they roll 100 every time. 🙄"); return
+
+    async with economy_lock:
+        ch_id = ctx.channel.id
+        if ch_id in bot._duels:
+            d = bot._duels[ch_id]
+            # auto-expire stale duel
+            if _now() - d["created_ts"] > DUEL_EXPIRE_SEC:
+                bot._duels.pop(ch_id, None)
+            else:
+                await ctx.send("There’s already a pending duel in this channel. Use `!accept` or `!decline` first."); return
+
+        a = _user(ctx.author.id)
+        t = _user(member.id)
+
+        # cooldown check on challenger (reuse last_roll as general casino guard)
+        since = _now() - float(a.get("last_roll", 0.0))
+        if since < max(ROLL_COOLDOWN_SEC, DUEL_COOLDOWN_SEC):
+            await ctx.send(f"{ctx.author.mention} slow down — try again in a few seconds."); return
+
+        if not _can_afford(a, amount):
+            await ctx.send(f"{ctx.author.mention} you only have **{_fmt_bread(a['balance'])}**."); return
+        if not _can_afford(t, amount):
+            await ctx.send(f"{member.mention} doesn’t have enough to cover **{_fmt_bread(amount)}**."); return
+
+        bot._duels[ch_id] = {
+            "challenger_id": ctx.author.id,
+            "target_id": member.id,
+            "amount": int(amount),
+            "created_ts": _now()
+        }
+
+    await ctx.send(f"🎲 {ctx.author.mention} challenges {member.mention} to a duel for **{_fmt_bread(amount)}** each! "
+                   f"{member.mention} type `!accept` or `!decline` (expires in {DUEL_EXPIRE_SEC}s).")
+
+@bot.command(name="accept", help="Accept the current channel duel")
+async def accept(ctx):
+    ch_id = ctx.channel.id
+    async with economy_lock:
+        d = bot._duels.get(ch_id)
+        if not d:
+            await ctx.send("No pending duel here."); return
+        if _now() - d["created_ts"] > DUEL_EXPIRE_SEC:
+            bot._duels.pop(ch_id, None)
+            await ctx.send("That duel expired."); return
+        if ctx.author.id != d["target_id"]:
+            await ctx.send("Only the challenged user can accept."); return
+
+        c = _user(d["challenger_id"])
+        t = _user(d["target_id"])
+        amt = d["amount"]
+
+        if not _can_afford(c, amt) or not _can_afford(t, amt):
+            bot._duels.pop(ch_id, None)
+            await ctx.send("One of you can’t cover the stake anymore. Duel canceled."); return
+
+        # deduct stakes (escrow into bank)
+        c["balance"] -= amt
+        t["balance"] -= amt
+        pot = amt * 2
+
+        rake = int(pot * DUEL_RAKE_PCT) if DUEL_RAKE_PCT > 0 else 0
+        pot_after_rake = pot - rake
+        if rake > 0:
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + rake)
+
+        # roll 1-100 each
+        roll_c = random.randint(1, 100)
+        roll_t = random.randint(1, 100)
+        rerolls = 0
+        while roll_c == roll_t and rerolls < 5:
+            roll_c = random.randint(1, 100)
+            roll_t = random.randint(1, 100)
+            rerolls += 1
+
+        if roll_c > roll_t:
+            winner_id = d["challenger_id"]
+        else:
+            winner_id = d["target_id"]
+
+        w = _user(winner_id)
+        new_bal = w["balance"] + pot_after_rake
+        final_bal, skim = _cap_wallet(new_bal)
+        w["balance"] = final_bal
+        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + skim)
+
+        bot._duels.pop(ch_id, None)
+        await _save_bank()
+
+    await ctx.send(
+        f"🎲 Duel result!\n"
+        f"<@{d['challenger_id']}> rolled **{roll_c}** · <@{d['target_id']}> rolled **{roll_t}**\n"
+        f"Winner: <@{winner_id}> — took **{_fmt_bread(pot_after_rake)}**"
+        + (f" (rake to bank **{_fmt_bread(rake)}**)" if DUEL_RAKE_PCT > 0 else "")
+        + (f" (cap skim **{_fmt_bread(skim)}** back to bank)" if skim else "")
+    )
+
+@bot.command(name="decline", help="Decline the current channel duel")
+async def decline(ctx):
+    ch_id = ctx.channel.id
+    async with economy_lock:
+        d = bot._duels.get(ch_id)
+        if not d:
+            await ctx.send("No pending duel here."); return
+        if ctx.author.id not in (d["target_id"], d["challenger_id"]):
+            await ctx.send("Only the challenger or the challenged user can decline."); return
+        bot._duels.pop(ch_id, None)
+    await ctx.send("Duel canceled. Cowardice is a strategy 😏")
+
+# ---- Slots ----
+def _slots_spin():
+    return (random.choice(SLOTS_REELS[0]),
+            random.choice(SLOTS_REELS[1]),
+            random.choice(SLOTS_REELS[2]))
+
+def _slots_payout(multis: dict, r):
+    s = "".join(r)
+    if r[0] == r[1] == r[2]:
+        key = s
+        if key in multis:
+            return multis[key]
+        return 6.0
+    if r[0] == r[1]:
+        return multis.get("PAIR_ANY", 1.5)
+    return 0.0
+
+@bot.command(name="slots", help="Spin the slots: !slots 100  — 3-of-a-kind or pairs pay out")
+async def slots(ctx, amount: int = None):
+    if not _is_gamble_channel(ctx.channel.id):
+        await ctx.send(f"Casino floor is only open in <#{GAMBLE_CHANNEL_ID}>."); return
+    if amount is None or amount <= 0:
+        await ctx.send("Usage: `!slots amount`"); return
+
+    async with economy_lock:
+        u = _user(ctx.author.id)
+
+        since = _now() - float(u.get("last_roll", 0.0))
+        if since < SLOTS_COOLDOWN_SEC:
+            await ctx.send(f"{ctx.author.mention} hold up — {int(SLOTS_COOLDOWN_SEC - since)}s cooldown."); return
+
+        max_bet = _dynamic_max_bet(economy["treasury"], u["balance"])
+        if amount > max_bet:
+            await ctx.send(PHRASES["gamble_max"].format(maxb=_fmt_bread(max_bet))); return
+        if not _can_afford(u, amount):
+            await ctx.send(f"{ctx.author.mention} you only have **{_fmt_bread(u['balance'])}**."); return
+
+        u["balance"] -= amount
+        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amount)
+
+        reels = _slots_spin()
+        mult = _slots_payout(SLOTS_PAYTABLE, reels)
+        gross_win = int(amount * mult) if mult > 0 else 0
+
+        skim_line = ""
+        if gross_win > 0:
+            pay = min(economy["treasury"], gross_win)
+            new_bal = u["balance"] + pay
+            final_bal, skim = _cap_wallet(new_bal)
+            u["balance"] = final_bal
+            economy["treasury"] -= max(0, pay - skim)
+            if skim:
+                skim_line = f" (cap skim **{_fmt_bread(skim)}** back to bank)"
+        else:
+            if SLOTS_JP_CUT > 0:
+                add = int(amount * SLOTS_JP_CUT)
+                move = min(add, economy["treasury"])
+                economy["treasury"] -= move
+                economy["jackpot_pool"] = economy.get("jackpot_pool", JP_MIN_POOL) + move
+
+        u["last_roll"] = _now()
+        await _save_bank()
+
+    sym = " ".join(reels)
+    if gross_win > 0:
+        await ctx.send(f"🎰 {sym} → You win **{_fmt_bread(gross_win)}**!{skim_line}  new: **{_fmt_bread(u['balance'])}**")
+    else:
+        await ctx.send(f"🎰 {sym} → no luck! new: **{_fmt_bread(u['balance'])}**  "
+                       f"({'+ progressive pot' if SLOTS_JP_CUT>0 else 'better luck next time'})")
+
+# ---- Raffle (start/join/draw with auto-draw watcher) ----
+@bot.command(name="raffle", help="Start or join a server raffle: !raffle start 200 | !raffle join | !raffle draw")
+async def raffle(ctx, action: str = None, amount: int = None):
+    gid = ctx.guild.id
+    now = _now()
+
+    if action is None:
+        await ctx.send("Usage: `!raffle start <amount>` | `!raffle join` | `!raffle draw`")
+        return
+
+    if action.lower() == "start":
+        if not amount or amount <= 0:
+            await ctx.send("Usage: `!raffle start <entry_amount>`"); return
+
+        async with economy_lock:
+            if gid in bot._raffles:
+                await ctx.send("A raffle is already running. Use `!raffle join` or wait for it to end."); return
+            u = _user(ctx.author.id)
+            if not _can_afford(u, amount):
+                await ctx.send(f"{ctx.author.mention} you only have **{_fmt_bread(u['balance'])}**."); return
+
+            u["balance"] -= amount
+            pot = amount
+            bot._raffles[gid] = {
+                "channel_id": ctx.channel.id,
+                "amount": amount,
+                "pot": pot,
+                "entrants": {ctx.author.id},
+                "host_id": ctx.author.id,
+                "end_ts": now + RAFFLE_JOIN_DEADLINE_SEC
+            }
+            await _save_bank()
+
+        await ctx.send(f"🎟️ {ctx.author.mention} started a raffle! Entry fee: **{_fmt_bread(amount)}**. "
+                       f"Type `!raffle join` to enter! Drawing in {RAFFLE_JOIN_DEADLINE_SEC}s.")
+
+    elif action.lower() == "join":
+        async with economy_lock:
+            r = bot._raffles.get(gid)
+            if not r:
+                await ctx.send("No active raffle to join."); return
+            if now > r["end_ts"]:
+                await ctx.send("Raffle entry period is over. Wait for the draw."); return
+            if ctx.author.id in r["entrants"]:
+                await ctx.send(f"{ctx.author.mention} you’re already entered."); return
+
+            u = _user(ctx.author.id)
+            if not _can_afford(u, r["amount"]):
+                await ctx.send(f"{ctx.author.mention} you don’t have **{_fmt_bread(r['amount'])}**."); return
+
+            u["balance"] -= r["amount"]
+            r["pot"] += r["amount"]
+            r["entrants"].add(ctx.author.id)
+            await _save_bank()
+
+        await ctx.send(f"{ctx.author.mention} joined the raffle! Pot is now **{_fmt_bread(r['pot'])}** with {len(r['entrants'])} entrants.")
+
+    elif action.lower() == "draw":
+        async with economy_lock:
+            r = bot._raffles.get(gid)
+            if not r:
+                await ctx.send("No active raffle."); return
+            if ctx.author.id != r["host_id"] and not ctx.author.guild_permissions.manage_guild:
+                await ctx.send("Only the raffle host or a mod can draw."); return
+            if len(r["entrants"]) < 2:
+                await ctx.send("Not enough entrants to draw."); return
+
+            winner_id = random.choice(list(r["entrants"]))
+            rake = int(r["pot"] * RAFFLE_RAKE_PCT) if RAFFLE_RAKE_PCT > 0 else 0
+            prize = r["pot"] - rake
+            if rake > 0:
+                economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + rake)
+
+            w = _user(winner_id)
+            new_bal = w["balance"] + prize
+            final_bal, skim = _cap_wallet(new_bal)
+            w["balance"] = final_bal
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + skim)
+
+            bot._raffles.pop(gid, None)
+            await _save_bank()
+
+        await ctx.send(f"🎉 The raffle is over! Winner: <@{winner_id}> — prize **{_fmt_bread(prize)}** "
+                       + (f"(rake to bank **{_fmt_bread(rake)}**)" if rake else "")
+                       + (f"(cap skim **{_fmt_bread(skim)}** back to bank)" if skim else ""))
+
+    else:
+        await ctx.send("Invalid action. Use `start`, `join`, or `draw`.")
+
+@tasks.loop(seconds=RAFFLE_WATCH_INTERVAL_SEC)
+async def raffle_watcher():
+    """
+    Every few seconds:
+      - If a raffle reached its deadline:
+         * If entrants >= RAFFLE_MIN_ENTRANTS → auto-draw and pay winner
+         * Else → auto-cancel and refund all entries
+    """
+    now = _now()
+    to_draw: List[Tuple[int, dict]] = []   # (guild_id, raffle)
+    to_cancel: List[Tuple[int, dict]] = [] # (guild_id, raffle)
+
+    async with economy_lock:
+        for gid, r in list(getattr(bot, "_raffles", {}).items()):
+            if now >= r.get("end_ts", 0):
+                if len(r.get("entrants", [])) >= RAFFLE_MIN_ENTRANTS:
+                    to_draw.append((gid, r))
+                else:
+                    to_cancel.append((gid, r))
+
+        announcements = []
+
+        for gid, r in to_draw:
+            winner_id = random.choice(list(r["entrants"]))
+            rake = int(r["pot"] * RAFFLE_RAKE_PCT) if RAFFLE_RAKE_PCT > 0 else 0
+            prize = r["pot"] - rake
+            if rake > 0:
+                economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + rake)
+
+            w = _user(winner_id)
+            new_bal = w["balance"] + prize
+            final_bal, skim = _cap_wallet(new_bal)
+            w["balance"] = final_bal
+            economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + skim)
+
+            bot._raffles.pop(gid, None)
+
+            announcements.append((
+                r["channel_id"],
+                f"🎉 **Raffle auto-draw!** Winner: <@{winner_id}> — prize **{_fmt_bread(prize)}** "
+                + (f"(rake to bank **{_fmt_bread(rake)}**)" if rake else "")
+                + (f" (cap skim **{_fmt_bread(skim)}** back to bank)" if skim else "")
+            ))
+
+        for gid, r in to_cancel:
+            refund_each = int(r["amount"])
+            skim_total = 0
+            for uid in list(r["entrants"]):
+                u = _user(uid)
+                new_bal = u["balance"] + refund_each
+                final_bal, skim = _cap_wallet(new_bal)
+                u["balance"] = final_bal
+                skim_total += skim
+            if skim_total:
+                economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + skim_total)
+
+            bot._raffles.pop(gid, None)
+            announcements.append((
+                r["channel_id"],
+                "⏰ Raffle expired (not enough entrants). All entries have been **refunded**."
+                + (f" (cap skim total **{_fmt_bread(skim_total)}** back to bank)" if skim_total else "")
+            ))
+
+        if to_draw or to_cancel:
+            await _save_bank()
+
+    for ch_id, text in announcements:
+        ch = bot.get_channel(ch_id)
+        if ch:
+            try:
+                await ch.send(text)
+            except Exception:
+                pass
+
+@raffle_watcher.before_loop
+async def _wait_raffle_ready():
+    await bot.wait_until_ready()
+
+# ================== QoL Casino Commands ==================
+@bot.command(name="odds", help="Show your current max bet and estimated win chance for that bet")
+async def odds(ctx, bet: int | None = None):
+    async with economy_lock:
+        u = _user(ctx.author.id)
+        max_b = _dynamic_max_bet(economy["treasury"], u["balance"])
+        if DAILY_ROLL_LOSS_CAP > 0:
+            loss_room = max(1, DAILY_ROLL_LOSS_CAP - int(u.get("roll_loss_today", 0)))
+            max_b = min(max_b, loss_room)
+        if not bet or bet <= 0: bet = max_b
+        p = _est_win_prob(bet)
+    await ctx.send(f"Max bet right now: **{_fmt_bread(max_b)}** · Estimated win chance for {bet} is **{p*100:.1f}%**")
+
+@bot.command(name="jackpot", help="Show the progressive jackpot pot")
+async def jackpot(ctx):
+    async with economy_lock:
+        pot = int(economy.get("jackpot_pool", 0))
+    await ctx.send(f"🎰 Progressive pot: **{_fmt_bread(pot)}**")
+
+# ================== Admin Commands ==================
+from discord.ext import commands as _admin
+
+AIR_DROP_ADMIN_ID = 939225086341296209
+
+@bot.command(name="seed", help="ADMIN: Seed bread to the bank or a user. Usage: !seed @user 500  |  !seed bank 2000")
+@_admin.has_permissions(manage_guild=True)
+async def seed(ctx, target: str = None, amount: int = None):
+    if target is None or amount is None or amount <= 0:
+        await ctx.send("Usage: `!seed @user 500` or `!seed bank 2000`"); return
+
+    if target.lower() == "bank":
+        async with economy_lock:
+            before_treasury = economy["treasury"]
+            bank_room = max(0, TREASURY_MAX - economy["treasury"])
+            mint_room = _remaining_mint_room()
+            allow = min(amount, bank_room, mint_room)
+            if allow <= 0:
+                await ctx.send(f"❌ Cannot add to bank — global cap reached ({TOTAL_MAX_CURRENCY:,}).")
+                return
+            economy["treasury"] += allow
+            added = economy["treasury"] - before_treasury
+            await _save_bank()
+        await ctx.send(PHRASES["seed_bank"].format(added=_fmt_bread(added), vault=_fmt_bread(economy['treasury'])))
+        return
+
+    member = ctx.message.mentions[0] if ctx.message.mentions else None
+    if not member:
+        try:
+            member = await ctx.guild.fetch_member(int(target))
+        except Exception:
+            member = None
+    if not member:
+        await ctx.send("I couldn't find that user. Mention them or use their ID."); return
+
+    async with economy_lock:
+        if economy["treasury"] <= 0:
+            await ctx.send(PHRASES["no_funds"]); return
+        give = min(amount, economy["treasury"])
+        u = _user(member.id)
+        new_bal = u["balance"] + give
+        final_bal, skim = _cap_wallet(new_bal)
+        economy["treasury"] -= (give - skim)
+        u["balance"] = final_bal
+        await _save_bank()
+
+    msg = PHRASES["seed_user"].format(user=member.mention, give=_fmt_bread(give), bal=_fmt_bread(final_bal))
+    if skim: msg += f" (cap skim {_fmt_bread(skim)} back to bank)"
+    await ctx.send(msg)
+
+@seed.error
+async def seed_error(ctx, error):
+    if isinstance(error, _admin.MissingPermissions):
+        await ctx.send("You need **Manage Server** to use this, babe. 💅")
+    else:
+        await ctx.send("Seed failed. Usage: `!seed @user 500` or `!seed bank 2000`")
+
+@bot.command(name="take", help="ADMIN: Take bread from a user into the bank. Usage: !take @user 100")
+@_admin.has_permissions(manage_guild=True)
+async def take(ctx, target: str = None, amount: int = None):
+    if target is None or amount is None or amount <= 0:
+        await ctx.send("Usage: `!take @user 100`"); return
+
+    # Removed '!take bank' burn path — burning disabled.
+    member = ctx.message.mentions[0] if ctx.message.mentions else None
+    if not member:
+        try:
+            member = await ctx.guild.fetch_member(int(target))
+        except Exception:
+            member = None
+    if not member:
+        await ctx.send("I couldn't find that user. Mention them or use their ID."); return
+
+    async with economy_lock:
+        u = _user(member.id)
+        amt = min(amount, u["balance"])
+        u["balance"] -= amt
+        economy["treasury"] = min(TREASURY_MAX, economy["treasury"] + amt)
+        await _save_bank()
+    await ctx.send(PHRASES["take_user"].format(amt=_fmt_bread(amt), user=member.mention, bal=_fmt_bread(u['balance'])))
+
+@take.error
+async def take_error(ctx, error):
+    if isinstance(error, _admin.MissingPermissions):
+        await ctx.send("You need **Manage Server** to use this, babe. 💅")
+    else:
+        await ctx.send("Take failed. Usage: `!take @user 100`")
+
+@bot.command(name="setbal", help="ADMIN: Set a user's exact balance. Usage: !setbal @user 5000")
+@_admin.has_permissions(manage_guild=True)
+async def setbal(ctx, member: discord.Member = None, amount: int = None):
+    if member is None or amount is None or amount < 0:
+        await ctx.send("Usage: `!setbal @user 5000`"); return
+
+    async with economy_lock:
+        u = _user(member.id)
+        amount = min(amount, USER_WALLET_CAP)
+        delta = amount - u["balance"]
+        if delta > 0:
+            take_amt = min(delta, economy["treasury"])
+            u["balance"] += take_amt
+            delta_applied = take_amt
+            economy["treasury"] -= take_amt
+        else:
+            give_back = min(-delta, TREASURY_MAX - economy["treasury"])
+            u["balance"] -= give_back
+            delta_applied = -give_back
+            economy["treasury"] += give_back
+        await _save_bank()
+
+    await ctx.send(PHRASES["setbal_user"].format(
+        user=member.mention, bal=_fmt_bread(u["balance"]),
+        delta=_fmt_bread(delta_applied), vault=_fmt_bread(economy["treasury"])
+    ))
+
+# ================== DB Debug Commands (admin) ==================
+@bot.command(name="dbstatus", help="ADMIN: Show DB status + economy row info")
+@_admin.has_permissions(manage_guild=True)
+async def dbstatus(ctx):
+    if not db_pool:
+        await ctx.send("DB: not connected ❌"); return
+    async with db_pool.acquire() as con:
+        await con.execute("SET search_path TO public")
+        row = await con.fetchrow("SELECT value FROM public.kv WHERE key='economy'")
+        if not row:
+            await ctx.send("DB: connected ✅ · economy row: (missing)"); return
+        val = row["value"]
+        if isinstance(val, str):
+            try: val = json.loads(val)
+            except Exception: val = {}
+        users = val.get("users", {}) if isinstance(val, dict) else {}
+        treasury = val.get("treasury") if isinstance(val, dict) else None
+        await ctx.send(f"DB: connected ✅ · economy row: present · users={len(users)} · treasury={treasury}")
+
+@bot.command(name="dbreload", help="ADMIN: Force reload economy from DB")
+@_admin.has_permissions(manage_guild=True)
+async def dbreload(ctx):
+    await _load_bank()
+    await ctx.send("Reloaded economy from DB.")
+
+@bot.command(name="dbdump", help="ADMIN: Show first 600 chars of economy JSON")
+@_admin.has_permissions(manage_guild=True)
+async def dbdump(ctx):
+    if not db_pool:
+        await ctx.send("DB: not connected ❌"); return
+    async with db_pool.acquire() as con:
+        row = await con.fetchrow("SELECT value FROM public.kv WHERE key='economy'")
+        if not row:
+            await ctx.send("No 'economy' row in DB."); return
+        val = row["value"]
+        if isinstance(val, str):
+            try: val = json.loads(val)
+            except Exception: pass
+        txt = json.dumps(val)[:600] if isinstance(val, (dict, list)) else str(val)[:600]
+        await ctx.send(f"```json\n{txt}\n...```")
+
+# ================== Fun / Media Commands ==================
+@bot.command(name="cafe", help="owl y lark")
+async def cafe(ctx, *, term: str = "coffee"):
+    query = term if term else "coffee"
+    async with ctx.channel.typing():
+        gif = await fetch_gif(query)
+    await ctx.send(gif if gif else "☕")
+
+@bot.command(name="scam", help="Show current BTC & ETH prices (USD, bratty style)")
+async def scam(ctx):
+    async with ctx.channel.typing():
+        url = ("https://api.coingecko.com/api/v3/simple/price"
+           "?ids=bitcoin,ethereum&vs_currencies=usd&include_24hr_change=true")
+        try:
+            async with aiohttp.ClientSession() as s:
+                async with s.get(url, timeout=15) as r:
+                    data = await r.json() if r.status == 200 else None
+        except Exception:
+            data = None
+    if not data or "bitcoin" not in data or "ethereum" not in data:
+        await ctx.send("Ugh 🙄 can't even get the prices rn... this is SO scammy 💅"); return
+    def _fmt_price(p: float) -> str: return f"${p:,.2f}"
+    def _fmt_change(ch: float) -> str:
+        return f"{ch:+.2f}%"
+    btc = data["bitcoin"]["usd"]; btc_ch = data["bitcoin"].get("usd_24h_change", 0.0)
+    eth = data["ethereum"]["usd"]; eth_ch = data["ethereum"].get("usd_24h_change", 0.0)
+    msg = (
+        f"✨ **SCAM ALERT** ✨\n"
+        f"BTC is at {_fmt_price(btc)} ({_fmt_change(btc_ch)}) — like… are you KIDDING me?? 😤\n"
+        f"ETH is {_fmt_price(eth)} ({_fmt_change(eth_ch)}) — ew… who’s buying this rn??? 🙄\n"
+        f"Send me money instead 💗 $fergielicious"
+    )
+    await ctx.send(msg)
+
+@bot.command(name="bbl", help="see fergies culo")
+async def bbl(ctx):
+    gif_url = "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExM2dmMnE4Z2xjdmMwZnN4bmplamMxazFlZTF0Z255MndxZGpqNGdkNyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/PMwewC6fjVkje/giphy.gif"
+    await ctx.send(gif_url)
+
+@bot.command(name="hawaii", help="see vivvy's vacation pix")
+async def hawaii(ctx):
+    await ctx.send(random.choice(HAWAII_IMAGES))
+
+# ---- Kewchie commands ----
+@bot.command(name="kewchie", help="Post a random Kali Uchis song from the playlist (in the kewchie channel)")
+async def kewchie(ctx):
+    if ctx.channel.id != KEWCHIE_CHANNEL_ID:
+        await ctx.send(f"Use this in <#{KEWCHIE_CHANNEL_ID}>"); return
+    links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
+    if not links:
+        await ctx.send("Playlist isn't available right now 😭"); return
+    await ctx.send(random.choice(links))
+
+@bot.command(name="kewchie-debug", help="Debug Spotify playlist setup")
+async def kewchie_debug(ctx):
+    cid_set = bool(SPOTIFY_CLIENT_ID); sec_set = bool(SPOTIFY_CLIENT_SECRET)
+    pid_set = bool(SPOTIFY_PLAYLIST_ID)
+    ch_ok = (bot.get_channel(KEWCHIE_CHANNEL_ID) is not None)
+    token = await _get_spotify_token()
+    token_ok = bool(token)
+    tracks = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID) if token_ok else []
+    msg = (
+        f"CID set: {cid_set}\n"
+        f"SECRET set: {sec_set}\n"
+        f"PLAYLIST set: {pid_set}\n"
+        f"Token: {'ok' if token_ok else 'failed'}\n"
+        f"Tracks fetched: {len(tracks)}\n"
+        f"Channel OK: {ch_ok} (<#{KEWCHIE_CHANNEL_ID}>)"
+    )
+    await ctx.send(f"```{msg}```")
+
+# ---- FIT command & auto daily ----
+@bot.command(name="fit", help="fergie's fits")
+async def fit(ctx):
+    if ctx.channel.id != FIT_CHANNEL_ID:
+        await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>"); return
+    url = random.choice(FIT_IMAGE_URLS)
+    msg = await ctx.send(f"OMFG look at this one girlie!!! we neeeeeeeeed! 💗\n{url}")
+    bot._fit_waiting[msg.id] = _now() + 20
+
+@tasks.loop(hours=24)
+async def fit_auto_daily():
+    ch = bot.get_channel(FIT_CHANNEL_ID)
+    if not ch: return
+    url = random.choice(FIT_IMAGE_URLS)
+    msg = await ch.send(f"OMFG look at this one girlie!!! we neeeeeeeeed! 💗\n{url}")
+    bot._fit_waiting[msg.id] = _now() + 20
+
+@fit_auto_daily.before_loop
+async def _fit_wait_ready():
+    await bot.wait_until_ready()
+    await asyncio.sleep(86400)
+
+# ================== Custom Help: !halp ==================
+from discord import Embed, Colour
+
+def _mention_channel(ch_id: int) -> str:
+    return f"<#{ch_id}>" if ch_id else "`(not set)`"
+
+@bot.command(name="halp", help="Shows an embedded help menu")
+async def halp(ctx, *, command: str | None = None):
+    if command:
+        cmd = bot.get_command(command)
+        if not cmd:
+            await ctx.send(f"Couldn't find a command named `{command}`.")
+            return
+
+        aliases = ", ".join(cmd.aliases) if getattr(cmd, "aliases", None) else "None"
+        usage = f"!{cmd.qualified_name} {cmd.signature}".strip()
+        e = Embed(
+            title=f"Command: !{cmd.qualified_name}",
+            description=(cmd.help or "No details provided."),
+            colour=Colour.blurple()
+        )
+        e.add_field(name="Usage", value=f"`{usage}`", inline=False)
+        e.add_field(name="Aliases", value=aliases, inline=False)
+        await ctx.send(embed=e)
+        return
+
+    e = Embed(
+        title="🍞 Bot Help",
+        description="Here’s everything I can do. Use `!halp <command>` for details on one command.",
+        colour=Colour.blurple()
+    )
+
+    e.add_field(
+        name="Notes",
+        value=(
+            f"• Casino commands only work in {_mention_channel(GAMBLE_CHANNEL_ID)}\n"
+            f"• `!fit` only works in {_mention_channel(FIT_CHANNEL_ID)}\n"
+            f"• `!kewchie` only works in {_mention_channel(KEWCHIE_CHANNEL_ID)}"
+        ),
+        inline=False
+    )
+
+    e.add_field(
+        name="💰 Economy",
+        value=(
+            "`!bank` — Show remaining bank vault\n"
+            "`!balance` / `!bal` / `!wallet` — See your (or someone else’s) balance\n"
+            "`!claim` — Claim daily allowance (24h cooldown, requires savings)\n"
+            "`!gift @user amount` — Gift bread (daily cap + tax tiers)\n"
+            "`!lb` / `!richlist` — Top 10 richest"
+        ),
+        inline=False
+    )
+
+    e.add_field(
+        name="🎲 Casino (only in casino channel)",
+        value=(
+            "`!roll <amount|all|half>` — Bet vs bank (win prob scales; jackpot on `all`)\n"
+            "`!putasos @user` — Try to rob someone (low success, fail hurts)\n"
+            "`!duel @user <amount>` — PvP dice duel (escrowed stakes; winner takes pot)\n"
+            "`!slots <amount>` — Spin 3 reels; 3-of-a-kind or pairs pay out\n"
+            "`!raffle start <amt>` / `!raffle join` / `!raffle draw` — Server raffle (auto-draw at deadline)\n"
+            "`!odds [bet]` — Show max bet & estimated win chance\n"
+            "`!jackpot` — Show progressive jackpot pot"
+        ),
+        inline=False
+    )
+
+    e.add_field(
+        name="🎉 Fun & Media",
+        value=(
+            "`!cafe [term]` — owl y lark\n"
+            "`!scam` — BTC/ETH prices (bratty style)\n"
+            "`!bbl` — see fergies culo\n"
+            "`!hawaii` — see vivvy's vacation pix"
+        ),
+        inline=False
+    )
+
+    e.add_field(
+        name="👗 Fit (fashion)",
+        value=(
+            "`!fit` — fergie's fits (fit channel only). If a specific user replies within 20s, "
+            "I send a cheeky follow-up."
+        ),
+        inline=False
+    )
+
+    e.add_field(
+        name="🎵 Kewchie (Kali Uchis)",
+        value=(
+            "`!kewchie` — Post a random playlist track (kewchie channel only)\n"
+            "`!kewchie-debug` — Debug Spotify playlist setup"
+        ),
+        inline=False
+    )
+
+    e.add_field(
+        name="🛠️ Admin (Manage Server required)",
+        value=(
+            "`!seed bank <amt>` — Refill bank (respects global cap)\n"
+            "`!seed @user <amt>` — Give bread (respects wallet cap)\n"
+            "`!take @user <amt>` — Take from user to bank (no burning)\n"
+            "`!setbal @user <amt>` — Set a user’s exact balance (capped to wallet)"
+        ),
+        inline=False
+    )
+
+    e.add_field(
+        name="⏱️ Automated Behaviors (FYI)",
+        value=(
+            "• Bread GIF every 4h; bread emoji every 6h\n"
+            "• Daily scam post (70% chance)\n"
+            "• 8am PT: auto allowance for all members + inactivity penalties\n"
+            "• `USER1_ID`: pings twice daily; reacts to “pinche fergie”; random 3x/day “bonk papo”\n"
+            "• `USER2_ID`: pings twice daily with “when jacuzzi?”\n"
+            "• `USER3_ID`: random replies (35% of their msgs)\n"
+            "• `LOBO_ID`: once/day “send me money lobo.” when they post\n"
+            "• `!fit`: 20s follow-up if the target user replies to the fit post"
+        ),
+        inline=False
+    )
+
+    e.set_footer(text="Tip: try `!halp roll` or `!halp gift` for specific usage.")
+    await ctx.send(embed=e)
+
+# ================== Version Command ==================
+@bot.command(name="version", help="Show bot version and runtime status")
+async def version(ctx):
+    from discord import Embed, Colour
+    db_status = "connected ✅" if (DATABASE_URL and db_pool) else ("no DATABASE_URL ❌" if not DATABASE_URL else "not connected ❌")
+    fields = [
+        ("Version", BOT_VERSION + (f" ({BUILD_TAG})" if BUILD_TAG else "")),
+        ("DB", db_status),
+        ("Casino Channel", f"<#{GAMBLE_CHANNEL_ID}>"),
+        ("Fit Channel", f"<#{FIT_CHANNEL_ID}>"),
+        ("Kewchie Channel", f"<#{KEWCHIE_CHANNEL_ID}>"),
+    ]
+    e = Embed(title="Bot Version", colour=Colour.blurple())
+    for n, v in fields:
+        e.add_field(name=n, value=v, inline=False)
+    await ctx.send(embed=e)
+
+# ================== Start ==================
+if __name__ == "__main__":
+    if not TOKEN or not TENOR_KEY or not CHANNEL_ID:
+        raise SystemExit("Please set DISCORD_TOKEN, TENOR_API_KEY, and CHANNEL_ID environment variables.")
+    # Final tiny typo fix for earlier block (safe at runtime)
+    if 'REACTION_EMOETS' in globals():
+        pass
+    bot.run(TOKEN)
