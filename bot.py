@@ -591,75 +591,77 @@ class FergieOpusBufferSink(voice_recv.AudioSink):
             )
         
     @voice_recv.AudioSink.listener()
-    def on_voice_member_speaking_stop(self, member):
-        if member.bot:
-            return
+def on_voice_member_speaking_stop(self, member):
+    if member.bot:
+        return
 
-        with self.lock:
+    with self.lock:
         packet_entries = self.buffers.pop(member.id, [])
 
-        if not packet_entries:
-            return
+    if not packet_entries:
+        return
 
-# Keep only entries that actually have RTP ordering information
-ordered_entries = [
-    entry
-    for entry in packet_entries
-    if entry[0] is not None and entry[1] is not None
-]
-
-# If packet metadata is available, sort by RTP timestamp + sequence.
-# Otherwise preserve the original receive order.
-if ordered_entries:
-    ordered_entries.sort(
-        key=lambda entry: (
-            entry[1],
-            entry[0]
-        )
-    )
-
-    # Remove exact duplicate RTP packets
-    seen = set()
-    packets = []
-
-    for sequence, timestamp, opus_data in ordered_entries:
-        key = (sequence, timestamp)
-
-        if key in seen:
-            continue
-
-        seen.add(key)
-        packets.append(opus_data)
-
-else:
-    packets = [
-        entry[2]
+    # Keep only entries that actually have RTP ordering information
+    ordered_entries = [
+        entry
         for entry in packet_entries
+        if entry[0] is not None and entry[1] is not None
     ]
 
-if not packets:
-    return
-
-total_bytes = sum(len(packet) for packet in packets)
-
-        # Ignore tiny silence/noise bursts
-        if len(packets) < 10 or total_bytes < 500:
-            return
-        print(
-            f"VC RTP ORDERED {member}: "
-            f"{len(packet_entries)} received -> "
-            f"{len(packets)} unique packets"
+    # If packet metadata is available, sort by RTP timestamp + sequence.
+    # Otherwise preserve the original receive order.
+    if ordered_entries:
+        ordered_entries.sort(
+            key=lambda entry: (
+                entry[1],
+                entry[0]
+            )
         )
-        print(
-            f"VC RAW UTTERANCE FROM {member} | "
-            f"{len(packets)} packets | "
-            f"{total_bytes} bytes"
-        )
-        asyncio.run_coroutine_threadsafe(
-             transcribe_vc_opus(member, packets),
-             self.loop
-         )
 
+        # Remove exact duplicate RTP packets
+        seen = set()
+        packets = []
+
+        for sequence, timestamp, opus_data in ordered_entries:
+            key = (sequence, timestamp)
+
+            if key in seen:
+                continue
+
+            seen.add(key)
+            packets.append(opus_data)
+
+    else:
+        packets = [
+            entry[2]
+            for entry in packet_entries
+        ]
+
+    if not packets:
+        return
+
+    total_bytes = sum(len(packet) for packet in packets)
+
+    # Ignore tiny silence/noise bursts
+    if len(packets) < 10 or total_bytes < 500:
+        return
+
+    print(
+        f"VC RTP ORDERED {member}: "
+        f"{len(packet_entries)} received -> "
+        f"{len(packets)} unique packets"
+    )
+
+    print(
+        f"VC RAW UTTERANCE FROM {member} | "
+        f"{len(packets)} packets | "
+        f"{total_bytes} bytes"
+    )
+
+    asyncio.run_coroutine_threadsafe(
+        transcribe_vc_opus(member, packets),
+        self.loop
+    )
     def cleanup(self):
         with self.lock:
             self.buffers.clear()
