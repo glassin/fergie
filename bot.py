@@ -1541,6 +1541,45 @@ async def fetch_fergie_picture(search_term: str):
     return None, None, None, None
 
 
+async def _fergie_art_usage():
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    data = await _db_get("fergie_art_daily")
+    if not isinstance(data, dict) or data.get("date") != today:
+        data = {"date": today, "count": 0}
+    return data
+
+
+async def _fergie_art_slots_left():
+    data = await _fergie_art_usage()
+    return max(0, FERGIE_IMAGE_DAILY_LIMIT - int(data.get("count", 0)))
+
+
+async def _fergie_consume_art_slot():
+    data = await _fergie_art_usage()
+    if int(data.get("count", 0)) >= FERGIE_IMAGE_DAILY_LIMIT:
+        return False
+    data["count"] = int(data.get("count", 0)) + 1
+    await _db_set("fergie_art_daily", data)
+    return True
+
+
+async def _fergie_refund_art_slot():
+    data = await _fergie_art_usage()
+    data["count"] = max(0, int(data.get("count", 0)) - 1)
+    await _db_set("fergie_art_daily", data)
+
+
+async def _fergie_reset_art_count():
+    """Admin-only helper: reset today's Art usage counter back to zero."""
+    data = await _fergie_art_usage()
+    data["count"] = 0
+    await _db_set("fergie_art_daily", data)
+
+
+def _fergie_art_cooldown_remaining() -> int:
+    return max(0, int(fergie_art_cooldown_until - time.time()))
+
+
 def _fergie_format_cooldown(seconds: int) -> str:
     seconds = max(0, int(seconds))
     minutes = (seconds + 59) // 60
