@@ -187,59 +187,102 @@ FERAL_LINES = [
 
 REACTION_EMOTES = ["🤭","😏","😢","😊","🙄","💗","🫶"]
 FERGIE_MUSIC_VERDICTS = [
-
     "divorced in a luxury apartment coded.",
-
     "another man staring out a rainy window.",
-
     "unemployed hot girl anthem.",
-
     "situationship survivor music.",
-
     "walking around target pretending you're okay coded.",
-
     "this belongs in a 2014 tumblr gifset.",
-
     "driving home from therapy vibes.",
-
-    "emotionally expensive taste.",
-
+    "emotionally unavailable but the outfit eats.",
     "starbucks parking lot at midnight energy.",
-
-    "very cigarette after crying coded.",
-
-    "main character syndrome approved.",
-
-    "this sounds like somebody texted 'we need to talk'.",
-
-    "pretending to clean your room while spiraling.",
-
     "you definitely stared at the ceiling to this.",
-
     "somebody misses their ex.",
-
     "gym breakup montage music.",
-
     "coffee shop employee final boss vibes.",
-
     "absolutely insufferable in the best way.",
-
     "i support women's rights and women's wrongs for this.",
-
     "jonathan would probably complain about this one.",
-
     "very arthoe coded.",
-
-    "this sounds expensive.",
-
-    "indie bisexual council approved.",
-
-    "playlist named 'night drives' detected.",
-
-    "winter depression deluxe edition.",
-
-    "this would've gone platinum on tumblr."
-
+    "this song owns at least three tote bags.",
+    "main character on public transportation energy.",
+    "this is what happens when yearning gets a producer.",
+    "someone absolutely typed 'i'm fine' and then played this.",
+    "hot people with attachment issues music.",
+    "this has cigarette-on-a-balcony energy and you don't even smoke.",
+    "the emotional support iced coffee is shaking.",
+    "this belongs on a playlist called 'do not text him.'",
+    "criminal levels of yearning detected.",
+    "this sounds like deleting the paragraph before sending 'lol'.",
+    "someone put reverb on a bad decision.",
+    "fergie-certified staring-out-the-window material.",
+    "this is either healing or making everything significantly worse.",
+    "the aux cord has developed trust issues.",
+    "this song definitely knows your screen time password.",
+    "romanticizing your commute again, are we?",
+    "this feels like getting dressed up just to be emotionally unavailable.",
+    "the beat is doing more emotional labor than half the men i know.",
+    "dangerously close to becoming a personality trait.",
+    "this is giving expensive sunglasses indoors.",
+    "sad but make it moisturized.",
+    "the vocals just filed for full custody of my attention.",
+    "this sounds like a crush you should absolutely not pursue.",
+    "very 'one more song before i go inside' coded.",
+    "somebody needs to confiscate your nostalgia.",
+    "this is why playlists need warning labels.",
+    "the serotonin is temporary but unfortunately the song slaps.",
+    "i can already see the unnecessarily dramatic instagram story.",
+    "this track has been divorced twice and learned nothing.",
+    "the bassline has better boundaries than you do.",
+    "this is giving emotionally compromised at whole foods.",
+    "a little toxic. a little gorgeous. unfortunate.",
+    "you heard the first ten seconds and started inventing a relationship.",
+    "this song definitely owns a vintage camera it barely knows how to use.",
+    "not the soundtrack to another imaginary scenario.",
+    "this feels illegal to listen to without an iced coffee.",
+    "someone's about to make a terrible decision in excellent lighting.",
+    "the delusion is tasteful on this one.",
+    "this would ruin my week in a very aesthetically pleasing way.",
+    "this is what happens when a red flag learns guitar.",
+    "the yearning department is severely understaffed.",
+    "i fear the sad girlies have cooked.",
+    "this song just put on lip gloss before ruining my life.",
+    "very standing-in-the-kitchen-at-2am-for-no-reason coded.",
+    "the chorus has me reconsidering several personal boundaries.",
+    "this sounds like blocking them and checking if they noticed.",
+    "a suspicious amount of emotional damage for one spotify link.",
+    "this track definitely says 'no worries' while actively worrying.",
+    "someone gave the intrusive thoughts studio time.",
+    "the vibes are immaculate. the coping mechanisms are not.",
+    "this is giving third coffee and zero meaningful progress.",
+    "put this on while pretending your life has cinematography.",
+    "this song has excellent hair and terrible communication skills.",
+    "i would absolutely judge you for this and then save it.",
+    "the playlist equivalent of making eye contact with your ex.",
+    "why does this sound like a memory that never happened?",
+    "this is dangerously close to making me feel something. disgusting.",
+    "the production said budget. the lyrics said unresolved issues.",
+    "this belongs in the background of a very avoidable emotional crisis.",
+    "somebody's frontal lobe logged off halfway through this song.",
+    "this track is wearing black sunglasses and refusing to elaborate.",
+    "the chorus just walked in like it pays rent here.",
+    "this is giving beautiful people making preventable mistakes.",
+    "i hate how much this understands the assignment.",
+    "this sounds like checking their location and immediately regretting it.",
+    "the emotional damage has excellent mixing.",
+    "this song definitely has a notes app apology drafted.",
+    "i'm judging the taste but unfortunately the taste is tasting.",
+    "this belongs on a playlist made after saying 'whatever' too aggressively.",
+    "the bridge just committed a felony against my emotional stability.",
+    "this track needs coffee, therapy, and maybe a restraining order.",
+    "somebody tell the guitarist to stop enabling this behavior.",
+    "this is giving expensive perfume and questionable intentions.",
+    "the song is hot. the decision-making is catastrophic.",
+    "very cute. very concerning. continue.",
+    "this has no business hitting this hard on a weekday.",
+    "the australian server in me approves. don't make it weird.",
+    "my digital nervous system did a little kick at that chorus.",
+    "fine. add it to the aux before i change my mind.",
 ]
 USER3_LINES = [
     "twinnies!!!","girly!","we hate it here r-right girly?","wen girlie wen?!?!",
@@ -1912,51 +1955,204 @@ User asked:
     except Exception as e:
 
         return f"error: {e}"
-async def ask_gemini_music_review(song_title: str):
+def _fergie_music_artist_key(artist: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (artist or "unknown").lower()).strip("_")[:120] or "unknown"
+
+
+async def _fergie_music_profile(artist: str):
+    """Load Fergie's lightweight evolving opinion of an artist from Neon."""
+    data = await _db_get(f"music_critic:{_fergie_music_artist_key(artist)}")
+    if not isinstance(data, dict):
+        return {
+            "artist": artist,
+            "reviews": 0,
+            "average_score": None,
+            "recent_scores": [],
+            "recent_songs": [],
+        }
+    return data
+
+
+async def _fergie_save_music_profile(
+    artist: str,
+    song_title: str,
+    score: float | None,
+):
+    """Update artist-level critic history without storing chat messages."""
+    if not artist or artist == "Unknown artist":
+        return
+
+    data = await _fergie_music_profile(artist)
+
+    reviews = int(data.get("reviews", 0))
+    recent_scores = [
+        float(x)
+        for x in data.get("recent_scores", [])
+        if isinstance(x, (int, float))
+    ][-9:]
+    recent_songs = [
+        str(x)
+        for x in data.get("recent_songs", [])
+        if x
+    ][-9:]
+
+    if score is not None:
+        recent_scores.append(round(float(score), 1))
+
+    if song_title:
+        recent_songs.append(song_title[:160])
+
+    data["artist"] = artist
+    data["reviews"] = reviews + 1
+    data["recent_scores"] = recent_scores[-10:]
+    data["recent_songs"] = recent_songs[-10:]
+    data["average_score"] = (
+        round(sum(recent_scores) / len(recent_scores), 1)
+        if recent_scores
+        else None
+    )
+
+    await _db_set(
+        f"music_critic:{_fergie_music_artist_key(artist)}",
+        data,
+    )
+
+
+def _fergie_extract_music_score(review: str):
+    """Read a 0-10 score from Fergie's generated review when present."""
+    match = re.search(
+        r"(?<!\d)(10(?:\.0)?|[0-9](?:\.[0-9])?)\s*/\s*10\b",
+        review or "",
+        flags=re.IGNORECASE,
+    )
+
+    if not match:
+        return None
+
+    try:
+        return max(0.0, min(10.0, float(match.group(1))))
+    except Exception:
+        return None
+
+
+async def ask_gemini_music_review(
+    song_title: str,
+    artist: str = "Unknown artist",
+    album: str = "",
+    release_date: str = "",
+    popularity: int | None = None,
+    posted_by: str = "someone",
+):
+    """
+    Fergie Music Critic 2.0:
+    - real Spotify song/artist metadata when available
+    - consistent personal taste
+    - artist history from Neon
+    - varied review shapes instead of one repetitive template
+    """
+    profile = await _fergie_music_profile(artist)
+
+    average_score = profile.get("average_score")
+    prior_reviews = int(profile.get("reviews", 0))
+    recent_songs = profile.get("recent_songs", [])[-4:]
+    recent_scores = profile.get("recent_scores", [])[-4:]
+
+    history_text = "No established opinion yet. Judge this one fresh."
+
+    if prior_reviews:
+        history_bits = [
+            f"You have reviewed {artist} {prior_reviews} time(s) before."
+        ]
+
+        if average_score is not None:
+            history_bits.append(
+                f"Your recent average score for this artist is about {average_score}/10."
+            )
+
+        if recent_songs:
+            history_bits.append(
+                "Recent songs you encountered: " + ", ".join(recent_songs) + "."
+            )
+
+        if recent_scores:
+            history_bits.append(
+                "Recent scores: "
+                + ", ".join(f"{float(x):.1f}/10" for x in recent_scores)
+                + "."
+            )
+
+        history_text = " ".join(history_bits)
+
+    metadata_lines = [
+        f"Song: {song_title}",
+        f"Artist: {artist}",
+    ]
+
+    if album:
+        metadata_lines.append(f"Album: {album}")
+
+    if release_date:
+        metadata_lines.append(f"Release date: {release_date}")
+
+    if popularity is not None:
+        metadata_lines.append(
+            f"Spotify popularity signal: {popularity}/100 "
+            "(context only; popularity does not mean quality)"
+        )
+
+    metadata_text = "\n".join(metadata_lines)
+
     prompt = f"""
-A Discord user posted this Spotify song:
+You are reviewing a Spotify song as Fergie.
 
-{song_title}
+Actual Spotify metadata:
+{metadata_text}
 
-Write a short Fergie-style music reaction.
+The person who posted it is: {posted_by}
 
-Fergie is:
-- 23-ish
-- bratty
-- sarcastic
-- crude but playful
-- dramatic
-- has a big butt
-- coffee-addicted
-- judgmental about music
-- never too nice
-- never robotic
+Your evolving history with this artist:
+{history_text}
 
-Rules:
-- React to the actual song title.
-- If the title hints at romance, heartbreak, partying, regional Mexican, rap, indie, rock, pop, etc., react naturally.
+Fergie's music taste:
+- You are an actual opinionated music girlie, not a random-number generator.
+- You generally appreciate indie/alternative music, Latin music, interesting pop,
+  strong hooks, distinctive production, personality, drama, and songs with replay value.
+- You can also love music outside those lanes when it genuinely works.
+- You dislike boring, generic, lazy, painfully corny, or personality-free music.
+- A famous or popular song does NOT automatically get a high score.
+- A weird or niche song does NOT automatically get praise.
+- Sometimes your opinion changes over time. Prior artist history should influence you
+  lightly, not force the same verdict forever.
+- Viviana is your mom. You can sometimes tease or praise Mom's aux taste when she posts,
+  but do not automatically give her every song a 10.
+- Jonathan is your dad/creator and is fair game for playful music-related roasting.
+- Your Australian-server accident, coffee obsession, gymmies, digital existence, and
+  other personal lore may occasionally inspire a joke, but DO NOT force lore into every review.
+
+How to judge it internally:
+Consider the artist/song context, production/style, vocals/performance, hook,
+lyrics/theme when reasonably known, originality/personality, replay value,
+and whether YOU personally would keep it on the aux.
+
+Output rules:
+- Give a genuine score from 0.0/10 to 10.0/10 based on your opinion.
+- Do NOT cluster everything between 7 and 10.
+- Bad or boring songs may score low. Great songs may score high.
+- Always include the score exactly once in the form X.X/10.
+- Keep the whole response under 5 short lines.
+- Vary the format naturally. Sometimes lead with the score, sometimes end with it.
+- Sometimes give one savage sentence. Sometimes give 2-4 short lines.
+- Sometimes praise it with almost no insult if you genuinely love it.
+- Sometimes roast it hard if you hate it.
+- You may lightly roast {posted_by}, but do not make every review about the poster.
+- Never repeat a canned catchphrase just because it exists.
 - Never use the phrase "emotionally expensive."
-- Never repeat the same joke across songs.
-- Sometimes love the song.
-- Sometimes hate it.
-- Sometimes roast the person posting it.
-- Sometimes roast the song itself.
-- Sometimes admit it's actually good.
-- Ratings can be anywhere from 2/10 to 10/10.
-- Don't force every review to sound poetic.
-- Write like a real friend hearing the aux.
-- Keep it under 5 short lines.
-- No markdown.
 - No hashtags.
-- Be unpredictable.
-- Stay Fergie
+- Do not say you listened to audio if you only know the song from available metadata/search context.
+- Do not invent specific musical details you cannot reasonably know.
+- Stay Fergie.
 
-Example style:
-"Strawberry Swing is giving staring out the passenger window pretending you're in a music video.
-Soft. Expensive. Slightly annoying.
-8.7/10 because I hate that it works."
-
-Now write Fergie's reaction.
+Write ONLY Fergie's review.
 """
 
     answer = await ask_gemini(prompt)
@@ -1964,11 +2160,26 @@ Now write Fergie's reaction.
     if not answer:
         return None
 
-    if answer.startswith("Gemini error:") or answer.startswith("error:") or "quota" in answer.lower():
+    if (
+        answer.startswith("Gemini error:")
+        or answer.startswith("error:")
+        or "quota" in answer.lower()
+    ):
         return None
 
+    answer = answer.strip()
+
     if len(answer) > 900:
-        answer = answer[:900]
+        answer = answer[:900].rsplit(" ", 1)[0] + "..."
+
+    score = _fergie_extract_music_score(answer)
+
+    # If Gemini somehow skipped the required rating, do not save a fake score.
+    await _fergie_save_music_profile(
+        artist=artist,
+        song_title=song_title,
+        score=score,
+    )
 
     return answer
 
@@ -2048,6 +2259,73 @@ async def _get_spotify_token():
                 return _spotify_token["access_token"]
     except Exception:
         return None
+
+def _spotify_track_id_from_url(url: str):
+    match = re.search(
+        r"open\.spotify\.com/(?:intl-[a-z]{2}/)?track/([A-Za-z0-9]+)",
+        url or "",
+        flags=re.IGNORECASE,
+    )
+    return match.group(1) if match else None
+
+
+async def _fetch_spotify_track_metadata(spotify_url: str):
+    """Fetch reliable title/artist/album metadata using Fergie's existing Spotify credentials."""
+    track_id = _spotify_track_id_from_url(spotify_url)
+
+    if not track_id:
+        return None
+
+    token = await _get_spotify_token()
+
+    if not token:
+        print("FERGIE MUSIC CRITIC: Spotify token unavailable; using Discord embed fallback")
+        return None
+
+    headers = {"Authorization": f"Bearer {token}"}
+    url = f"https://api.spotify.com/v1/tracks/{track_id}"
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=15)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                url,
+                headers=headers,
+                params={"market": SPOTIFY_MARKET},
+            ) as response:
+                if response.status != 200:
+                    print(
+                        f"FERGIE MUSIC CRITIC SPOTIFY ERROR "
+                        f"{response.status}: {await response.text()}"
+                    )
+                    return None
+
+                data = await response.json()
+
+        artists = [
+            str(item.get("name", "")).strip()
+            for item in data.get("artists", [])
+            if item.get("name")
+        ]
+
+        album_data = data.get("album") or {}
+
+        return {
+            "title": str(data.get("name") or "").strip(),
+            "artist": ", ".join(artists) or "Unknown artist",
+            "album": str(album_data.get("name") or "").strip(),
+            "release_date": str(album_data.get("release_date") or "").strip(),
+            "popularity": data.get("popularity"),
+        }
+
+    except Exception as e:
+        print(
+            f"FERGIE MUSIC CRITIC SPOTIFY EXCEPTION: "
+            f"{type(e).__name__}: {e}"
+        )
+        return None
+
 
 async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
     token = await _get_spotify_token()
@@ -2770,68 +3048,84 @@ async def on_message(message: discord.Message):
         await bot.process_commands(message)
         return
         
-    # Spotify link → Fergie music critic mode
+    # Spotify link → Fergie Music Critic 2.0
     if "open.spotify.com" in lower:
         song_title = None
+        artist = "Unknown artist"
+        album = ""
+        release_date = ""
+        popularity = None
 
-        await asyncio.sleep(5)
+        # Prefer Spotify's API for reliable track + artist metadata.
+        metadata = await _fetch_spotify_track_metadata(content)
 
-        try:
-            message = await message.channel.fetch_message(message.id)
-        except Exception:
-            pass
+        if metadata:
+            song_title = metadata.get("title") or None
+            artist = metadata.get("artist") or "Unknown artist"
+            album = metadata.get("album") or ""
+            release_date = metadata.get("release_date") or ""
+            popularity = metadata.get("popularity")
 
-        if message.embeds:
-            for embed in message.embeds:
-                if embed.title:
-                    song_title = embed.title
-                    break
+        # Discord embeds are still a fallback for links we cannot resolve through Spotify.
+        if not song_title:
+            await asyncio.sleep(5)
+
+            try:
+                message = await message.channel.fetch_message(message.id)
+            except Exception:
+                pass
+
+            if message.embeds:
+                for embed in message.embeds:
+                    if embed.title:
+                        song_title = embed.title
+                    if getattr(embed, "author", None) and embed.author.name:
+                        artist = embed.author.name
+                    if song_title:
+                        break
 
         if not song_title:
             song_title = "this spotify link"
 
-        if message.author.id == USER3_ID:
-            verdict = "mother's aux privies remain undefeated."
-            score = "10"
-        else:
-            verdict = random.choice(FERGIE_MUSIC_VERDICTS)
-            score = f"{random.uniform(7.0, 9.8):.1f}"
-
-        review = await ask_gemini_music_review(song_title)
-
-        if review:
-
-            await message.reply(
-                review,
-                mention_author=False
-            )
-
-            return
-
-
-        replies = [
-
-            f"🎧 now spinning:\n\n**{song_title}**\n\n{verdict}\n\ni support this foolishness.\n\n{score}/10",
-
-            f"ugh.\n\n**{song_title}**\n\n{verdict}\n\nabsolutely insufferable in the best way.\n\n{score}/10",
-
-            f"LISTEN.\n\n**{song_title}**\n\n{verdict}\n\nvery concerning behavior.\n\nrating: {score}/10",
-
-            f"☕🎧\n\n**{song_title}**\n\n{verdict}\n\nthis is why i need coffee.\n\n{score}/10"
-
-        ]
-
-
-        await message.reply(
-
-            random.choice(replies),
-
-            mention_author=False
-
+        review = await ask_gemini_music_review(
+            song_title=song_title,
+            artist=artist,
+            album=album,
+            release_date=release_date,
+            popularity=popularity,
+            posted_by=message.author.display_name,
         )
 
+        if review:
+            await message.reply(
+                review,
+                mention_author=False,
+            )
+            return
+
+        # Gemini/Spotify failure fallback: keep the large verdict pool so this
+        # feature still responds instead of silently dying.
+        verdict = (
+            "mother's aux privileges remain undefeated."
+            if message.author.id == USER3_ID
+            else random.choice(FERGIE_MUSIC_VERDICTS)
+        )
+
+        score = f"{random.uniform(3.0, 9.5):.1f}"
+
+        replies = [
+            f"🎧 **{song_title}** — {artist}\n{verdict}\n{score}/10",
+            f"ugh. **{song_title}** by **{artist}**.\n{verdict}\n{score}/10",
+            f"LISTEN. **{song_title}** — **{artist}**\n{verdict}\nrating: {score}/10",
+            f"☕🎧 **{song_title}** — **{artist}**\n{verdict}\n{score}/10",
+        ]
+
+        await message.reply(
+            random.choice(replies),
+            mention_author=False,
+        )
         return
-        
+
     # Global jump scare trigger (image only, then creepy line), per-user cooldown
     if JUMPSCARE_TRIGGER in lower:
         now = _now()
