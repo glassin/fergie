@@ -3934,6 +3934,29 @@ async def dbdump(ctx):
         txt = json.dumps(val)[:600] if isinstance(val, (dict, list)) else str(val)[:600]
         await ctx.send(f"```json\n{txt}\n...```")
 
+
+# ================== Fergie Art Status ==================
+@bot.command(name="art", help="Show how many Fergie Art generations are left today")
+async def art(ctx):
+    data = await _fergie_art_usage()
+    used = int(data.get("count", 0))
+    left = max(0, FERGIE_IMAGE_DAILY_LIMIT - used)
+
+    if left <= 0:
+        await ctx.send(
+            f"🎨 art department: **0/{FERGIE_IMAGE_DAILY_LIMIT} pics left today.** "
+            "girl we're CLOSED. 😭 try me tomorrow."
+        )
+    elif left == 1:
+        await ctx.send(
+            f"🎨 art department: **1/{FERGIE_IMAGE_DAILY_LIMIT} pic left today**, babe. 🙄"
+        )
+    else:
+        await ctx.send(
+            f"🎨 art department: **{left}/{FERGIE_IMAGE_DAILY_LIMIT} pics left today**, babe. 🙄"
+        )
+
+
 # ================== Fun / Media Commands ==================
 @bot.command(name="cafe", help="owl y lark")
 async def cafe(ctx, *, term: str = "coffee"):
