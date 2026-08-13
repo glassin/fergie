@@ -1286,6 +1286,186 @@ def _fergie_image_generation_prompt(text: str):
     return None
 
 
+# ================== Fergie Picture Fetch (Wikimedia Commons) ==================
+
+FERGIE_COMMONS_API = "https://commons.wikimedia.org/w/api.php"
+FERGIE_COMMONS_USER_AGENT = os.getenv(
+    "FERGIE_COMMONS_USER_AGENT",
+    "FergieDiscordBot/4.5 (Wikimedia Commons picture search)"
+).strip()
+
+
+def _fergie_picture_search_query(text: str):
+    """
+    Detect explicit real-picture requests without colliding with Art generation.
+    Examples:
+      @fergie show me a picture of Sabrina Carpenter
+      @fergie find me a photo of a capybara
+      @fergie picture of Mount Fuji
+    """
+    text = (text or "").strip()
+
+    patterns = [
+        r"^(?:please\s+)?(?:show|find|get|fetch)\s+me\s+(?:an?\s+|some\s+)?(?:picture|photo|image|pic|pics|photos|images)\s+(?:of\s+)?(.+)$",
+        r"^(?:please\s+)?(?:show|find|get|fetch)\s+(?:an?\s+|some\s+)?(?:picture|photo|image|pic|pics|photos|images)\s+(?:of\s+)?(.+)$",
+        r"^(?:picture|photo|image|pic)\s+of\s+(.+)$",
+    ]
+
+    for pattern in patterns:
+        match = re.match(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            query = match.group(1).strip(" .?!")
+            if query:
+                return query
+
+    return None
+
+
+def _fergie_picture_extension(mime: str) -> str:
+    mime = (mime or "").lower().strip()
+    return {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/webp": ".webp",
+        "image/gif": ".gif",
+    }.get(mime, ".jpg")
+
+
+async def fetch_fergie_commons_picture(search_term: str):
+    """
+    Search Wikimedia Commons and return one usable raster thumbnail.
+
+    Returns:
+        (image_bytes, filename, source_page_url, title) on success
+        (None, None, None, None) on no result/failure
+    """
+    search_term = (search_term or "").strip()
+
+    if not search_term:
+        return None, None, None, None
+
+    params = {
+        "action": "query",
+        "format": "json",
+        "formatversion": "2",
+        "generator": "search",
+        "gsrsearch": search_term,
+        "gsrnamespace": "6",  # File namespace
+        "gsrlimit": "12",
+        "prop": "imageinfo",
+        "iiprop": "url|mime|thumbmime",
+        "iiurlwidth": "1200",
+    }
+
+    headers = {
+        "User-Agent": FERGIE_COMMONS_USER_AGENT,
+        "Accept": "application/json",
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=20)
+
+        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
+            async with session.get(FERGIE_COMMONS_API, params=params) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    print(
+                        f"FERGIE PICTURE SEARCH ERROR {response.status}: "
+                        f"{error_text[:500]}"
+                    )
+                    return None, None, None, None
+
+                data = await response.json()
+
+            pages = data.get("query", {}).get("pages", [])
+
+            candidates = []
+
+            for page in pages:
+                imageinfo = page.get("imageinfo") or []
+                if not imageinfo:
+                    continue
+
+                info = imageinfo[0]
+                thumb_url = info.get("thumburl") or info.get("url")
+                source_page = info.get("descriptionurl")
+                thumb_mime = (
+                    info.get("thumbmime")
+                    or info.get("mime")
+                    or ""
+                ).lower()
+
+                if not thumb_url:
+                    continue
+
+                # Prefer image thumbnails Discord can display directly.
+                if thumb_mime and not thumb_mime.startswith("image/"):
+                    continue
+
+                candidates.append({
+                    "url": thumb_url,
+                    "source": source_page,
+                    "mime": thumb_mime,
+                    "title": (page.get("title") or "Wikimedia Commons image"),
+                })
+
+            if not candidates:
+                return None, None, None, None
+
+            # Pick from the top few results so repeated searches don't always
+            # return the exact same picture while staying relevant.
+            pick_pool = candidates[:5]
+            random.shuffle(pick_pool)
+
+            for candidate in pick_pool:
+                try:
+                    async with session.get(candidate["url"]) as image_response:
+                        if image_response.status != 200:
+                            continue
+
+                        image_bytes = await image_response.read()
+
+                        if not image_bytes or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES:
+                            continue
+
+                        content_type = (
+                            image_response.headers.get("Content-Type", "")
+                            .split(";", 1)[0]
+                            .lower()
+                            .strip()
+                        )
+
+                        mime = content_type or candidate["mime"]
+
+                        if mime and not mime.startswith("image/"):
+                            continue
+
+                        extension = _fergie_picture_extension(mime)
+                        filename = f"fergie_found_pic{extension}"
+
+                        return (
+                            image_bytes,
+                            filename,
+                            candidate["source"],
+                            candidate["title"],
+                        )
+
+                except Exception as e:
+                    print(
+                        f"FERGIE PICTURE DOWNLOAD SKIP: "
+                        f"{type(e).__name__}: {e}"
+                    )
+                    continue
+
+    except Exception as e:
+        print(
+            f"FERGIE PICTURE SEARCH EXCEPTION: "
+            f"{type(e).__name__}: {e}"
+        )
+
+    return None, None, None, None
+
+
 async def _fergie_download_attachment(attachment: discord.Attachment):
     if attachment.size and attachment.size > FERGIE_IMAGE_MAX_BYTES:
         return None, None
@@ -2962,6 +3142,59 @@ async def on_message(message: discord.Message):
                 )
             return
 
+        # Fergie Picture Fetch: search for a real existing picture.
+        # This is separate from Art and does NOT consume an Art generation.
+        picture_query = _fergie_picture_search_query(question)
+        if picture_query:
+            wait = await message.reply(
+                f"ugh fine. looking for **{picture_query}**... 📸🙄",
+                mention_author=False,
+            )
+
+            try:
+                image_bytes, filename, source_url, source_title = (
+                    await fetch_fergie_commons_picture(picture_query)
+                )
+            except Exception as e:
+                print(
+                    f"FERGIE PICTURE HANDLER ERROR: "
+                    f"{type(e).__name__}: {e}"
+                )
+                image_bytes = None
+                filename = None
+                source_url = None
+                source_title = None
+
+            if not image_bytes:
+                await wait.edit(
+                    content=(
+                        f"fak. i couldn't find a decent pic of **{picture_query}** "
+                        "on Commons. 🙄"
+                    )
+                )
+                return
+
+            try:
+                await wait.delete()
+            except Exception:
+                pass
+
+            source_line = (
+                f"\n*source: {source_url}*"
+                if source_url
+                else ""
+            )
+
+            await message.reply(
+                content=f"found one. 🙄📸{source_line}",
+                file=discord.File(
+                    io.BytesIO(image_bytes),
+                    filename=filename or "fergie_found_pic.jpg",
+                ),
+                mention_author=False,
+            )
+            return
+
         # Fergie TL;DR: direct mention + natural-language recap request.
         # This runs before normal Gemini chat so the request gets today's
         # accessible server context instead of only the last few messages.
@@ -4494,6 +4727,7 @@ async def halp(ctx, *, command: str | None = None):
         value=(
             "`@fergie <anything>` — Talk to me normally; I understand English, Spanish & Spanglish\n"
             "`@fergie say <text>` — Make me say it as a voice post\n"
+            "`@fergie show me a picture of <thing>` — Find a real picture online\n"
             "`@fergie give me the tldr` — Recap today's accessible server yapping\n"
             "`@fergie` + image — I'll look at the image and react\n"
             "I may also randomly butt into chat, react to images, or answer with a voice post."
