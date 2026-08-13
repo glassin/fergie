@@ -50,7 +50,7 @@ text_voice_reply_cooldowns = {}
 # Fergie Eyes + Art v1
 FERGIE_IMAGE_REACTION_CHANCE = float(os.getenv("FERGIE_IMAGE_REACTION_CHANCE", "0.10"))
 FERGIE_IMAGE_REACTION_COOLDOWN_SECONDS = int(os.getenv("FERGIE_IMAGE_REACTION_COOLDOWN", "180"))
-FERGIE_IMAGE_DAILY_LIMIT = int(os.getenv("FERGIE_IMAGE_DAILY_LIMIT", "4"))
+FERGIE_IMAGE_DAILY_LIMIT = int(os.getenv("FERGIE_IMAGE_DAILY_LIMIT", "5"))
 FERGIE_IMAGE_MODEL = os.getenv("FERGIE_IMAGE_MODEL", "gemini-3.1-flash-image").strip()
 FERGIE_IMAGE_MAX_BYTES = int(os.getenv("FERGIE_IMAGE_MAX_BYTES", str(8 * 1024 * 1024)))
 fergie_image_reaction_cooldowns = {}
@@ -2660,7 +2660,7 @@ async def on_message(message: discord.Message):
             left = await _fergie_art_slots_left()
             if left <= 0:
                 await message.reply(
-                    "girl the art department is CLOSED. 😭 i already made my 4 pics today. try me tomorrow.",
+                    "girl the art department is CLOSED. 😭 i already made my 5 pics today. try me tomorrow.",
                     mention_author=False,
                 )
                 return
