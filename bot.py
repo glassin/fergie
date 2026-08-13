@@ -1331,6 +1331,192 @@ def _fergie_picture_extension(mime: str) -> str:
     }.get(mime, ".jpg")
 
 
+
+# ================== Fergie DuckDuckGo Image Search ==================
+# DuckDuckGo does not provide an official public image-search API.
+# This uses its public web image-search flow with aiohttp and falls back to Commons.
+FERGIE_DDG_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
+
+async def _fergie_ddg_vqd(session: aiohttp.ClientSession, search_term: str):
+    """Fetch DuckDuckGo's short-lived VQD token needed for image search."""
+    params = {"q": search_term}
+
+    async with session.get(
+        "https://duckduckgo.com/",
+        params=params,
+        headers=FERGIE_DDG_HEADERS,
+    ) as response:
+        if response.status != 200:
+            return None
+
+        html = await response.text()
+
+    patterns = [
+        r'vqd=["\']([^"\']+)["\']',
+        r'vqd=([0-9-]+)&',
+        r'"vqd"\s*:\s*"([^"]+)"',
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, html)
+        if match:
+            return match.group(1)
+
+    return None
+
+
+async def fetch_fergie_duckduckgo_picture(search_term: str):
+    """
+    Search DuckDuckGo Images and return one downloadable image.
+
+    Returns:
+        (image_bytes, filename, source_page_url, title) on success
+        (None, None, None, None) on failure/no result
+    """
+    search_term = re.sub(r"\s+", " ", (search_term or "")).strip()
+    if not search_term:
+        return None, None, None, None
+
+    timeout = aiohttp.ClientTimeout(total=25)
+
+    try:
+        async with aiohttp.ClientSession(
+            timeout=timeout,
+            headers=FERGIE_DDG_HEADERS,
+        ) as session:
+            vqd = await _fergie_ddg_vqd(session, search_term)
+
+            if not vqd:
+                print("FERGIE DDG: could not obtain VQD token")
+                return None, None, None, None
+
+            params = {
+                "l": "us-en",
+                "o": "json",
+                "q": search_term,
+                "vqd": vqd,
+                "f": ",,,",
+            }
+
+            headers = {
+                **FERGIE_DDG_HEADERS,
+                "Referer": f"https://duckduckgo.com/?q={quote_plus(search_term)}&iax=images&ia=images",
+            }
+
+            async with session.get(
+                "https://duckduckgo.com/i.js",
+                params=params,
+                headers=headers,
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    print(
+                        f"FERGIE DDG SEARCH ERROR {response.status}: "
+                        f"{error_text[:300]}"
+                    )
+                    return None, None, None, None
+
+                data = await response.json(content_type=None)
+
+            results = data.get("results", []) if isinstance(data, dict) else []
+
+            if not results:
+                print(f"FERGIE DDG: no image results for {search_term!r}")
+                return None, None, None, None
+
+            # DuckDuckGo orders results by relevance. Try a handful because
+            # some origin sites block hotlink/download requests.
+            for result in results[:12]:
+                image_url = result.get("image")
+                thumb_url = result.get("thumbnail")
+                source_page = result.get("url")
+                title = (result.get("title") or search_term).strip()
+
+                # Prefer the original image, then thumbnail as a fallback.
+                for candidate_url in (image_url, thumb_url):
+                    if not candidate_url:
+                        continue
+
+                    try:
+                        async with session.get(
+                            candidate_url,
+                            headers={
+                                **FERGIE_DDG_HEADERS,
+                                "Referer": source_page or "https://duckduckgo.com/",
+                            },
+                            allow_redirects=True,
+                        ) as image_response:
+                            if image_response.status != 200:
+                                continue
+
+                            content_type = (
+                                image_response.headers.get("Content-Type", "")
+                                .split(";", 1)[0]
+                                .lower()
+                                .strip()
+                            )
+
+                            if content_type and not content_type.startswith("image/"):
+                                continue
+
+                            image_bytes = await image_response.read()
+
+                            if (
+                                not image_bytes
+                                or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES
+                            ):
+                                continue
+
+                            extension = _fergie_picture_extension(content_type)
+                            filename = f"fergie_found_pic{extension}"
+
+                            print(
+                                f"FERGIE DDG PICTURE FOUND ✅ "
+                                f"query={search_term!r} title={title!r}"
+                            )
+
+                            return (
+                                image_bytes,
+                                filename,
+                                source_page,
+                                title,
+                            )
+
+                    except Exception as e:
+                        print(
+                            f"FERGIE DDG DOWNLOAD SKIP: "
+                            f"{type(e).__name__}: {e}"
+                        )
+                        continue
+
+    except Exception as e:
+        print(
+            f"FERGIE DDG SEARCH EXCEPTION: "
+            f"{type(e).__name__}: {e}"
+        )
+
+    return None, None, None, None
+
+
+async def fetch_fergie_picture(search_term: str):
+    """DuckDuckGo Images first, then Wikimedia Commons fallback."""
+    result = await fetch_fergie_duckduckgo_picture(search_term)
+
+    if result[0]:
+        return result
+
+    print("FERGIE PICTURE: DuckDuckGo failed; trying Wikimedia Commons fallback")
+    return await fetch_fergie_commons_picture(search_term)
+
+
 async def fetch_fergie_commons_picture(search_term: str):
     """
     Search Wikimedia Commons using several progressively broader/smarter queries.
@@ -3071,7 +3257,7 @@ async def on_message(message: discord.Message):
 
             try:
                 image_bytes, filename, source_url, source_title = (
-                    await fetch_fergie_commons_picture(picture_query)
+                    await fetch_fergie_picture(picture_query)
                 )
             except Exception as e:
                 print(
@@ -4645,7 +4831,7 @@ async def halp(ctx, *, command: str | None = None):
         value=(
             "`@fergie <anything>` — Talk to me normally; I understand English, Spanish & Spanglish\n"
             "`@fergie say <text>` — Make me say it as a voice post\n"
-            "`@fergie show me a picture of <thing>` — Find a real picture online\n"
+            "`@fergie show me a picture of <thing>` — Find a real picture on the web\n"
             "`@fergie give me the tldr` — Recap today's accessible server yapping\n"
             "`@fergie` + image — I'll look at the image and react\n"
             "I may also randomly butt into chat, react to images, or answer with a voice post."
