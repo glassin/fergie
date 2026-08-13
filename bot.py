@@ -90,8 +90,8 @@ DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
 REPLY_CHANCE = 0.10
 
 # Version/info (for !version)
-BOT_VERSION = os.getenv("BOT_VERSION", "v1.2-allgames")
-BUILD_TAG   = os.getenv("BUILD_TAG", "")
+BOT_VERSION = "Fergie 4.5"
+BUILD_TAG   = "Eyes • Ears • Mouth"
 
 # Specific member IDs
 USER1_ID = 1028310674318839878
@@ -4039,12 +4039,16 @@ async def version(ctx):
     from discord import Embed, Colour
     db_status = "connected ✅" if (DATABASE_URL and db_pool) else ("no DATABASE_URL ❌" if not DATABASE_URL else "not connected ❌")
     fields = [
-        ("Version", BOT_VERSION + (f" ({BUILD_TAG})" if BUILD_TAG else "")),
+        ("Version", BOT_VERSION),
+        ("Build", BUILD_TAG),
         ("DB", db_status),
+        ("VC Brain", "ready ✅" if VC_BRIDGE_SECRET else "not configured ❌"),
+        ("Art", f"{FERGIE_IMAGE_DAILY_LIMIT}/day"),
+        ("Picture Fetch", "Google Search"),
         ("Fit Channel", f"<#{FIT_CHANNEL_ID}>"),
         ("Kewchie Channel", f"<#{KEWCHIE_CHANNEL_ID}>"),
     ]
-    e = Embed(title="Bot Version", colour=Colour.blurple())
+    e = Embed(title="Fergie Status", colour=Colour.blurple())
     for n, v in fields:
         e.add_field(name=n, value=v, inline=False)
     await ctx.send(embed=e)
