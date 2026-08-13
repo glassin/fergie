@@ -3936,25 +3936,28 @@ async def dbdump(ctx):
 
 
 # ================== Fergie Art Status ==================
-@bot.command(name="art", help="Show how many Fergie Art generations are left today")
+@bot.command(name="art", help="Show Fergie's remaining daily Art generations")
 async def art(ctx):
-    data = await _fergie_art_usage()
-    used = int(data.get("count", 0))
-    left = max(0, FERGIE_IMAGE_DAILY_LIMIT - used)
+    left = await _fergie_art_slots_left()
+    used = max(0, FERGIE_IMAGE_DAILY_LIMIT - left)
 
     if left <= 0:
-        await ctx.send(
-            f"🎨 art department: **0/{FERGIE_IMAGE_DAILY_LIMIT} pics left today.** "
+        msg = (
+            f"🎨 art department: **0/{FERGIE_IMAGE_DAILY_LIMIT} pics left today**. "
             "girl we're CLOSED. 😭 try me tomorrow."
         )
     elif left == 1:
-        await ctx.send(
-            f"🎨 art department: **1/{FERGIE_IMAGE_DAILY_LIMIT} pic left today**, babe. 🙄"
+        msg = (
+            f"🎨 art department: **1/{FERGIE_IMAGE_DAILY_LIMIT} pic left today**. "
+            "one shot left, fak. don\'t embarrass me. 🙄"
         )
     else:
-        await ctx.send(
-            f"🎨 art department: **{left}/{FERGIE_IMAGE_DAILY_LIMIT} pics left today**, babe. 🙄"
+        msg = (
+            f"🎨 art department: **{left}/{FERGIE_IMAGE_DAILY_LIMIT} pics left today**. "
+            f"i\'ve made **{used}** today. don\'t waste the rest, fak. 🙄🎨"
         )
+
+    await ctx.send(msg)
 
 
 # ================== Fun / Media Commands ==================
