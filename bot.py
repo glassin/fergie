@@ -63,6 +63,7 @@ FERGIE_ART_OUTAGE_COOLDOWN_SECONDS = int(
 )
 fergie_art_cooldown_until = 0.0
 fergie_art_last_error = ""
+FERGIE_ADMIN_USER_ID = 939225086341296209
 
 FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
 
@@ -1408,6 +1409,12 @@ async def _fergie_refund_art_slot():
     await _db_set("fergie_art_daily", data)
 
 
+
+
+async def _fergie_reset_art_count():
+    """Admin-only helper: reset today's Art usage counter back to zero."""
+    today_key = datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    await _db_set("fergie:art:daily", {"day": today_key, "count": 0})
 def _fergie_art_cooldown_remaining() -> int:
     return max(0, int(fergie_art_cooldown_until - time.time()))
 
@@ -2588,6 +2595,31 @@ TODAY'S ACCESSIBLE DISCORD MESSAGES:
         cleaned = cleaned[:1797].rstrip() + "..."
 
     return cleaned
+
+
+@bot.command(name="resetart")
+async def resetart(ctx):
+    """Reset Fergie's daily Art count. Restricted to Fergie's admin."""
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try fak. that's an admin button. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        await _fergie_reset_art_count()
+        await ctx.reply(
+            f"art count reset. 🙄🎨 you have **{FERGIE_IMAGE_DAILY_LIMIT} pics** available again today.",
+            mention_author=False,
+        )
+    except Exception as e:
+        print(f"FERGIE ART RESET ERROR: {type(e).__name__}: {e}")
+        await ctx.reply(
+            "fak. i tried to reset the art count and something exploded. 🙄",
+            mention_author=False,
+        )
+
 
 @bot.event
 async def on_message(message: discord.Message):
