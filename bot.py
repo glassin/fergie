@@ -1333,7 +1333,7 @@ def _fergie_picture_extension(mime: str) -> str:
 
 async def fetch_fergie_commons_picture(search_term: str):
     """
-    Search Wikimedia Commons and return one usable raster thumbnail.
+    Search Wikimedia Commons using several progressively broader/smarter queries.
 
     Returns:
         (image_bytes, filename, source_page_url, title) on success
@@ -1344,18 +1344,45 @@ async def fetch_fergie_commons_picture(search_term: str):
     if not search_term:
         return None, None, None, None
 
-    params = {
-        "action": "query",
-        "format": "json",
-        "formatversion": "2",
-        "generator": "search",
-        "gsrsearch": search_term,
-        "gsrnamespace": "6",  # File namespace
-        "gsrlimit": "12",
-        "prop": "imageinfo",
-        "iiprop": "url|mime|thumbmime",
-        "iiurlwidth": "1200",
-    }
+    # Commons can be literal/picky. Try the user's wording first, then useful
+    # variants that often help with bands, people, places, and named things.
+    clean = re.sub(r"\s+", " ", search_term).strip()
+    variants = [clean]
+
+    lower = clean.lower()
+
+    # "zoe the band" -> "zoe band"
+    without_the = re.sub(r"\bthe\b", "", clean, flags=re.IGNORECASE)
+    without_the = re.sub(r"\s+", " ", without_the).strip()
+    if without_the and without_the.lower() != lower:
+        variants.append(without_the)
+
+    # Band searches benefit from explicit music context.
+    if "band" in lower:
+        base = re.sub(r"\b(?:the\s+)?band\b", "", clean, flags=re.IGNORECASE).strip()
+        if base:
+            variants.extend([
+                f"{base} band",
+                f"{base} music band",
+                f"{base} rock band",
+                f"{base} musicians",
+            ])
+
+    # Person-style fallback. This does not assume the subject is definitely a
+    # person; it simply gives Commons another useful text-search variation.
+    variants.extend([
+        f"{clean} portrait",
+        f"{clean} photo",
+    ])
+
+    # De-duplicate while preserving order.
+    seen = set()
+    search_variants = []
+    for item in variants:
+        key = item.casefold()
+        if item and key not in seen:
+            seen.add(key)
+            search_variants.append(item)
 
     headers = {
         "User-Agent": FERGIE_COMMONS_USER_AGENT,
@@ -1363,99 +1390,125 @@ async def fetch_fergie_commons_picture(search_term: str):
     }
 
     try:
-        timeout = aiohttp.ClientTimeout(total=20)
+        timeout = aiohttp.ClientTimeout(total=25)
 
         async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-            async with session.get(FERGIE_COMMONS_API, params=params) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    print(
-                        f"FERGIE PICTURE SEARCH ERROR {response.status}: "
-                        f"{error_text[:500]}"
-                    )
-                    return None, None, None, None
+            for search_query in search_variants[:7]:
+                print(f"FERGIE PICTURE SEARCH: {search_query}")
 
-                data = await response.json()
+                params = {
+                    "action": "query",
+                    "format": "json",
+                    "formatversion": "2",
+                    "generator": "search",
+                    "gsrsearch": search_query,
+                    "gsrnamespace": "6",
+                    "gsrlimit": "20",
+                    "prop": "imageinfo",
+                    "iiprop": "url|mime|thumbmime",
+                    "iiurlwidth": "1200",
+                }
 
-            pages = data.get("query", {}).get("pages", [])
-
-            candidates = []
-
-            for page in pages:
-                imageinfo = page.get("imageinfo") or []
-                if not imageinfo:
-                    continue
-
-                info = imageinfo[0]
-                thumb_url = info.get("thumburl") or info.get("url")
-                source_page = info.get("descriptionurl")
-                thumb_mime = (
-                    info.get("thumbmime")
-                    or info.get("mime")
-                    or ""
-                ).lower()
-
-                if not thumb_url:
-                    continue
-
-                # Prefer image thumbnails Discord can display directly.
-                if thumb_mime and not thumb_mime.startswith("image/"):
-                    continue
-
-                candidates.append({
-                    "url": thumb_url,
-                    "source": source_page,
-                    "mime": thumb_mime,
-                    "title": (page.get("title") or "Wikimedia Commons image"),
-                })
-
-            if not candidates:
-                return None, None, None, None
-
-            # Pick from the top few results so repeated searches don't always
-            # return the exact same picture while staying relevant.
-            pick_pool = candidates[:5]
-            random.shuffle(pick_pool)
-
-            for candidate in pick_pool:
                 try:
-                    async with session.get(candidate["url"]) as image_response:
-                        if image_response.status != 200:
+                    async with session.get(FERGIE_COMMONS_API, params=params) as response:
+                        if response.status != 200:
+                            error_text = await response.text()
+                            print(
+                                f"FERGIE PICTURE SEARCH ERROR {response.status}: "
+                                f"{error_text[:500]}"
+                            )
                             continue
 
-                        image_bytes = await image_response.read()
-
-                        if not image_bytes or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES:
-                            continue
-
-                        content_type = (
-                            image_response.headers.get("Content-Type", "")
-                            .split(";", 1)[0]
-                            .lower()
-                            .strip()
-                        )
-
-                        mime = content_type or candidate["mime"]
-
-                        if mime and not mime.startswith("image/"):
-                            continue
-
-                        extension = _fergie_picture_extension(mime)
-                        filename = f"fergie_found_pic{extension}"
-
-                        return (
-                            image_bytes,
-                            filename,
-                            candidate["source"],
-                            candidate["title"],
-                        )
-
+                        data = await response.json()
                 except Exception as e:
                     print(
-                        f"FERGIE PICTURE DOWNLOAD SKIP: "
+                        f"FERGIE PICTURE QUERY ERROR: "
                         f"{type(e).__name__}: {e}"
                     )
                     continue
+
+                pages = data.get("query", {}).get("pages", [])
+                candidates = []
+
+                for page in pages:
+                    imageinfo = page.get("imageinfo") or []
+                    if not imageinfo:
+                        continue
+
+                    info = imageinfo[0]
+                    thumb_url = info.get("thumburl") or info.get("url")
+                    source_page = info.get("descriptionurl")
+                    thumb_mime = (
+                        info.get("thumbmime")
+                        or info.get("mime")
+                        or ""
+                    ).lower()
+
+                    if not thumb_url:
+                        continue
+
+                    if thumb_mime and not thumb_mime.startswith("image/"):
+                        continue
+
+                    title = page.get("title") or "Wikimedia Commons image"
+
+                    candidates.append({
+                        "url": thumb_url,
+                        "source": source_page,
+                        "mime": thumb_mime,
+                        "title": title,
+                    })
+
+                if not candidates:
+                    continue
+
+                # Search results are already relevance-ranked. Keep the first
+                # result as the strongest candidate, but allow a few fallbacks
+                # if its file cannot be downloaded.
+                for candidate in candidates[:8]:
+                    try:
+                        async with session.get(candidate["url"]) as image_response:
+                            if image_response.status != 200:
+                                continue
+
+                            image_bytes = await image_response.read()
+
+                            if not image_bytes or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES:
+                                continue
+
+                            content_type = (
+                                image_response.headers.get("Content-Type", "")
+                                .split(";", 1)[0]
+                                .lower()
+                                .strip()
+                            )
+
+                            mime = content_type or candidate["mime"]
+
+                            if mime and not mime.startswith("image/"):
+                                continue
+
+                            extension = _fergie_picture_extension(mime)
+                            filename = f"fergie_found_pic{extension}"
+
+                            print(
+                                f"FERGIE PICTURE FOUND ✅ "
+                                f"query={search_query!r} title={candidate['title']!r}"
+                            )
+
+                            return (
+                                image_bytes,
+                                filename,
+                                candidate["source"],
+                                candidate["title"],
+                            )
+
+                    except Exception as e:
+                        print(
+                            f"FERGIE PICTURE DOWNLOAD SKIP: "
+                            f"{type(e).__name__}: {e}"
+                        )
+                        continue
 
     except Exception as e:
         print(
@@ -1464,141 +1517,6 @@ async def fetch_fergie_commons_picture(search_term: str):
         )
 
     return None, None, None, None
-
-
-async def _fergie_download_attachment(attachment: discord.Attachment):
-    if attachment.size and attachment.size > FERGIE_IMAGE_MAX_BYTES:
-        return None, None
-    try:
-        data = await attachment.read()
-    except Exception as e:
-        print(f"FERGIE EYES DOWNLOAD ERROR: {type(e).__name__}: {e}")
-        return None, None
-    if not data or len(data) > FERGIE_IMAGE_MAX_BYTES:
-        return None, None
-    mime = (attachment.content_type or "").split(";", 1)[0].lower().strip()
-    if mime not in FERGIE_EYE_MIME_TYPES:
-        name = (attachment.filename or "").lower()
-        if name.endswith((".jpg", ".jpeg")):
-            mime = "image/jpeg"
-        elif name.endswith(".png"):
-            mime = "image/png"
-        elif name.endswith(".webp"):
-            mime = "image/webp"
-        else:
-            return None, None
-    return data, mime
-
-
-async def ask_gemini_image_reaction(message: discord.Message, attachment: discord.Attachment):
-    if not GEMINI_KEY:
-        return None
-    image_bytes, mime = await _fergie_download_attachment(attachment)
-    if not image_bytes:
-        return None
-
-    cast_member = FERGIE_CAST.get(message.author.id)
-    known_name = cast_member.get("name") if cast_member else message.author.display_name
-    traits = "\n".join(f"- {x}" for x in cast_member.get("traits", [])) if cast_member else "None"
-    caption = (message.clean_content or "").strip()
-    prompt = f"""
-You are Fergie, a bratty, dramatic, chronically caffeinated Discord qtpi.
-Look at the attached image and react naturally like another member of the Discord server.
-
-The person who posted it is {known_name}.
-Known running-joke context about them:
-{traits}
-Their accompanying message/caption was: {caption or '(none)'}
-
-Rules:
-- Actually use what is visibly in the image.
-- Keep it witty, casual, playful and concise: normally 1-2 sentences.
-- If the image contains text that matters, you may react to it.
-- Do not invent details you cannot see.
-- Do not identify an unknown real person by name from appearance alone.
-- Do not make sensitive-trait guesses about people in the image.
-- Use server lore only when it naturally fits.
-- Understand English, Spanish and Spanglish.
-- No analysis or preamble; output only Fergie's reply.
-"""
-    payload = {
-        "contents": [{"parts": [
-            {"text": prompt},
-            {"inlineData": {"mimeType": mime, "data": base64.b64encode(image_bytes).decode("ascii")}},
-        ]}]
-    }
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
-    try:
-        timeout = aiohttp.ClientTimeout(total=45)
-        data = None
-        status = None
-        retry_delays = (0, 2, 5)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            for attempt, delay in enumerate(retry_delays, start=1):
-                if delay:
-                    await asyncio.sleep(delay)
-                async with session.post(url, json=payload) as r:
-                    status = r.status
-                    data = await r.json()
-                if status == 200 and "error" not in data:
-                    fergie_art_cooldown_until = 0.0
-                    fergie_art_last_error = ""
-                    break
-                msg = data.get("error", {}).get("message", str(data)) if isinstance(data, dict) else str(data)
-                retryable = status in (429, 500, 502, 503, 504) or any(
-                    x in msg.lower() for x in ("high demand", "temporar", "unavailable", "overloaded")
-                )
-                if retryable and attempt < len(retry_delays):
-                    print(f"FERGIE EYES RETRY {attempt}/2: Gemini busy ({status}); retrying...")
-                    continue
-                print(f"FERGIE EYES GEMINI ERROR: {data}")
-                return None
-        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
-        text = " ".join(p.get("text", "") for p in parts if p.get("text")).strip()
-        return text[:700] if text else None
-    except Exception as e:
-        print(f"FERGIE EYES ERROR: {type(e).__name__}: {e}")
-        return None
-
-
-async def _fergie_art_usage():
-    today = datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
-    data = await _db_get("fergie_art_daily")
-    if not isinstance(data, dict) or data.get("date") != today:
-        data = {"date": today, "count": 0}
-    return data
-
-
-async def _fergie_art_slots_left():
-    data = await _fergie_art_usage()
-    return max(0, FERGIE_IMAGE_DAILY_LIMIT - int(data.get("count", 0)))
-
-
-async def _fergie_consume_art_slot():
-    data = await _fergie_art_usage()
-    if int(data.get("count", 0)) >= FERGIE_IMAGE_DAILY_LIMIT:
-        return False
-    data["count"] = int(data.get("count", 0)) + 1
-    await _db_set("fergie_art_daily", data)
-    return True
-
-
-async def _fergie_refund_art_slot():
-    data = await _fergie_art_usage()
-    data["count"] = max(0, int(data.get("count", 0)) - 1)
-    await _db_set("fergie_art_daily", data)
-
-
-
-
-async def _fergie_reset_art_count():
-    """Admin-only helper: reset today's Art usage counter back to zero."""
-    data = await _fergie_art_usage()
-    data["count"] = 0
-    await _db_set("fergie_art_daily", data)
-def _fergie_art_cooldown_remaining() -> int:
-    return max(0, int(fergie_art_cooldown_until - time.time()))
-
 
 def _fergie_format_cooldown(seconds: int) -> str:
     seconds = max(0, int(seconds))
