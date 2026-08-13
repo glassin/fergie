@@ -2866,8 +2866,9 @@ async def on_message(message: discord.Message):
                 await message.channel.send("🥖🍑")
                 bot._reply_counts[uid] = 0
 
-    # Special: reply to USER3_ID with USER3_LINES (throttled to 35% of their msgs; 20% add emote)
-    if message.author.id == USER3_ID:
+    # Special: reply to USER3_ID with USER3_LINES only when she is NOT directly talking to Fergie.
+    # Explicit @fergie requests must reach the normal AI mention handler.
+    if message.author.id == USER3_ID and not mentioned:
         if random.random() < 0.35:
             phrase = random.choice(USER3_LINES)
             if random.random() < 0.20:
@@ -2880,8 +2881,9 @@ async def on_message(message: discord.Message):
         bot._mimic_last_ts = 0
     nowts = _now()
 
-    # If USER3 speaks, maybe reply in their style
-    if message.author.id == USER3_ID:
+    # If USER3 speaks without directly addressing Fergie, maybe reply in their style.
+    # Direct @fergie messages bypass mimic so Viv can use Fergie's AI normally.
+    if message.author.id == USER3_ID and not mentioned:
         if nowts - bot._mimic_last_ts >= MIMIC_COOLDOWN_SEC and random.random() < MIMIC_REPLY_CHANCE:
             gen = await _mimic_generate()
             if gen:
