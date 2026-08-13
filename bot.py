@@ -1341,12 +1341,27 @@ Rules:
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
     try:
         timeout = aiohttp.ClientTimeout(total=45)
+        data = None
+        status = None
+        retry_delays = (0, 2, 5)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload) as r:
-                data = await r.json()
-        if r.status != 200 or "error" in data:
-            print(f"FERGIE EYES GEMINI ERROR: {data}")
-            return None
+            for attempt, delay in enumerate(retry_delays, start=1):
+                if delay:
+                    await asyncio.sleep(delay)
+                async with session.post(url, json=payload) as r:
+                    status = r.status
+                    data = await r.json()
+                if status == 200 and "error" not in data:
+                    break
+                msg = data.get("error", {}).get("message", str(data)) if isinstance(data, dict) else str(data)
+                retryable = status in (429, 500, 502, 503, 504) or any(
+                    x in msg.lower() for x in ("high demand", "temporar", "unavailable", "overloaded")
+                )
+                if retryable and attempt < len(retry_delays):
+                    print(f"FERGIE EYES RETRY {attempt}/2: Gemini busy ({status}); retrying...")
+                    continue
+                print(f"FERGIE EYES GEMINI ERROR: {data}")
+                return None
         parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
         text = " ".join(p.get("text", "") for p in parts if p.get("text")).strip()
         return text[:700] if text else None
@@ -1451,13 +1466,27 @@ async def generate_fergie_image(prompt: str):
     }
     try:
         timeout = aiohttp.ClientTimeout(total=120)
+        data = None
+        status = None
+        retry_delays = (0, 2, 5)
         async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload) as r:
-                data = await r.json()
-        if r.status != 200 or "error" in data:
-            msg = data.get("error", {}).get("message", str(data))
-            print(f"FERGIE ART GEMINI ERROR: {msg}")
-            return None, msg
+            for attempt, delay in enumerate(retry_delays, start=1):
+                if delay:
+                    await asyncio.sleep(delay)
+                async with session.post(url, json=payload) as r:
+                    status = r.status
+                    data = await r.json()
+                if status == 200 and "error" not in data:
+                    break
+                msg = data.get("error", {}).get("message", str(data)) if isinstance(data, dict) else str(data)
+                retryable = status in (429, 500, 502, 503, 504) or any(
+                    x in msg.lower() for x in ("high demand", "temporar", "unavailable", "overloaded")
+                )
+                if retryable and attempt < len(retry_delays):
+                    print(f"FERGIE ART RETRY {attempt}/2: Gemini busy ({status}); retrying...")
+                    continue
+                print(f"FERGIE ART GEMINI ERROR: {msg}")
+                return None, msg
         for candidate in data.get("candidates", []):
             for part in candidate.get("content", {}).get("parts", []):
                 inline = part.get("inlineData") or part.get("inline_data")
