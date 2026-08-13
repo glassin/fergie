@@ -2911,23 +2911,53 @@ async def on_message(message: discord.Message):
         )
         reply_context = ""
 
-        # Fergie Say: repeat requested text directly into the channel.
+        # Fergie Say: turn requested text directly into a voice post.
         # Example: @fergie say carne asada
         say_match = re.match(r"^say\s+(.+)$", question, flags=re.IGNORECASE | re.DOTALL)
         if say_match:
             say_text = say_match.group(1).strip()
 
-            # Discord messages cap at 2000 chars; leave a little safety room.
+            # Keep explicit Say requests reasonably short for a Discord voice post.
             if len(say_text) > 1800:
                 say_text = say_text[:1800]
 
-            if say_text:
-                await message.channel.send(
-                    say_text,
-                    allowed_mentions=discord.AllowedMentions.none(),
-                )
-            else:
+            if not say_text:
                 await message.reply("say what, fak. 🙄", mention_author=False)
+                return
+
+            audio = await generate_fergie_text_voice(say_text)
+
+            if not audio:
+                await message.reply(
+                    "fak. my voice machine isn't cooperating. 🙄",
+                    mention_author=False,
+                )
+                return
+
+            try:
+                audio_file = discord.File(
+                    io.BytesIO(audio),
+                    filename=f"fergie_say_{message.author.id}.mp3",
+                )
+
+                await message.reply(
+                    file=audio_file,
+                    mention_author=False,
+                )
+
+                print(
+                    f"FERGIE SAY VOICE SENT ✅ "
+                    f"user={message.author.id} bytes={len(audio)}"
+                )
+            except Exception as e:
+                print(
+                    f"FERGIE SAY VOICE SEND ERROR: "
+                    f"{type(e).__name__}: {e}"
+                )
+                await message.reply(
+                    "fak. i made the audio and discord ate it. 🙄",
+                    mention_author=False,
+                )
             return
 
         # Fergie TL;DR: direct mention + natural-language recap request.
@@ -4461,7 +4491,7 @@ async def halp(ctx, *, command: str | None = None):
         name="🧠 Talk to Fergie",
         value=(
             "`@fergie <anything>` — Talk to me normally; I understand English, Spanish & Spanglish\n"
-            "`@fergie say <text>` — Make me post exactly what you tell me to say\n"
+            "`@fergie say <text>` — Make me say it as a voice post\n"
             "`@fergie give me the tldr` — Recap today's accessible server yapping\n"
             "`@fergie` + image — I'll look at the image and react\n"
             "I may also randomly butt into chat, react to images, or answer with a voice post."
