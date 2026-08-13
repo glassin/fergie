@@ -56,6 +56,14 @@ FERGIE_IMAGE_MAX_BYTES = int(os.getenv("FERGIE_IMAGE_MAX_BYTES", str(8 * 1024 * 
 fergie_image_reaction_cooldowns = {}
 FERGIE_EYE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
+# Art outage protection: after Gemini exhausts all retries on a temporary
+# capacity/rate-limit failure, pause new Art requests for 15 minutes.
+FERGIE_ART_OUTAGE_COOLDOWN_SECONDS = int(
+    os.getenv("FERGIE_ART_OUTAGE_COOLDOWN_SECONDS", "900")
+)
+fergie_art_cooldown_until = 0.0
+fergie_art_last_error = ""
+
 FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
 
 def get_fergie_human_age():
@@ -1352,6 +1360,8 @@ Rules:
                     status = r.status
                     data = await r.json()
                 if status == 200 and "error" not in data:
+                    fergie_art_cooldown_until = 0.0
+                    fergie_art_last_error = ""
                     break
                 msg = data.get("error", {}).get("message", str(data)) if isinstance(data, dict) else str(data)
                 retryable = status in (429, 500, 502, 503, 504) or any(
@@ -1398,6 +1408,27 @@ async def _fergie_refund_art_slot():
     await _db_set("fergie_art_daily", data)
 
 
+def _fergie_art_cooldown_remaining() -> int:
+    return max(0, int(fergie_art_cooldown_until - time.time()))
+
+
+def _fergie_format_cooldown(seconds: int) -> str:
+    seconds = max(0, int(seconds))
+    minutes = (seconds + 59) // 60
+    if minutes <= 1:
+        return "about a minute"
+    return f"about {minutes} minutes"
+
+
+def _fergie_art_error_kind(error_text: str | None) -> str:
+    text = (error_text or "").lower()
+    if any(x in text for x in ("high demand", "temporar", "unavailable", "overloaded", "503")):
+        return "busy"
+    if any(x in text for x in ("429", "rate limit", "too many requests", "resource_exhausted", "quota")):
+        return "rate"
+    return "other"
+
+
 FERGIE_VISUAL_REFS = {
     "viviana": {"path": "visual_refs/viviana.png", "aliases": ["viviana", "viv"]},
     "khurty": {"path": "visual_refs/khurty.png", "aliases": ["khurty", "kurtie"]},
@@ -1430,6 +1461,8 @@ def _fergie_load_visual_ref(path: str):
 
 
 async def generate_fergie_image(prompt: str):
+    global fergie_art_cooldown_until, fergie_art_last_error
+
     if not GEMINI_KEY:
         return None, "Gemini key missing."
 
@@ -1485,6 +1518,17 @@ async def generate_fergie_image(prompt: str):
                 if retryable and attempt < len(retry_delays):
                     print(f"FERGIE ART RETRY {attempt}/2: Gemini busy ({status}); retrying...")
                     continue
+
+                if retryable:
+                    fergie_art_last_error = msg
+                    fergie_art_cooldown_until = (
+                        time.time() + FERGIE_ART_OUTAGE_COOLDOWN_SECONDS
+                    )
+                    print(
+                        "FERGIE ART COOLDOWN STARTED: "
+                        f"{FERGIE_ART_OUTAGE_COOLDOWN_SECONDS}s"
+                    )
+
                 print(f"FERGIE ART GEMINI ERROR: {msg}")
                 return None, msg
         for candidate in data.get("candidates", []):
@@ -2398,6 +2442,16 @@ async def on_message(message: discord.Message):
         )
         art_prompt = _fergie_image_generation_prompt(art_question)
         if art_prompt and not _fergie_static_image_attachments(message):
+            cooldown_remaining = _fergie_art_cooldown_remaining()
+            if cooldown_remaining > 0:
+                await message.reply(
+                    "fak. google's art department is fighting for its life rn. 🙄 "
+                    f"i'm cooling Art down for {_fergie_format_cooldown(cooldown_remaining)}. "
+                    "your pic limit is untouched.",
+                    mention_author=False,
+                )
+                return
+
             left = await _fergie_art_slots_left()
             if left <= 0:
                 await message.reply(
@@ -2414,7 +2468,33 @@ async def on_message(message: discord.Message):
             image_bytes, art_error = await generate_fergie_image(art_prompt)
             if not image_bytes:
                 await _fergie_refund_art_slot()
-                await wait.edit(content="fak. the art machine had a moment. i didn't charge today's limit — try again later. 🙄")
+
+                error_kind = _fergie_art_error_kind(art_error)
+                if error_kind == "busy":
+                    cooldown_remaining = _fergie_art_cooldown_remaining()
+                    await wait.edit(
+                        content=(
+                            "fak. google's art department is fighting for its life rn. 🙄 "
+                            "i didn't charge today's pic limit. "
+                            f"Art is cooling down for {_fergie_format_cooldown(cooldown_remaining)}."
+                        )
+                    )
+                elif error_kind == "rate":
+                    cooldown_remaining = _fergie_art_cooldown_remaining()
+                    await wait.edit(
+                        content=(
+                            "google told me to slow tf down. 🙄 "
+                            "i didn't charge today's pic limit. "
+                            f"Art is cooling down for {_fergie_format_cooldown(cooldown_remaining)}."
+                        )
+                    )
+                else:
+                    await wait.edit(
+                        content=(
+                            "fak. the art machine had a moment. "
+                            "i didn't charge today's limit — try again later. 🙄"
+                        )
+                    )
                 return
 
             try:
@@ -3936,28 +4016,37 @@ async def dbdump(ctx):
 
 
 # ================== Fergie Art Status ==================
-@bot.command(name="art", help="Show Fergie's remaining daily Art generations")
+@bot.command(name="art", help="Show Fergie's Art status and remaining daily generations")
 async def art(ctx):
     left = await _fergie_art_slots_left()
     used = max(0, FERGIE_IMAGE_DAILY_LIMIT - left)
+    cooldown_remaining = _fergie_art_cooldown_remaining()
 
-    if left <= 0:
-        msg = (
-            f"🎨 art department: **0/{FERGIE_IMAGE_DAILY_LIMIT} pics left today**. "
-            "girl we're CLOSED. 😭 try me tomorrow."
-        )
-    elif left == 1:
-        msg = (
-            f"🎨 art department: **1/{FERGIE_IMAGE_DAILY_LIMIT} pic left today**. "
-            "one shot left, fak. don\'t embarrass me. 🙄"
+    if cooldown_remaining > 0:
+        status = (
+            f"🟠 **Gemini Art cooling down** — "
+            f"{_fergie_format_cooldown(cooldown_remaining)} left"
         )
     else:
-        msg = (
-            f"🎨 art department: **{left}/{FERGIE_IMAGE_DAILY_LIMIT} pics left today**. "
-            f"i\'ve made **{used}** today. don\'t waste the rest, fak. 🙄🎨"
+        status = "🟢 **Art ready**"
+
+    if left <= 0:
+        allowance = (
+            f"🎨 **0/{FERGIE_IMAGE_DAILY_LIMIT} pics left today.** "
+            "girl we're CLOSED. 😭"
+        )
+    elif left == 1:
+        allowance = (
+            f"🎨 **1/{FERGIE_IMAGE_DAILY_LIMIT} pic left today.** "
+            "one shot left, fak. don't embarrass me. 🙄"
+        )
+    else:
+        allowance = (
+            f"🎨 **{left}/{FERGIE_IMAGE_DAILY_LIMIT} pics left today.** "
+            f"i've made **{used}** today. don't waste the rest, fak. 🙄"
         )
 
-    await ctx.send(msg)
+    await ctx.send(f"{allowance}\n{status}")
 
 
 # ================== Fun / Media Commands ==================
