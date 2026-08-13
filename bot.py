@@ -2074,13 +2074,43 @@ def _fergie_extract_music_score(review: str):
         return None
 
 
+def _fergie_music_poster_context(user_id: int, display_name: str):
+    """Resolve a Spotify poster through Fergie's established cast before falling back to Discord name."""
+    member = FERGIE_CAST.get(user_id)
+
+    if not member:
+        return {
+            "known": False,
+            "name": display_name or "someone",
+            "relationship": "server member",
+            "traits": [],
+        }
+
+    name = member.get("name") or display_name or "someone"
+    traits = list(member.get("traits") or [])
+
+    relationship = "server regular"
+    if user_id == USER3_ID:
+        relationship = "your mom"
+    elif user_id == USER1_ID:
+        relationship = "your dad/creator"
+
+    return {
+        "known": True,
+        "name": name,
+        "relationship": relationship,
+        "traits": traits,
+    }
+
+
 async def ask_gemini_music_review(
     song_title: str,
     artist: str = "Unknown artist",
     album: str = "",
     release_date: str = "",
     popularity: int | None = None,
-    posted_by: str = "someone",
+    poster_id: int | None = None,
+    poster_display_name: str = "someone",
 ):
     """
     Fergie Music Critic 2.0:
@@ -2090,6 +2120,25 @@ async def ask_gemini_music_review(
     - varied review shapes instead of one repetitive template
     """
     profile = await _fergie_music_profile(artist)
+    poster = _fergie_music_poster_context(
+        int(poster_id) if poster_id is not None else 0,
+        poster_display_name,
+    )
+
+    poster_name = poster["name"]
+    poster_relationship = poster["relationship"]
+    poster_traits = poster["traits"]
+
+    poster_context_lines = [
+        f"Canonical name: {poster_name}",
+        f"Relationship to you: {poster_relationship}",
+        f"Known cast member: {'yes' if poster['known'] else 'no'}",
+    ]
+    if poster_traits:
+        poster_context_lines.append(
+            "Relevant established traits: " + "; ".join(poster_traits)
+        )
+    poster_context = "\n".join(poster_context_lines)
 
     average_score = profile.get("average_score")
     prior_reviews = int(profile.get("reviews", 0))
@@ -2142,12 +2191,26 @@ async def ask_gemini_music_review(
     metadata_text = "\n".join(metadata_lines)
 
     prompt = f"""
-You are reviewing a Spotify song as Fergie.
+You ARE Fergie, the same Fergie who talks to this Discord server. This music critic is not a separate persona or mini-bot.
+
+Your canonical self-lore:
+{FERGIE_SELF_LORE}
+
+The server cast you already know:
+{build_cast_context()}
+
+Who posted this song:
+{poster_context}
+
+IMPORTANT identity rule:
+- If this is a known cast member, think of them by their canonical cast identity and your relationship to them.
+- Do NOT call a known cast member by their raw Discord display name just because Discord supplied one.
+- For your dad/creator, naturally think of him as Jonathan, Dad, Papo, or another relationship-appropriate name when you address him.
+- For your mom, naturally think of her as Viviana, Viv, Mom, or another relationship-appropriate name.
+- You do not have to address the poster at all. Use their identity only when it makes the review more personal or funny.
 
 Actual Spotify metadata:
 {metadata_text}
-
-The person who posted it is: {posted_by}
 
 Your evolving history with this artist:
 {history_text}
@@ -2173,22 +2236,45 @@ Consider the artist/song context, production/style, vocals/performance, hook,
 lyrics/theme when reasonably known, originality/personality, replay value,
 and whether YOU personally would keep it on the aux.
 
+Fergie's critic voice:
+- This is FERGIE reviewing the song, not a polite music app and not a generic AI critic.
+- Be bratty, funny, opinionated, dramatic, nosy, a little feral, and confidently specific.
+- React like somebody dropped the song into your Discord and now you have THOUGHTS.
+- Your wording should feel conversational and spontaneous: "fak", "girl", "ugh", "LISTEN",
+  "be so serious", "oh my gawwwd", "como jodes", "not you...", "i fear...", etc. are available,
+  but rotate them and do NOT cram a catchphrase into every review.
+- You can roast the poster's taste, imagine an absurd scenario the song belongs in,
+  compare it to relationship/gym/coffee/server behavior, or make a weirdly specific observation.
+- If the song is excellent, LET YOURSELF GET EXCITED. Do not bury every compliment under "it's fine."
+- If it sucks, say it sucks in a funny Fergie way. Do not soften every negative review.
+- If it is mid, explain what KIND of mid it is. "It's fine" by itself is boring.
+- Avoid generic critic filler such as "it's got a vibe", "nice little groove", "could be worse",
+  "not life-changing", "not completely terrible", "solid track", or "pretty good" unless the
+  surrounding joke makes the line distinctly Fergie.
+- Do not mechanically begin reviews with "Ugh,". Opening lines should vary a lot.
+- Do not mechanically address {posted_by} in every review.
+- The score is the punctuation on the opinion, not the whole review.
+
 Output rules:
 - Give a genuine score from 0.0/10 to 10.0/10 based on your opinion.
 - Do NOT cluster everything between 7 and 10.
 - Bad or boring songs may score low. Great songs may score high.
 - Always include the score exactly once in the form X.X/10.
 - Keep the whole response under 5 short lines.
-- Vary the format naturally. Sometimes lead with the score, sometimes end with it.
+- Vary the shape aggressively: one-line drive-by, two-line roast, dramatic mini-rant,
+  begrudging praise, ecstatic praise, or a short oddly-specific scenario.
+- Sometimes lead with the score; sometimes bury it at the end.
 - Sometimes give one savage sentence. Sometimes give 2-4 short lines.
-- Sometimes praise it with almost no insult if you genuinely love it.
+- Sometimes praise it with NO insult if you genuinely love it.
 - Sometimes roast it hard if you hate it.
-- You may lightly roast {posted_by}, but do not make every review about the poster.
+- You may roast {poster_name}, but only when it makes the review funnier.
 - Never repeat a canned catchphrase just because it exists.
 - Never use the phrase "emotionally expensive."
 - No hashtags.
 - Do not say you listened to audio if you only know the song from available metadata/search context.
 - Do not invent specific musical details you cannot reasonably know.
+- Before returning the review, silently ask: "Could a generic music-review bot have written this?"
+  If yes, rewrite it until it unmistakably sounds like Fergie.
 - Stay Fergie.
 
 Write ONLY Fergie's review.
@@ -3132,7 +3218,8 @@ async def on_message(message: discord.Message):
             album=album,
             release_date=release_date,
             popularity=popularity,
-            posted_by=message.author.display_name,
+            poster_id=message.author.id,
+            poster_display_name=message.author.display_name,
         )
 
         if review:
