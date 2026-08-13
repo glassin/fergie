@@ -1,5 +1,5 @@
 
-# Bread Bot (Minimal)
+# fergz
 
 A tiny Discord bot that:
 - Replies randomly with bread GIFs or bread puns (no pings)
