@@ -2384,6 +2384,209 @@ async def fergie_reminders():
 async def _wait_fergie_reminders():
     await bot.wait_until_ready()  
     
+
+# ================== Fergie TL;DR ==================
+# Ephemeral only: channel messages are gathered in memory for this request,
+# summarized, and discarded. Nothing from TL;DR is written to Neon/Postgres.
+FERGIE_TLDR_MAX_MESSAGES = int(os.getenv("FERGIE_TLDR_MAX_MESSAGES", "1200"))
+FERGIE_TLDR_MAX_PER_CHANNEL = int(os.getenv("FERGIE_TLDR_MAX_PER_CHANNEL", "400"))
+FERGIE_TLDR_MAX_CONTEXT_CHARS = int(os.getenv("FERGIE_TLDR_MAX_CONTEXT_CHARS", "50000"))
+
+
+def _fergie_is_tldr_request(text: str) -> bool:
+    """Match natural direct-mention TL;DR requests such as 'give me the tldr'."""
+    cleaned = re.sub(r"\s+", " ", (text or "").strip().lower())
+    if not cleaned:
+        return False
+
+    patterns = [
+        r"\b(?:give|gimme|send|show|tell)\s+me\s+(?:the\s+)?t\.?l\.?d\.?r\.?\b",
+        r"\b(?:give|gimme|send|show|tell)\s+me\s+(?:a\s+)?(?:recap|summary)\b",
+        r"\bwhat\s+did\s+i\s+miss\b",
+        r"^(?:the\s+)?t\.?l\.?d\.?r\.?\??$",
+        r"^(?:today'?s?\s+)?(?:recap|summary)\??$",
+    ]
+    return any(re.search(pattern, cleaned, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _fergie_tldr_message_is_noise(msg: discord.Message) -> bool:
+    """Drop obvious command/bot noise while keeping normal conversation."""
+    if msg.author.bot:
+        return True
+
+    content = (msg.clean_content or msg.content or "").strip()
+    if not content:
+        return True
+
+    if content.startswith("!"):
+        return True
+
+    # Do not summarize the request that triggered this TL;DR.
+    if bot.user:
+        stripped = (
+            content
+            .replace(f"<@{bot.user.id}>", "")
+            .replace(f"<@!{bot.user.id}>", "")
+            .strip()
+        )
+        if _fergie_is_tldr_request(stripped):
+            return True
+
+    return False
+
+
+async def _fergie_collect_todays_tldr_messages(message: discord.Message):
+    """
+    Collect today's visible text-chat messages for the requester.
+
+    "Today" is the current calendar day in America/Los_Angeles, not the last
+    24 hours. Only channels the requester can view AND read history in are
+    included. Fergie must also have permission to read them.
+    """
+    if not message.guild:
+        return []
+
+    pacific = ZoneInfo("America/Los_Angeles")
+    now_local = datetime.now(pacific)
+    start_local = datetime.combine(now_local.date(), dtime.min, tzinfo=pacific)
+    start_utc = start_local.astimezone(timezone.utc)
+
+    guild = message.guild
+    requester = message.author
+    me = guild.me
+    gathered = []
+
+    channels = list(guild.text_channels)
+
+    # If the request happens inside a thread, include that thread too.
+    if isinstance(message.channel, discord.Thread):
+        channels.append(message.channel)
+
+    for channel in channels:
+        if len(gathered) >= FERGIE_TLDR_MAX_MESSAGES:
+            break
+
+        try:
+            requester_perms = channel.permissions_for(requester)
+            if not requester_perms.view_channel or not requester_perms.read_message_history:
+                continue
+
+            if me is not None:
+                bot_perms = channel.permissions_for(me)
+                if not bot_perms.view_channel or not bot_perms.read_message_history:
+                    continue
+
+            channel_rows = []
+            async for msg in channel.history(
+                limit=FERGIE_TLDR_MAX_PER_CHANNEL,
+                after=start_utc,
+                oldest_first=True,
+            ):
+                if msg.id == message.id or _fergie_tldr_message_is_noise(msg):
+                    continue
+
+                content = (msg.clean_content or msg.content or "").strip()
+                if not content:
+                    continue
+
+                # Keep individual messages bounded so one giant paste cannot
+                # consume the whole summary context.
+                if len(content) > 1000:
+                    content = content[:1000] + "…"
+
+                created_local = msg.created_at.astimezone(pacific)
+                channel_rows.append(
+                    (
+                        msg.created_at,
+                        f"[{created_local.strftime('%I:%M %p')}] "
+                        f"#{channel.name} — {msg.author.display_name}: {content}"
+                    )
+                )
+
+            gathered.extend(channel_rows)
+
+        except (discord.Forbidden, discord.HTTPException) as e:
+            print(
+                f"FERGIE TLDR SKIP CHANNEL {getattr(channel, 'id', '?')}: "
+                f"{type(e).__name__}: {e}"
+            )
+            continue
+        except Exception as e:
+            print(
+                f"FERGIE TLDR CHANNEL ERROR {getattr(channel, 'id', '?')}: "
+                f"{type(e).__name__}: {e}"
+            )
+            continue
+
+    gathered.sort(key=lambda row: row[0])
+    return gathered[-FERGIE_TLDR_MAX_MESSAGES:]
+
+
+async def make_fergie_tldr(message: discord.Message):
+    """Build a short Fergie-style recap from today's ephemeral Discord context."""
+    rows = await _fergie_collect_todays_tldr_messages(message)
+
+    if not rows:
+        return (
+            "girl there is nothing to TL;DR today. 😭 "
+            "either everybody touched grass or the server is giving abandoned mall."
+        )
+
+    transcript_lines = [row[1] for row in rows]
+    transcript = "\n".join(transcript_lines)
+
+    # Keep the newest material if the server had an unusually busy day.
+    if len(transcript) > FERGIE_TLDR_MAX_CONTEXT_CHARS:
+        transcript = transcript[-FERGIE_TLDR_MAX_CONTEXT_CHARS:]
+        first_newline = transcript.find("\n")
+        if first_newline != -1:
+            transcript = transcript[first_newline + 1:]
+
+    prompt = f"""
+You are making Fergie's TL;DR of TODAY'S Discord conversation.
+
+IMPORTANT:
+- Use ONLY the Discord messages supplied below.
+- Do NOT use Google Search or outside information.
+- Do NOT claim something happened unless the supplied messages support it.
+- This is an ephemeral recap. Do not talk about storage, databases, or privacy mechanics.
+- Summarize the main conversations, funny moments, decisions, plans, arguments, links/topics,
+  and anything someone returning to the server would actually want to know.
+- Ignore repetitive chatter and low-value noise.
+- Mention people by their Discord display names when useful.
+- Do not expose or mention channels that are not present in the supplied context.
+- Do not quote huge chunks of messages.
+- Keep it concise enough for one Discord message: aim for roughly 5-10 short bullet points
+  or a compact paragraph plus bullets.
+- Maximum 1700 characters.
+- Write in Fergie's normal bratty, sarcastic, caffeinated server voice.
+- Be funny, but the recap must remain factually faithful to the supplied messages.
+- Start naturally with something like "alright here's today's bullshit 🙄:" but vary it.
+
+TODAY'S ACCESSIBLE DISCORD MESSAGES:
+{transcript}
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return "fak. my recap brain clocked out. try me again in a minute. 🙄"
+
+    cleaned = answer.strip()
+
+    if (
+        cleaned.startswith("Gemini error:")
+        or cleaned.startswith("error:")
+        or cleaned == "gemini key missing"
+        or "quota" in cleaned.lower()
+    ):
+        return "fak. google is being dramatic again. i can't make the TL;DR rn. 🙄"
+
+    if len(cleaned) > 1800:
+        cleaned = cleaned[:1797].rstrip() + "..."
+
+    return cleaned
+
 @bot.event
 async def on_message(message: discord.Message):
 
@@ -2672,6 +2875,27 @@ async def on_message(message: discord.Message):
             .strip()
         )
         reply_context = ""
+
+        # Fergie TL;DR: direct mention + natural-language recap request.
+        # This runs before normal Gemini chat so the request gets today's
+        # accessible server context instead of only the last few messages.
+        if _fergie_is_tldr_request(question):
+            if await gemini_on_cooldown(message):
+                return
+
+            wait = await message.reply(
+                "ugh fine. reading today's yapping... 🙄",
+                mention_author=False
+            )
+
+            try:
+                answer = await make_fergie_tldr(message)
+            except Exception as e:
+                print(f"FERGIE TLDR ERROR: {type(e).__name__}: {e}")
+                answer = "fak. the recap machine had a moment. try me again in a minute. 🙄"
+
+            await wait.edit(content=answer)
+            return
 
         if message.reference and message.reference.resolved:
             replied_msg = message.reference.resolved
