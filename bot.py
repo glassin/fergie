@@ -1354,26 +1354,64 @@ def _fergie_absolute_url(base_url: str, found_url: str):
         return None
 
 
-def _fergie_extract_page_image_url(page_html: str, page_url: str):
-    """Prefer OpenGraph/Twitter preview images from grounded source pages."""
+def _fergie_image_url_looks_bad(image_url: str) -> bool:
+    """Reject obvious logos/icons/placeholders before downloading."""
+    lowered = (image_url or "").lower()
+
+    bad_tokens = (
+        "logo",
+        "wordmark",
+        "favicon",
+        "icon",
+        "sprite",
+        "placeholder",
+        "default-avatar",
+        "default_avatar",
+        "apple-touch-icon",
+    )
+
+    return any(token in lowered for token in bad_tokens)
+
+
+def _fergie_extract_page_image_urls(page_html: str, page_url: str):
+    """Collect likely real-image candidates from a grounded source page."""
     if not page_html:
-        return None
+        return []
 
     patterns = [
         r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']',
         r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']',
         r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']',
         r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image(?::src)?["\']',
+        r'<meta[^>]+itemprop=["\']image["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<link[^>]+rel=["\']image_src["\'][^>]+href=["\']([^"\']+)["\']',
+        r'"image"\s*:\s*"([^"]+)"',
+        r'"contentUrl"\s*:\s*"([^"]+)"',
     ]
 
-    for pattern in patterns:
-        match = re.search(pattern, page_html, flags=re.IGNORECASE)
-        if match:
-            resolved = _fergie_absolute_url(page_url, match.group(1))
-            if resolved:
-                return resolved
+    found = []
+    seen = set()
 
-    return None
+    for pattern in patterns:
+        for match in re.finditer(pattern, page_html, flags=re.IGNORECASE):
+            resolved = _fergie_absolute_url(page_url, match.group(1))
+
+            if not resolved:
+                continue
+
+            if _fergie_image_url_looks_bad(resolved):
+                continue
+
+            if resolved in seen:
+                continue
+
+            seen.add(resolved)
+            found.append(resolved)
+
+            if len(found) >= 12:
+                return found
+
+    return found
 
 
 async def _fergie_google_grounded_pages(search_term: str):
@@ -1392,13 +1430,19 @@ async def _fergie_google_grounded_pages(search_term: str):
 
     prompt = f"""
 Use Google Search to find relevant public webpages that visibly feature a clear
-photo of this subject:
+REAL PHOTO of this subject:
 
 {search_term}
 
-Prefer official sites, Wikipedia/reference pages, established music or
-entertainment sites, reputable news sites, or other strong sources.
-Do not invent URLs. Briefly identify the subject and suitable source pages.
+Important:
+- Prefer an actual photograph of the person, band members, place, object, or thing.
+- For a band or musical artist, prefer a press photo / member photo, NOT a logo,
+  album cover, wordmark, icon, or streaming-service placeholder.
+- For a person, prefer a portrait, event photo, press photo, or headshot.
+- Avoid pages whose main preview image is only a logo, icon, poster, or generic artwork.
+- Prefer official sites, Wikipedia/reference pages, established music or
+  entertainment sites, reputable news sites, or other strong sources.
+- Do not invent URLs. Briefly identify the subject and suitable source pages.
 """
 
     payload = {
@@ -1526,64 +1570,73 @@ async def fetch_fergie_picture(search_term: str):
 
                         page_html = await page_response.text(errors="ignore")
 
-                    image_url = _fergie_extract_page_image_url(
+                    image_urls = _fergie_extract_page_image_urls(
                         page_html,
                         final_page_url,
                     )
 
-                    if not image_url:
+                    if not image_urls:
                         print(
-                            f"FERGIE PICTURE: no preview image on "
+                            f"FERGIE PICTURE: no usable preview image on "
                             f"{grounded_title!r}"
                         )
                         continue
 
-                    async with session.get(
-                        image_url,
-                        headers={
-                            **FERGIE_PICTURE_WEB_HEADERS,
-                            "Referer": final_page_url,
-                        },
-                        allow_redirects=True,
-                    ) as image_response:
+                    for image_url in image_urls:
+                        try:
+                            async with session.get(
+                                image_url,
+                                headers={
+                                    **FERGIE_PICTURE_WEB_HEADERS,
+                                    "Referer": final_page_url,
+                                },
+                                allow_redirects=True,
+                            ) as image_response:
 
-                        if image_response.status != 200:
+                                if image_response.status != 200:
+                                    print(
+                                        f"FERGIE PICTURE IMAGE SKIP "
+                                        f"{image_response.status}: {image_url[:180]}"
+                                    )
+                                    continue
+
+                                image_mime = (
+                                    image_response.headers.get("Content-Type", "")
+                                    .split(";", 1)[0]
+                                    .lower()
+                                    .strip()
+                                )
+
+                                if not image_mime.startswith("image/"):
+                                    continue
+
+                                image_bytes = await image_response.read()
+
+                                if (
+                                    not image_bytes
+                                    or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES
+                                ):
+                                    continue
+
                             print(
-                                f"FERGIE PICTURE IMAGE SKIP "
-                                f"{image_response.status}: {image_url[:180]}"
+                                f"FERGIE GOOGLE PICTURE FOUND ✅ "
+                                f"subject={search_term!r} "
+                                f"source={grounded_title!r}"
+                            )
+
+                            return (
+                                image_bytes,
+                                f"fergie_found_pic{_fergie_picture_extension(image_mime)}",
+                                final_page_url,
+                                grounded_title,
+                            )
+
+                        except Exception as image_error:
+                            print(
+                                f"FERGIE PICTURE IMAGE ERROR: "
+                                f"{type(image_error).__name__}: {image_error}"
                             )
                             continue
-
-                        image_mime = (
-                            image_response.headers.get("Content-Type", "")
-                            .split(";", 1)[0]
-                            .lower()
-                            .strip()
-                        )
-
-                        if not image_mime.startswith("image/"):
-                            continue
-
-                        image_bytes = await image_response.read()
-
-                        if (
-                            not image_bytes
-                            or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES
-                        ):
-                            continue
-
-                    print(
-                        f"FERGIE GOOGLE PICTURE FOUND ✅ "
-                        f"subject={search_term!r} "
-                        f"source={grounded_title!r}"
-                    )
-
-                    return (
-                        image_bytes,
-                        f"fergie_found_pic{_fergie_picture_extension(image_mime)}",
-                        final_page_url,
-                        grounded_title,
-                    )
 
                 except Exception as e:
                     print(
