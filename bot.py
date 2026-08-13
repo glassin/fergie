@@ -1,4 +1,4 @@
-import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io, base64
+import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io, base64, html
 from aiohttp import web
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
@@ -1286,23 +1286,26 @@ def _fergie_image_generation_prompt(text: str):
     return None
 
 
-# ================== Fergie Picture Fetch (Wikimedia Commons) ==================
+# ================== Fergie Picture Fetch (Google Search Grounding) ==================
 
-FERGIE_COMMONS_API = "https://commons.wikimedia.org/w/api.php"
-FERGIE_COMMONS_USER_AGENT = os.getenv(
-    "FERGIE_COMMONS_USER_AGENT",
-    "FergieDiscordBot/4.5 (Wikimedia Commons picture search)"
+# Uses the SAME GEMINI_API_KEY already deployed for Fergie.
+FERGIE_PICTURE_SEARCH_MODEL = os.getenv(
+    "FERGIE_PICTURE_SEARCH_MODEL",
+    "gemini-3.1-flash-lite",
 ).strip()
+
+FERGIE_PICTURE_WEB_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
 
 
 def _fergie_picture_search_query(text: str):
-    """
-    Detect explicit real-picture requests without colliding with Art generation.
-    Examples:
-      @fergie show me a picture of Sabrina Carpenter
-      @fergie find me a photo of a capybara
-      @fergie picture of Mount Fuji
-    """
+    """Detect explicit requests for a REAL existing picture."""
     text = (text or "").strip()
 
     patterns = [
@@ -1325,384 +1328,278 @@ def _fergie_picture_extension(mime: str) -> str:
     mime = (mime or "").lower().strip()
     return {
         "image/jpeg": ".jpg",
+        "image/jpg": ".jpg",
         "image/png": ".png",
         "image/webp": ".webp",
         "image/gif": ".gif",
     }.get(mime, ".jpg")
 
 
+def _fergie_absolute_url(base_url: str, found_url: str):
+    found_url = html.unescape((found_url or "").strip())
 
-# ================== Fergie DuckDuckGo Image Search ==================
-# DuckDuckGo does not provide an official public image-search API.
-# This uses its public web image-search flow with aiohttp and falls back to Commons.
-FERGIE_DDG_HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0 Safari/537.36"
-    ),
-    "Accept-Language": "en-US,en;q=0.9",
-}
+    if not found_url:
+        return None
+
+    if found_url.startswith("//"):
+        return "https:" + found_url
+
+    if found_url.startswith(("http://", "https://")):
+        return found_url
+
+    try:
+        from urllib.parse import urljoin
+        return urljoin(base_url, found_url)
+    except Exception:
+        return None
 
 
-async def _fergie_ddg_vqd(session: aiohttp.ClientSession, search_term: str):
-    """Fetch DuckDuckGo's short-lived VQD token needed for image search."""
-    params = {"q": search_term}
-
-    async with session.get(
-        "https://duckduckgo.com/",
-        params=params,
-        headers=FERGIE_DDG_HEADERS,
-    ) as response:
-        if response.status != 200:
-            return None
-
-        html = await response.text()
+def _fergie_extract_page_image_url(page_html: str, page_url: str):
+    """Prefer OpenGraph/Twitter preview images from grounded source pages."""
+    if not page_html:
+        return None
 
     patterns = [
-        r'vqd=["\']([^"\']+)["\']',
-        r'vqd=([0-9-]+)&',
-        r'"vqd"\s*:\s*"([^"]+)"',
+        r'<meta[^>]+property=["\']og:image(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image(?::secure_url)?["\']',
+        r'<meta[^>]+name=["\']twitter:image(?::src)?["\'][^>]+content=["\']([^"\']+)["\']',
+        r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+name=["\']twitter:image(?::src)?["\']',
     ]
 
     for pattern in patterns:
-        match = re.search(pattern, html)
+        match = re.search(pattern, page_html, flags=re.IGNORECASE)
         if match:
-            return match.group(1)
+            resolved = _fergie_absolute_url(page_url, match.group(1))
+            if resolved:
+                return resolved
 
     return None
 
 
-async def fetch_fergie_duckduckgo_picture(search_term: str):
+async def _fergie_google_grounded_pages(search_term: str):
     """
-    Search DuckDuckGo Images and return one downloadable image.
+    Use Gemini Google Search grounding and return ONLY URLs from groundingMetadata.
+    Gemini-generated text URLs are deliberately ignored.
+    """
+    if not GEMINI_KEY:
+        print("FERGIE PICTURE GOOGLE: GEMINI_API_KEY missing")
+        return []
 
-    Returns:
-        (image_bytes, filename, source_page_url, title) on success
-        (None, None, None, None) on failure/no result
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{FERGIE_PICTURE_SEARCH_MODEL}:generateContent?key={GEMINI_KEY}"
+    )
+
+    prompt = f"""
+Use Google Search to find relevant public webpages that visibly feature a clear
+photo of this subject:
+
+{search_term}
+
+Prefer official sites, Wikipedia/reference pages, established music or
+entertainment sites, reputable news sites, or other strong sources.
+Do not invent URLs. Briefly identify the subject and suitable source pages.
+"""
+
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "tools": [{"google_search": {}}],
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=30)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as response:
+                status = response.status
+                data = await response.json(content_type=None)
+
+        if status != 200 or "error" in data:
+            msg = (
+                data.get("error", {}).get("message", str(data))
+                if isinstance(data, dict)
+                else str(data)
+            )
+            print(
+                f"FERGIE PICTURE GOOGLE SEARCH ERROR "
+                f"{status}: {msg[:500]}"
+            )
+            return []
+
+        candidates = data.get("candidates", [])
+        if not candidates:
+            print("FERGIE PICTURE GOOGLE: no candidates")
+            return []
+
+        grounding = candidates[0].get("groundingMetadata", {})
+        chunks = grounding.get("groundingChunks", [])
+
+        pages = []
+        seen = set()
+
+        for chunk in chunks:
+            web_chunk = chunk.get("web") or {}
+            page_url = (web_chunk.get("uri") or "").strip()
+            title = (web_chunk.get("title") or search_term).strip()
+
+            if not page_url or page_url in seen:
+                continue
+
+            seen.add(page_url)
+            pages.append((page_url, title))
+
+        print(
+            f"FERGIE PICTURE GOOGLE: "
+            f"{len(pages)} grounded page(s) for {search_term!r}"
+        )
+
+        return pages
+
+    except Exception as e:
+        print(
+            f"FERGIE PICTURE GOOGLE SEARCH EXCEPTION: "
+            f"{type(e).__name__}: {e}"
+        )
+        return []
+
+
+async def fetch_fergie_picture(search_term: str):
     """
-    search_term = re.sub(r"\s+", " ", (search_term or "")).strip()
-    if not search_term:
+    Google Search grounding -> grounded source page -> real OG/Twitter image.
+
+    This fetches an existing web image; it does NOT call Gemini image generation
+    and does NOT consume Fergie's Art counter.
+    """
+    pages = await _fergie_google_grounded_pages(search_term)
+
+    if not pages:
         return None, None, None, None
 
-    timeout = aiohttp.ClientTimeout(total=25)
+    timeout = aiohttp.ClientTimeout(total=20)
 
     try:
         async with aiohttp.ClientSession(
             timeout=timeout,
-            headers=FERGIE_DDG_HEADERS,
+            headers=FERGIE_PICTURE_WEB_HEADERS,
         ) as session:
-            vqd = await _fergie_ddg_vqd(session, search_term)
 
-            if not vqd:
-                print("FERGIE DDG: could not obtain VQD token")
-                return None, None, None, None
-
-            params = {
-                "l": "us-en",
-                "o": "json",
-                "q": search_term,
-                "vqd": vqd,
-                "f": ",,,",
-            }
-
-            headers = {
-                **FERGIE_DDG_HEADERS,
-                "Referer": f"https://duckduckgo.com/?q={quote_plus(search_term)}&iax=images&ia=images",
-            }
-
-            async with session.get(
-                "https://duckduckgo.com/i.js",
-                params=params,
-                headers=headers,
-            ) as response:
-                if response.status != 200:
-                    error_text = await response.text()
-                    print(
-                        f"FERGIE DDG SEARCH ERROR {response.status}: "
-                        f"{error_text[:300]}"
-                    )
-                    return None, None, None, None
-
-                data = await response.json(content_type=None)
-
-            results = data.get("results", []) if isinstance(data, dict) else []
-
-            if not results:
-                print(f"FERGIE DDG: no image results for {search_term!r}")
-                return None, None, None, None
-
-            # DuckDuckGo orders results by relevance. Try a handful because
-            # some origin sites block hotlink/download requests.
-            for result in results[:12]:
-                image_url = result.get("image")
-                thumb_url = result.get("thumbnail")
-                source_page = result.get("url")
-                title = (result.get("title") or search_term).strip()
-
-                # Prefer the original image, then thumbnail as a fallback.
-                for candidate_url in (image_url, thumb_url):
-                    if not candidate_url:
-                        continue
-
-                    try:
-                        async with session.get(
-                            candidate_url,
-                            headers={
-                                **FERGIE_DDG_HEADERS,
-                                "Referer": source_page or "https://duckduckgo.com/",
-                            },
-                            allow_redirects=True,
-                        ) as image_response:
-                            if image_response.status != 200:
-                                continue
-
-                            content_type = (
-                                image_response.headers.get("Content-Type", "")
-                                .split(";", 1)[0]
-                                .lower()
-                                .strip()
-                            )
-
-                            if content_type and not content_type.startswith("image/"):
-                                continue
-
-                            image_bytes = await image_response.read()
-
-                            if (
-                                not image_bytes
-                                or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES
-                            ):
-                                continue
-
-                            extension = _fergie_picture_extension(content_type)
-                            filename = f"fergie_found_pic{extension}"
-
-                            print(
-                                f"FERGIE DDG PICTURE FOUND ✅ "
-                                f"query={search_term!r} title={title!r}"
-                            )
-
-                            return (
-                                image_bytes,
-                                filename,
-                                source_page,
-                                title,
-                            )
-
-                    except Exception as e:
-                        print(
-                            f"FERGIE DDG DOWNLOAD SKIP: "
-                            f"{type(e).__name__}: {e}"
-                        )
-                        continue
-
-    except Exception as e:
-        print(
-            f"FERGIE DDG SEARCH EXCEPTION: "
-            f"{type(e).__name__}: {e}"
-        )
-
-    return None, None, None, None
-
-
-async def fetch_fergie_picture(search_term: str):
-    """DuckDuckGo Images first, then Wikimedia Commons fallback."""
-    result = await fetch_fergie_duckduckgo_picture(search_term)
-
-    if result[0]:
-        return result
-
-    print("FERGIE PICTURE: DuckDuckGo failed; trying Wikimedia Commons fallback")
-    return await fetch_fergie_commons_picture(search_term)
-
-
-async def fetch_fergie_commons_picture(search_term: str):
-    """
-    Search Wikimedia Commons using several progressively broader/smarter queries.
-
-    Returns:
-        (image_bytes, filename, source_page_url, title) on success
-        (None, None, None, None) on no result/failure
-    """
-    search_term = (search_term or "").strip()
-
-    if not search_term:
-        return None, None, None, None
-
-    # Commons can be literal/picky. Try the user's wording first, then useful
-    # variants that often help with bands, people, places, and named things.
-    clean = re.sub(r"\s+", " ", search_term).strip()
-    variants = [clean]
-
-    lower = clean.lower()
-
-    # "zoe the band" -> "zoe band"
-    without_the = re.sub(r"\bthe\b", "", clean, flags=re.IGNORECASE)
-    without_the = re.sub(r"\s+", " ", without_the).strip()
-    if without_the and without_the.lower() != lower:
-        variants.append(without_the)
-
-    # Band searches benefit from explicit music context.
-    if "band" in lower:
-        base = re.sub(r"\b(?:the\s+)?band\b", "", clean, flags=re.IGNORECASE).strip()
-        if base:
-            variants.extend([
-                f"{base} band",
-                f"{base} music band",
-                f"{base} rock band",
-                f"{base} musicians",
-            ])
-
-    # Person-style fallback. This does not assume the subject is definitely a
-    # person; it simply gives Commons another useful text-search variation.
-    variants.extend([
-        f"{clean} portrait",
-        f"{clean} photo",
-    ])
-
-    # De-duplicate while preserving order.
-    seen = set()
-    search_variants = []
-    for item in variants:
-        key = item.casefold()
-        if item and key not in seen:
-            seen.add(key)
-            search_variants.append(item)
-
-    headers = {
-        "User-Agent": FERGIE_COMMONS_USER_AGENT,
-        "Accept": "application/json",
-    }
-
-    try:
-        timeout = aiohttp.ClientTimeout(total=25)
-
-        async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-            for search_query in search_variants[:7]:
-                print(f"FERGIE PICTURE SEARCH: {search_query}")
-
-                params = {
-                    "action": "query",
-                    "format": "json",
-                    "formatversion": "2",
-                    "generator": "search",
-                    "gsrsearch": search_query,
-                    "gsrnamespace": "6",
-                    "gsrlimit": "20",
-                    "prop": "imageinfo",
-                    "iiprop": "url|mime|thumbmime",
-                    "iiurlwidth": "1200",
-                }
-
+            for grounded_url, grounded_title in pages[:10]:
                 try:
-                    async with session.get(FERGIE_COMMONS_API, params=params) as response:
-                        if response.status != 200:
-                            error_text = await response.text()
+                    async with session.get(
+                        grounded_url,
+                        allow_redirects=True,
+                    ) as page_response:
+
+                        if page_response.status != 200:
                             print(
-                                f"FERGIE PICTURE SEARCH ERROR {response.status}: "
-                                f"{error_text[:500]}"
+                                f"FERGIE PICTURE PAGE SKIP "
+                                f"{page_response.status}: {grounded_title}"
                             )
                             continue
 
-                        data = await response.json()
+                        final_page_url = str(page_response.url)
+                        content_type = (
+                            page_response.headers.get("Content-Type", "")
+                            .split(";", 1)[0]
+                            .lower()
+                            .strip()
+                        )
+
+                        if content_type.startswith("image/"):
+                            image_bytes = await page_response.read()
+
+                            if (
+                                image_bytes
+                                and len(image_bytes) <= FERGIE_IMAGE_MAX_BYTES
+                            ):
+                                return (
+                                    image_bytes,
+                                    f"fergie_found_pic{_fergie_picture_extension(content_type)}",
+                                    final_page_url,
+                                    grounded_title,
+                                )
+
+                            continue
+
+                        if "html" not in content_type:
+                            continue
+
+                        page_html = await page_response.text(errors="ignore")
+
+                    image_url = _fergie_extract_page_image_url(
+                        page_html,
+                        final_page_url,
+                    )
+
+                    if not image_url:
+                        print(
+                            f"FERGIE PICTURE: no preview image on "
+                            f"{grounded_title!r}"
+                        )
+                        continue
+
+                    async with session.get(
+                        image_url,
+                        headers={
+                            **FERGIE_PICTURE_WEB_HEADERS,
+                            "Referer": final_page_url,
+                        },
+                        allow_redirects=True,
+                    ) as image_response:
+
+                        if image_response.status != 200:
+                            print(
+                                f"FERGIE PICTURE IMAGE SKIP "
+                                f"{image_response.status}: {image_url[:180]}"
+                            )
+                            continue
+
+                        image_mime = (
+                            image_response.headers.get("Content-Type", "")
+                            .split(";", 1)[0]
+                            .lower()
+                            .strip()
+                        )
+
+                        if not image_mime.startswith("image/"):
+                            continue
+
+                        image_bytes = await image_response.read()
+
+                        if (
+                            not image_bytes
+                            or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES
+                        ):
+                            continue
+
+                    print(
+                        f"FERGIE GOOGLE PICTURE FOUND ✅ "
+                        f"subject={search_term!r} "
+                        f"source={grounded_title!r}"
+                    )
+
+                    return (
+                        image_bytes,
+                        f"fergie_found_pic{_fergie_picture_extension(image_mime)}",
+                        final_page_url,
+                        grounded_title,
+                    )
+
                 except Exception as e:
                     print(
-                        f"FERGIE PICTURE QUERY ERROR: "
+                        f"FERGIE PICTURE SOURCE SKIP: "
                         f"{type(e).__name__}: {e}"
                     )
                     continue
 
-                pages = data.get("query", {}).get("pages", [])
-                candidates = []
-
-                for page in pages:
-                    imageinfo = page.get("imageinfo") or []
-                    if not imageinfo:
-                        continue
-
-                    info = imageinfo[0]
-                    thumb_url = info.get("thumburl") or info.get("url")
-                    source_page = info.get("descriptionurl")
-                    thumb_mime = (
-                        info.get("thumbmime")
-                        or info.get("mime")
-                        or ""
-                    ).lower()
-
-                    if not thumb_url:
-                        continue
-
-                    if thumb_mime and not thumb_mime.startswith("image/"):
-                        continue
-
-                    title = page.get("title") or "Wikimedia Commons image"
-
-                    candidates.append({
-                        "url": thumb_url,
-                        "source": source_page,
-                        "mime": thumb_mime,
-                        "title": title,
-                    })
-
-                if not candidates:
-                    continue
-
-                # Search results are already relevance-ranked. Keep the first
-                # result as the strongest candidate, but allow a few fallbacks
-                # if its file cannot be downloaded.
-                for candidate in candidates[:8]:
-                    try:
-                        async with session.get(candidate["url"]) as image_response:
-                            if image_response.status != 200:
-                                continue
-
-                            image_bytes = await image_response.read()
-
-                            if not image_bytes or len(image_bytes) > FERGIE_IMAGE_MAX_BYTES:
-                                continue
-
-                            content_type = (
-                                image_response.headers.get("Content-Type", "")
-                                .split(";", 1)[0]
-                                .lower()
-                                .strip()
-                            )
-
-                            mime = content_type or candidate["mime"]
-
-                            if mime and not mime.startswith("image/"):
-                                continue
-
-                            extension = _fergie_picture_extension(mime)
-                            filename = f"fergie_found_pic{extension}"
-
-                            print(
-                                f"FERGIE PICTURE FOUND ✅ "
-                                f"query={search_query!r} title={candidate['title']!r}"
-                            )
-
-                            return (
-                                image_bytes,
-                                filename,
-                                candidate["source"],
-                                candidate["title"],
-                            )
-
-                    except Exception as e:
-                        print(
-                            f"FERGIE PICTURE DOWNLOAD SKIP: "
-                            f"{type(e).__name__}: {e}"
-                        )
-                        continue
-
     except Exception as e:
         print(
-            f"FERGIE PICTURE SEARCH EXCEPTION: "
+            f"FERGIE PICTURE FETCH EXCEPTION: "
             f"{type(e).__name__}: {e}"
         )
 
     return None, None, None, None
+
 
 def _fergie_format_cooldown(seconds: int) -> str:
     seconds = max(0, int(seconds))
@@ -3272,8 +3169,7 @@ async def on_message(message: discord.Message):
             if not image_bytes:
                 await wait.edit(
                     content=(
-                        f"fak. i couldn't find a decent pic of **{picture_query}** "
-                        "on Commons. 🙄"
+                        f"fak. Google found sources for **{picture_query}**, but i couldn't pull a usable pic. 🙄"
                     )
                 )
                 return
@@ -4831,7 +4727,7 @@ async def halp(ctx, *, command: str | None = None):
         value=(
             "`@fergie <anything>` — Talk to me normally; I understand English, Spanish & Spanglish\n"
             "`@fergie say <text>` — Make me say it as a voice post\n"
-            "`@fergie show me a picture of <thing>` — Find a real picture on the web\n"
+            "`@fergie show me a picture of <thing>` — Find a real picture with Google Search\n"
             "`@fergie give me the tldr` — Recap today's accessible server yapping\n"
             "`@fergie` + image — I'll look at the image and react\n"
             "I may also randomly butt into chat, react to images, or answer with a voice post."
