@@ -1,4 +1,4 @@
-import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re
+import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io
 from aiohttp import web
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
@@ -30,10 +30,22 @@ TOKEN       = os.getenv("DISCORD_TOKEN")
 GEMINI_KEY = os.getenv("GEMINI_API_KEY")
 TENOR_KEY   = os.getenv("TENOR_API_KEY")
 
+# ElevenLabs is used only for rare audio replies in normal text chat.
+# Live Discord VC remains owned by the separate fergie-vc Node service.
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY", "").strip()
+ELEVENLABS_VOICE_ID = os.getenv("ELEVENLABS_VOICE_ID", "").strip()
+
 VC_BRIDGE_SECRET = os.getenv("VC_BRIDGE_SECRET", "").strip()
 VC_BRIDGE_PORT = int(os.getenv("VC_BRIDGE_PORT", "3001"))
 
 vc_bridge_runner = None
+
+# Rare audio replies in normal Discord text chat.
+TEXT_VOICE_REPLY_CHANCE = float(os.getenv("TEXT_VOICE_REPLY_CHANCE", "0.05"))
+TEXT_VOICE_REPLY_COOLDOWN_SECONDS = int(
+    os.getenv("TEXT_VOICE_REPLY_COOLDOWN_SECONDS", "600")
+)
+text_voice_reply_cooldowns = {}
 
 FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
 
@@ -1064,6 +1076,153 @@ async def start_vc_bridge_server():
     )
 
     
+
+# ================== Rare Text-Channel Voice Replies ==================
+
+def _clean_text_for_voice(text: str) -> str:
+    """Make a normal Fergie reply sound natural when ElevenLabs reads it aloud."""
+    cleaned = (text or "").strip()
+
+    for user_id, member in FERGIE_CAST.items():
+        name = member.get("name", "someone")
+        cleaned = cleaned.replace(f"<@{user_id}>", name)
+        cleaned = cleaned.replace(f"<@!{user_id}>", name)
+
+    cleaned = re.sub(r"[*_~`#]", "", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+
+    if len(cleaned) > 900:
+        cleaned = cleaned[:900].rsplit(" ", 1)[0] + "..."
+
+    return cleaned
+
+
+async def generate_fergie_text_voice(text: str) -> bytes | None:
+    if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
+        print("TEXT VOICE SKIP: ElevenLabs key/voice ID missing")
+        return None
+
+    spoken_text = _clean_text_for_voice(text)
+
+    if not spoken_text:
+        return None
+
+    url = (
+        "https://api.elevenlabs.io/v1/text-to-speech/"
+        f"{ELEVENLABS_VOICE_ID}?output_format=mp3_44100_128"
+    )
+
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "text": spoken_text,
+        "model_id": "eleven_flash_v2_5",
+        "voice_settings": {
+            "stability": 0.45,
+            "similarity_boost": 0.80,
+            "style": 0.25,
+            "use_speaker_boost": True,
+        },
+    }
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=45)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                url,
+                headers=headers,
+                json=payload,
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    print(
+                        f"TEXT VOICE TTS ERROR {response.status}: "
+                        f"{error_text[:500]}"
+                    )
+                    return None
+
+                audio = await response.read()
+
+        if not audio:
+            print("TEXT VOICE TTS ERROR: empty audio")
+            return None
+
+        return audio
+
+    except Exception as e:
+        print(
+            f"TEXT VOICE TTS EXCEPTION: "
+            f"{type(e).__name__}: {e}"
+        )
+        return None
+
+
+async def maybe_send_fergie_voice_reply(
+    message: discord.Message,
+    reply_text: str,
+) -> bool:
+    """
+    5% chance to send an eligible Fergie response as audio instead of text.
+    Cooldown is per server and only starts after a successful audio reply.
+    """
+    if not message.guild:
+        return False
+
+    guild_id = message.guild.id
+    now = time.time()
+    last_voice_reply = text_voice_reply_cooldowns.get(guild_id, 0)
+
+    if now - last_voice_reply < TEXT_VOICE_REPLY_COOLDOWN_SECONDS:
+        return False
+
+    roll = random.random()
+
+    if roll >= TEXT_VOICE_REPLY_CHANCE:
+        return False
+
+    print(
+        f"TEXT VOICE DECISION: roll={roll:.3f} "
+        f"chance={TEXT_VOICE_REPLY_CHANCE:.2f} => VOICE"
+    )
+
+    audio = await generate_fergie_text_voice(reply_text)
+
+    if not audio:
+        print("TEXT VOICE FALLBACK: normal text")
+        return False
+
+    try:
+        audio_file = discord.File(
+            io.BytesIO(audio),
+            filename=f"fergie_reply_{message.author.id}.mp3",
+        )
+
+        await message.reply(
+            file=audio_file,
+            mention_author=False,
+        )
+
+        text_voice_reply_cooldowns[guild_id] = time.time()
+
+        print(
+            f"TEXT VOICE REPLY SENT ✅ "
+            f"guild={guild_id} bytes={len(audio)}"
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            f"TEXT VOICE SEND ERROR: "
+            f"{type(e).__name__}: {e}"
+        )
+        return False
+
+
 # ================== Passive Cast Replies ==================
 
 PASSIVE_CAST_REPLY_CHANCE = 0.08
@@ -2352,9 +2511,20 @@ If the user is replying to your previous message, use that previous message as c
             if len(answer) > 1800:
                 answer = answer[:1800]
 
-            await wait.edit(
-                content=answer
+            sent_as_voice = await maybe_send_fergie_voice_reply(
+                message,
+                answer,
             )
+
+            if sent_as_voice:
+                try:
+                    await wait.delete()
+                except Exception:
+                    pass
+            else:
+                await wait.edit(
+                    content=answer
+                )
 
             return
 
@@ -2385,10 +2555,17 @@ If the user is replying to your previous message, use that previous message as c
             if passive_reply:
                 passive_cast_cooldowns[message.channel.id] = now
 
-                await message.reply(
+                sent_as_voice = await maybe_send_fergie_voice_reply(
+                    message,
                     passive_reply,
-                    mention_author=False
                 )
+
+                if not sent_as_voice:
+                    await message.reply(
+                        passive_reply,
+                        mention_author=False
+                    )
+
                 return
                 
     # Random chat sass (global)
