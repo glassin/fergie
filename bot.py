@@ -1413,7 +1413,7 @@ async def _fergie_refund_art_slot():
 
 async def _fergie_reset_art_count():
     """Admin-only helper: reset today's Art usage counter back to zero."""
-    data = await _fergie_art_daily_state()
+    data = await _fergie_art_usage()
     data["count"] = 0
     await _db_set("fergie_art_daily", data)
 def _fergie_art_cooldown_remaining() -> int:
