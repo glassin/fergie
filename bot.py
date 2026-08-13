@@ -1,4 +1,4 @@
-import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io
+import os, random, aiohttp, discord, json, asyncio, time, math, ssl, re, io, base64
 from aiohttp import web
 from discord.ext import tasks, commands
 from urllib.parse import quote_plus
@@ -46,6 +46,15 @@ TEXT_VOICE_REPLY_COOLDOWN_SECONDS = int(
     os.getenv("TEXT_VOICE_REPLY_COOLDOWN_SECONDS", "600")
 )
 text_voice_reply_cooldowns = {}
+
+# Fergie Eyes + Art v1
+FERGIE_IMAGE_REACTION_CHANCE = float(os.getenv("FERGIE_IMAGE_REACTION_CHANCE", "0.10"))
+FERGIE_IMAGE_REACTION_COOLDOWN_SECONDS = int(os.getenv("FERGIE_IMAGE_REACTION_COOLDOWN", "180"))
+FERGIE_IMAGE_DAILY_LIMIT = int(os.getenv("FERGIE_IMAGE_DAILY_LIMIT", "2"))
+FERGIE_IMAGE_MODEL = os.getenv("FERGIE_IMAGE_MODEL", "gemini-3.1-flash-image").strip()
+FERGIE_IMAGE_MAX_BYTES = int(os.getenv("FERGIE_IMAGE_MAX_BYTES", str(8 * 1024 * 1024)))
+fergie_image_reaction_cooldowns = {}
+FERGIE_EYE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 
 FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
 
@@ -1239,6 +1248,196 @@ async def maybe_send_fergie_voice_reply(
         return False
 
 
+# ================== Fergie Eyes + Art v1 ==================
+
+def _fergie_static_image_attachments(message: discord.Message):
+    images = []
+    for attachment in message.attachments:
+        mime = (attachment.content_type or "").split(";", 1)[0].lower().strip()
+        filename = (attachment.filename or "").lower()
+        if mime in FERGIE_EYE_MIME_TYPES or filename.endswith((".jpg", ".jpeg", ".png", ".webp")):
+            if not filename.endswith(".gif") and mime != "image/gif":
+                images.append(attachment)
+    return images
+
+
+def _fergie_image_generation_prompt(text: str):
+    text = (text or "").strip()
+    patterns = [
+        r"^(?:please\s+)?(?:make|create|generate|draw)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|pic|art|drawing)\s+(?:of\s+)?(.+)$",
+        r"^(?:please\s+)?(?:make|create|generate|draw)\s+(?:me\s+)?(.+)$",
+        r"^(?:can you\s+)?(?:make|create|generate|draw)\s+(?:me\s+)?(?:an?\s+)?(?:image|picture|pic|art|drawing)\s+(?:of\s+)?(.+)$",
+    ]
+    for pattern in patterns:
+        match = re.match(pattern, text, flags=re.IGNORECASE | re.DOTALL)
+        if match:
+            prompt = match.group(1).strip(" .")
+            if prompt:
+                return prompt
+    return None
+
+
+async def _fergie_download_attachment(attachment: discord.Attachment):
+    if attachment.size and attachment.size > FERGIE_IMAGE_MAX_BYTES:
+        return None, None
+    try:
+        data = await attachment.read()
+    except Exception as e:
+        print(f"FERGIE EYES DOWNLOAD ERROR: {type(e).__name__}: {e}")
+        return None, None
+    if not data or len(data) > FERGIE_IMAGE_MAX_BYTES:
+        return None, None
+    mime = (attachment.content_type or "").split(";", 1)[0].lower().strip()
+    if mime not in FERGIE_EYE_MIME_TYPES:
+        name = (attachment.filename or "").lower()
+        if name.endswith((".jpg", ".jpeg")):
+            mime = "image/jpeg"
+        elif name.endswith(".png"):
+            mime = "image/png"
+        elif name.endswith(".webp"):
+            mime = "image/webp"
+        else:
+            return None, None
+    return data, mime
+
+
+async def ask_gemini_image_reaction(message: discord.Message, attachment: discord.Attachment):
+    if not GEMINI_KEY:
+        return None
+    image_bytes, mime = await _fergie_download_attachment(attachment)
+    if not image_bytes:
+        return None
+
+    cast_member = FERGIE_CAST.get(message.author.id)
+    known_name = cast_member.get("name") if cast_member else message.author.display_name
+    traits = "\n".join(f"- {x}" for x in cast_member.get("traits", [])) if cast_member else "None"
+    caption = (message.clean_content or "").strip()
+    prompt = f"""
+You are Fergie, a bratty, dramatic, chronically caffeinated Discord qtpi.
+Look at the attached image and react naturally like another member of the Discord server.
+
+The person who posted it is {known_name}.
+Known running-joke context about them:
+{traits}
+Their accompanying message/caption was: {caption or '(none)'}
+
+Rules:
+- Actually use what is visibly in the image.
+- Keep it witty, casual, playful and concise: normally 1-2 sentences.
+- If the image contains text that matters, you may react to it.
+- Do not invent details you cannot see.
+- Do not identify an unknown real person by name from appearance alone.
+- Do not make sensitive-trait guesses about people in the image.
+- Use server lore only when it naturally fits.
+- Understand English, Spanish and Spanglish.
+- No analysis or preamble; output only Fergie's reply.
+"""
+    payload = {
+        "contents": [{"parts": [
+            {"text": prompt},
+            {"inlineData": {"mimeType": mime, "data": base64.b64encode(image_bytes).decode("ascii")}},
+        ]}]
+    }
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+    try:
+        timeout = aiohttp.ClientTimeout(total=45)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as r:
+                data = await r.json()
+        if r.status != 200 or "error" in data:
+            print(f"FERGIE EYES GEMINI ERROR: {data}")
+            return None
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        text = " ".join(p.get("text", "") for p in parts if p.get("text")).strip()
+        return text[:700] if text else None
+    except Exception as e:
+        print(f"FERGIE EYES ERROR: {type(e).__name__}: {e}")
+        return None
+
+
+async def _fergie_art_usage():
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
+    data = await _db_get("fergie_art_daily")
+    if not isinstance(data, dict) or data.get("date") != today:
+        data = {"date": today, "count": 0}
+    return data
+
+
+async def _fergie_art_slots_left():
+    data = await _fergie_art_usage()
+    return max(0, FERGIE_IMAGE_DAILY_LIMIT - int(data.get("count", 0)))
+
+
+async def _fergie_consume_art_slot():
+    data = await _fergie_art_usage()
+    if int(data.get("count", 0)) >= FERGIE_IMAGE_DAILY_LIMIT:
+        return False
+    data["count"] = int(data.get("count", 0)) + 1
+    await _db_set("fergie_art_daily", data)
+    return True
+
+
+async def _fergie_refund_art_slot():
+    data = await _fergie_art_usage()
+    data["count"] = max(0, int(data.get("count", 0)) - 1)
+    await _db_set("fergie_art_daily", data)
+
+
+async def generate_fergie_image(prompt: str):
+    if not GEMINI_KEY:
+        return None, "Gemini key missing."
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{FERGIE_IMAGE_MODEL}:generateContent?key={GEMINI_KEY}"
+    payload = {
+        "contents": [{"parts": [{"text": prompt.strip()}]}],
+        "generationConfig": {"responseModalities": ["Image"]},
+    }
+    try:
+        timeout = aiohttp.ClientTimeout(total=120)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(url, json=payload) as r:
+                data = await r.json()
+        if r.status != 200 or "error" in data:
+            msg = data.get("error", {}).get("message", str(data))
+            print(f"FERGIE ART GEMINI ERROR: {msg}")
+            return None, msg
+        for candidate in data.get("candidates", []):
+            for part in candidate.get("content", {}).get("parts", []):
+                inline = part.get("inlineData") or part.get("inline_data")
+                if inline and inline.get("data"):
+                    return base64.b64decode(inline["data"]), None
+        return None, "Gemini returned no image."
+    except Exception as e:
+        print(f"FERGIE ART ERROR: {type(e).__name__}: {e}")
+        return None, str(e)
+
+
+async def maybe_handle_fergie_image(message: discord.Message, mentioned: bool):
+    images = _fergie_static_image_attachments(message)
+    if not images:
+        return False
+
+    # A direct mention with a picture always gets Fergie's eyes. Otherwise 10% passive chance.
+    if not mentioned:
+        if not message.guild:
+            return False
+        now = time.time()
+        last = fergie_image_reaction_cooldowns.get(message.guild.id, 0)
+        if now - last < FERGIE_IMAGE_REACTION_COOLDOWN_SECONDS:
+            return False
+        if random.random() >= FERGIE_IMAGE_REACTION_CHANCE:
+            return False
+
+    reaction = await ask_gemini_image_reaction(message, images[0])
+    if not reaction:
+        return False
+
+    if message.guild and not mentioned:
+        fergie_image_reaction_cooldowns[message.guild.id] = time.time()
+
+    await message.reply(reaction, mention_author=False)
+    return True
+
+
 # ================== Passive Cast Replies ==================
 
 PASSIVE_CAST_REPLY_CHANCE = 0.08
@@ -2093,6 +2292,59 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
+    # Resolve direct Fergie mention early so image features can use it.
+    mentioned = False
+    if bot.user and (bot.user in message.mentions):
+        mentioned = True
+    elif bot.user:
+        bid = bot.user.id
+        if f"<@{bid}>" in content or f"<@!{bid}>" in content:
+            mentioned = True
+
+    # Fergie Art: explicit natural-language request while mentioning Fergie.
+    if mentioned:
+        art_question = (
+            content
+            .replace(f"<@{bot.user.id}>", "")
+            .replace(f"<@!{bot.user.id}>", "")
+            .strip()
+        )
+        art_prompt = _fergie_image_generation_prompt(art_question)
+        if art_prompt and not _fergie_static_image_attachments(message):
+            left = await _fergie_art_slots_left()
+            if left <= 0:
+                await message.reply(
+                    "girl the art department is CLOSED. 😭 i already made my 2 pics today. try me tomorrow.",
+                    mention_author=False,
+                )
+                return
+
+            if not await _fergie_consume_art_slot():
+                await message.reply("ugh. art department closed for today. 🙄", mention_author=False)
+                return
+
+            wait = await message.reply("ugh fine. let me cook. 🎨🙄", mention_author=False)
+            image_bytes, art_error = await generate_fergie_image(art_prompt)
+            if not image_bytes:
+                await _fergie_refund_art_slot()
+                await wait.edit(content="fak. the art machine had a moment. i didn't charge today's limit — try again later. 🙄")
+                return
+
+            try:
+                await wait.delete()
+            except Exception:
+                pass
+            await message.reply(
+                content="there. don't say i never do anything for you. 🙄🎨",
+                file=discord.File(io.BytesIO(image_bytes), filename="fergie_art.png"),
+                mention_author=False,
+            )
+            return
+
+    # Fergie Eyes: direct image mentions always get a reaction; other images have a passive chance.
+    if await maybe_handle_fergie_image(message, mentioned):
+        return
+
     
     # Process commands first
     if content.strip().startswith("!"):
@@ -2243,14 +2495,7 @@ async def on_message(message: discord.Message):
                 return
 
     # Mention → bratty only (existing behavior)
-    mentioned = False
-    if bot.user and (bot.user in message.mentions):
-        mentioned = True
-    elif bot.user:
-        bid = bot.user.id
-        if f"<@{bid}>" in content or f"<@!{bid}>" in content:
-            mentioned = True
-
+    # `mentioned` was resolved near the top of on_message so Eyes/Art can share it.
     if mentioned:
 
         question = (
