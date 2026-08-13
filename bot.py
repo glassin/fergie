@@ -2911,6 +2911,25 @@ async def on_message(message: discord.Message):
         )
         reply_context = ""
 
+        # Fergie Say: repeat requested text directly into the channel.
+        # Example: @fergie say carne asada
+        say_match = re.match(r"^say\s+(.+)$", question, flags=re.IGNORECASE | re.DOTALL)
+        if say_match:
+            say_text = say_match.group(1).strip()
+
+            # Discord messages cap at 2000 chars; leave a little safety room.
+            if len(say_text) > 1800:
+                say_text = say_text[:1800]
+
+            if say_text:
+                await message.channel.send(
+                    say_text,
+                    allowed_mentions=discord.AllowedMentions.none(),
+                )
+            else:
+                await message.reply("say what, fak. 🙄", mention_author=False)
+            return
+
         # Fergie TL;DR: direct mention + natural-language recap request.
         # This runs before normal Gemini chat so the request gets today's
         # accessible server context instead of only the last few messages.
@@ -4442,6 +4461,7 @@ async def halp(ctx, *, command: str | None = None):
         name="🧠 Talk to Fergie",
         value=(
             "`@fergie <anything>` — Talk to me normally; I understand English, Spanish & Spanglish\n"
+            "`@fergie say <text>` — Make me post exactly what you tell me to say\n"
             "`@fergie give me the tldr` — Recap today's accessible server yapping\n"
             "`@fergie` + image — I'll look at the image and react\n"
             "I may also randomly butt into chat, react to images, or answer with a voice post."
