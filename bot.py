@@ -1383,12 +1383,70 @@ async def _fergie_refund_art_slot():
     await _db_set("fergie_art_daily", data)
 
 
+FERGIE_VISUAL_REFS = {
+    "viviana": {"path": "visual_refs/viviana.png", "aliases": ["viviana", "viv"]},
+    "khurty": {"path": "visual_refs/khurty.png", "aliases": ["khurty", "kurtie"]},
+    "papo": {"path": "visual_refs/papo.png", "aliases": ["papo", "sancho", "miguel"]},
+    "chadwin": {"path": "visual_refs/chadwin.png", "aliases": ["chadwin", "edwin"]},
+    "raquel": {"path": "visual_refs/raquel.png", "aliases": ["raquel"]},
+    "jonathan": {"path": "visual_refs/jonathan.png", "aliases": ["jonathan"]},
+}
+
+
+def _fergie_visual_refs_for_prompt(prompt: str):
+    text = (prompt or "").lower()
+    found = []
+    for canonical, info in FERGIE_VISUAL_REFS.items():
+        if any(re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", text) for alias in info["aliases"]):
+            found.append((canonical, info["path"]))
+    return found
+
+
+def _fergie_load_visual_ref(path: str):
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+        if not data or len(data) > FERGIE_IMAGE_MAX_BYTES:
+            return None
+        return data
+    except Exception as e:
+        print(f"FERGIE ART REF ERROR {path}: {type(e).__name__}: {e}")
+        return None
+
+
 async def generate_fergie_image(prompt: str):
     if not GEMINI_KEY:
         return None, "Gemini key missing."
+
+    refs = _fergie_visual_refs_for_prompt(prompt)
+    parts = []
+
+    if refs:
+        names = ", ".join(name for name, _ in refs)
+        parts.append({"text": (
+            f"Create this requested image: {prompt.strip()}\n\n"
+            f"The attached reference image(s) show the established visual designs for: {names}. "
+            "Preserve each referenced character's recognizable face, hair, skin tone, body/build, glasses, "
+            "piercings, tattoos, and other defining visual features. Adapt clothing, pose, expression, lighting, "
+            "and setting only as the user's request requires. Do not merge character identities. "
+            "If more than one reference is attached, keep them as distinct people."
+        )})
+        for name, path in refs:
+            data = _fergie_load_visual_ref(path)
+            if data:
+                parts.append({"text": f"Visual reference for {name}:"})
+                parts.append({"inlineData": {
+                    "mimeType": "image/png",
+                    "data": base64.b64encode(data).decode("ascii"),
+                }})
+            else:
+                print(f"FERGIE ART REF SKIPPED: {name} ({path})")
+    else:
+        parts.append({"text": prompt.strip()})
+
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{FERGIE_IMAGE_MODEL}:generateContent?key={GEMINI_KEY}"
     payload = {
-        "contents": [{"parts": [{"text": prompt.strip()}]}],
+        "contents": [{"parts": parts}],
         "generationConfig": {"responseModalities": ["Image"]},
     }
     try:
