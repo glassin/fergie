@@ -721,6 +721,7 @@ FERGIE_CAST = {
         "traits": [
             "Always needs hydration",
             "Gets bonked constantly",
+            "His other name is Miguel",
             "say's nigga too much",
             "He's always horny",
             "spams spotify links",
