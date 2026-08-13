@@ -81,15 +81,12 @@ def get_fergie_human_age():
     return age
 
 CHANNEL_ID  = 1273436116699058290
-BREAD_EMOJI = os.getenv("BREAD_EMOJI", "🍞")
 
 # Postgres (Neon/Supabase/Railway)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 # DB SSL behavior: "require" (default) or "insecure" to skip certificate verification
 DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
 
-SEARCH_TERM  = "bread"
-RESULT_LIMIT = 20
 REPLY_CHANCE = 0.10
 
 # Version/info (for !version)
@@ -173,12 +170,6 @@ HAWAII_IMAGES = [
 ]
 
 # ---- Chat lines ----
-BREAD_PUNS = [
-    "I loaf you more than words can say 🍞❤️","You’re the best thing since sliced bread!",
-    "Life is what you bake it 🥖","Rye not have another slice?","All you knead is love (and maybe a little butter) 🧈",
-    "You’re toast-ally awesome!","Bready or not, here I crumb! 🍞","Let’s get this bread 💪",
-    "Some secrets are best kept on the loaf-down.","MMMMM"
-]
 
 BRATTY_LINES = [
     "very cheugi","cayuuuuuute","I hate it here!","SEND ME TO THE ER MF!!!","send me monies!!!",
@@ -321,7 +312,7 @@ FERGIE_BORED_LINES = [
     "okayyyyy. i'll just sit here looking pretty i guess."
 
 ]
-# ================== In-memory economy (backed by Postgres JSON) ==================
+# ================== Shared runtime helpers ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
     
@@ -2228,7 +2219,6 @@ async def fetch_gif(query: str, limit: int = 20):
             if not items: return None
             return random.choice(items)["media_formats"]["gif"]["url"]
 
-async def fetch_bread_gif(): return await fetch_gif(SEARCH_TERM, RESULT_LIMIT)
 
 # ================== Schedulers helpers ==================
 def _pick_two_random_times_today():
@@ -2288,8 +2278,6 @@ async def on_ready():
     await bot.tree.sync(guild=TEST_GUILD)
     
     print(f"Logged in as {bot.user}")
-    four_hour_post.start()
-    six_hour_emoji.start()
     user1_twice_daily_fixed.start()
     user2_twice_daily_fixed.start()
     user3_task.start()
@@ -3454,35 +3442,6 @@ async def _fit_reply_watch(message: discord.Message):
         ch = message.channel
         await ch.send(f"{FIT_FOLLOWUP_EMOTE} {FIT_FOLLOWUP_TEXT}")
         bot._fit_waiting.pop(replied_to.id, None)
-
-# ================== Bread posts & schedules ==================
-@tasks.loop(hours=4)
-async def four_hour_post():
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel:
-        gif = await fetch_bread_gif()
-        text = random.choice([
-            random.choice(BREAD_PUNS),
-            f"Fresh bread drop! 🥖\n{gif}" if gif else random.choice(BREAD_PUNS),
-            f"{random.choice(BREAD_PUNS)}\n{gif}" if gif else random.choice(BREAD_PUNS),
-        ])
-        await channel.send(text)
-
-@four_hour_post.before_loop
-async def _wait_four_hour_post():
-    await bot.wait_until_ready()
-    await asyncio.sleep(4 * 3600)
-
-@tasks.loop(hours=6)
-async def six_hour_emoji():
-    channel = bot.get_channel(CHANNEL_ID)
-    if channel:
-        await channel.send(BREAD_EMOJI)
-
-@six_hour_emoji.before_loop
-async def _wait_six_hour_emoji():
-    await bot.wait_until_ready()
-    await asyncio.sleep(6 * 3600)
 
 @tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
 async def user1_twice_daily_fixed():
