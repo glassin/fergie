@@ -4406,64 +4406,56 @@ from discord import Embed, Colour
 def _mention_channel(ch_id: int) -> str:
     return f"<#{ch_id}>" if ch_id else "`(not set)`"
 
-@bot.command(name="halp", help="Shows an embedded help menu")
+
+@bot.command(name="halp", help="Show Fergie's help menu")
 async def halp(ctx, *, command: str | None = None):
     if command:
-        cmd = bot.get_command(command)
+        cmd = bot.get_command(command.lstrip("!").strip())
         if not cmd:
-            await ctx.send(f"Couldn't find a command named `{command}`.")
+            await ctx.send(f"girl i don't have a `{command}` command. 🙄")
             return
 
-        aliases = ", ".join(cmd.aliases) if getattr(cmd, "aliases", None) else "None"
+        aliases = ", ".join(f"`!{a}`" for a in getattr(cmd, "aliases", [])) or "None"
         usage = f"!{cmd.qualified_name} {cmd.signature}".strip()
         e = Embed(
-            title=f"Command: !{cmd.qualified_name}",
+            title=f"🙄 !{cmd.qualified_name}",
             description=(cmd.help or "No details provided."),
             colour=Colour.blurple()
         )
         e.add_field(name="Usage", value=f"`{usage}`", inline=False)
         e.add_field(name="Aliases", value=aliases, inline=False)
+        e.set_footer(text="fergie tech support. unfortunately.")
         await ctx.send(embed=e)
         return
 
     e = Embed(
-        title="🍞 Bot Help",
-        description="Here’s everything I can do. Use `!halp <command>` for details on one command.",
+        title="🙄 Fergie Halp Desk",
+        description=(
+            "fine. here's the stuff you people keep making me do.\n"
+            "Use `!halp <command>` if you need details on a specific `!` command."
+        ),
         colour=Colour.blurple()
     )
 
     e.add_field(
-        name="Notes",
+        name="🧠 Talk to Fergie",
         value=(
-            f"• Casino commands only work in {_mention_channel(GAMBLE_CHANNEL_ID)}\n"
-            f"• `!fit` only works in {_mention_channel(FIT_CHANNEL_ID)}\n"
-            f"• `!kewchie` only works in {_mention_channel(KEWCHIE_CHANNEL_ID)}"
+            "`@fergie <anything>` — Talk to me normally; I understand English, Spanish & Spanglish\n"
+            "`@fergie give me the tldr` — Recap today's accessible server yapping\n"
+            "`@fergie` + image — I'll look at the image and react\n"
+            "I may also randomly butt into chat, react to images, or answer with a voice post."
         ),
         inline=False
     )
 
     e.add_field(
-        name="💰 Economy",
+        name="🎨 Eyes, Art & Comics",
         value=(
-            "`!bank` — Show remaining bank vault\n"
-            "`!balance` / `!bal` / `!wallet` — See your (or someone else’s) balance\n"
-            "`!claim` — Claim daily allowance (24h cooldown, requires savings)\n"
-            "`!gift @user amount` — Gift bread (daily cap + tax tiers)\n"
-            "`!lb` / `!richlist` — Top 10 richest"
-        ),
-        inline=False
-    )
-
-    e.add_field(
-        name="🎲 Casino (only in casino channel)",
-        value=(
-            "`!roll <amount|all|half>` — Bet vs bank (win prob scales; jackpot on `all`)\n"
-            "`!putasos @user` — Try to rob someone (low success, fail hurts)\n"
-            "`!duel @user <amount>` — PvP dice duel (escrowed stakes; winner takes pot)\n"
-            "`!slots <amount>` — Spin 3 reels; 3-of-a-kind or pairs pay out\n"
-            "`!raffle start <amt>` / `!raffle join` / `!raffle draw` — Server raffle (auto-draw at deadline)\n"
-            "`!odds [bet]` — Show max bet & estimated win chance\n"
-            "`!jackpot` — Show progressive jackpot pot"
+            "`@fergie make a pic/image of ...` — Generate an image\n"
+            "`@fergie make a comic of ...` — Generate a comic; known cast references can be used\n"
+            "`!art` — Check Art status + remaining generations\n"
+            f"• Art allowance: **{FERGIE_IMAGE_DAILY_LIMIT} successful generations/day**\n"
+            "• Failed generations don't use the allowance"
         ),
         inline=False
     )
@@ -4472,58 +4464,37 @@ async def halp(ctx, *, command: str | None = None):
         name="🎉 Fun & Media",
         value=(
             "`!cafe [term]` — owl y lark\n"
-            "`!scam` — BTC/ETH prices (bratty style)\n"
-            "`!bbl` — see fergies culo\n"
-            "`!hawaii` — see vivvy's vacation pix"
+            "`!scam` — BTC/ETH prices, unfortunately\n"
+            "`!bbl` — see fergie's culo\n"
+            "`!hawaii` — see vivvy's vacation pix\n"
+            f"`!fit` — fergie's fits (only in {_mention_channel(FIT_CHANNEL_ID)})\n"
+            f"`!kewchie` — random Kali Uchis track (only in {_mention_channel(KEWCHIE_CHANNEL_ID)})"
         ),
         inline=False
     )
 
     e.add_field(
-        name="👗 Fit (fashion)",
+        name="🔐 Jonathan-only",
         value=(
-            "`!fit` — fergie's fits (fit channel only). If a specific user replies within 20s, "
-            "I send a cheeky follow-up."
+            "`!resetart` — Reset today's Art count back to 0 and restore the full daily allowance"
         ),
         inline=False
     )
 
     e.add_field(
-        name="🎵 Kewchie (Kali Uchis)",
+        name="🛠️ Server Admin",
         value=(
-            "`!kewchie` — Post a random playlist track (kewchie channel only)\n"
-            "`!kewchie-debug` — Debug Spotify playlist setup"
+            "`!seed bank <amt>` / `!seed @user <amt>` — Add bread\n"
+            "`!take @user <amt>` — Move bread back to bank\n"
+            "`!setbal @user <amt>` — Set exact balance\n"
+            "`!dbstatus` / `!dbreload` / `!dbdump` — Database tools\n"
+            "`!version` — Bot/runtime status\n"
+            "`!kewchie-debug` — Spotify playlist debug"
         ),
         inline=False
     )
 
-    e.add_field(
-        name="🛠️ Admin (Manage Server required)",
-        value=(
-            "`!seed bank <amt>` — Refill bank (respects global cap)\n"
-            "`!seed @user <amt>` — Give bread (respects wallet cap)\n"
-            "`!take @user <amt>` — Take from user to bank (no burning)\n"
-            "`!setbal @user <amt>` — Set a user’s exact balance (capped to wallet)"
-        ),
-        inline=False
-    )
-
-    e.add_field(
-        name="⏱️ Automated Behaviors (FYI)",
-        value=(
-            "• Bread GIF every 4h; bread emoji every 6h\n"
-            "• Daily scam post (70% chance)\n"
-            "• 8am PT: auto allowance for all members + inactivity penalties\n"
-            "• `USER1_ID`: pings twice daily; reacts to “pinche fergie”; random 3x/day “bonk papo”\n"
-            "• `USER2_ID`: pings twice daily with “when jacuzzi?”\n"
-            "• `USER3_ID`: random replies (35% of their msgs)\n"
-            "• `LOBO_ID`: once/day “send me money lobo.” when they post\n"
-            "• `!fit`: 20s follow-up if the target user replies to the fit post"
-        ),
-        inline=False
-    )
-
-    e.set_footer(text="Tip: try `!halp roll` or `!halp gift` for specific usage.")
+    e.set_footer(text="there. you're welcome. 🙄 • try !halp art, !halp roll, etc.")
     await ctx.send(embed=e)
 
 # ================== Version Command ==================
