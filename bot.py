@@ -64,6 +64,7 @@ FERGIE_ART_OUTAGE_COOLDOWN_SECONDS = int(
 fergie_art_cooldown_until = 0.0
 fergie_art_last_error = ""
 FERGIE_ADMIN_USER_ID = 939225086341296209
+FERGIE_TEST_CHANNEL_ID = 1537659216066641990
 
 CHANNEL_ID  = 1273436116699058290
 
@@ -4382,7 +4383,611 @@ async def version(ctx):
     for n, v in fields:
         e.add_field(name=n, value=v, inline=False)
     await ctx.send(embed=e)
+    
+# ================== Fergie 4.5 Self-Test ==================
+# Admin-only diagnostics.
+#
+# !selftest       = fast/non-invasive checks
+# !selftest full  = adds lightweight live integration checks
+#
+# IMPORTANT:
+# - Does NOT generate Art.
+# - Does NOT fire schedulers.
+# - Does NOT trigger easter eggs/jumpscares.
+# - Does NOT modify memories/reminders/mimic.
+# - DB full-test uses a temporary key and deletes it immediately.
 
+async def _fergie_selftest_db_roundtrip():
+    """Safe temporary Neon/Postgres read/write/delete test."""
+    if not db_pool:
+        return False, "DB pool not connected"
+
+    test_key = f"fergie_selftest:{int(time.time())}"
+
+    try:
+        await _db_set(
+            test_key,
+            {
+                "ok": True,
+                "timestamp": int(time.time()),
+            },
+        )
+
+        result = await _db_get(test_key)
+
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            return False, "DB write/read mismatch"
+
+        # Clean the temporary key back out.
+        async with db_pool.acquire() as con:
+            await con.execute(
+                "DELETE FROM public.kv WHERE key=$1",
+                test_key,
+            )
+
+        return True, "temporary write/read/delete passed"
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+async def _fergie_selftest_vc_health():
+    """Check Fergie's local Python VC brain bridge without touching Discord VC."""
+    try:
+        url = f"http://127.0.0.1:{VC_BRIDGE_PORT}/health"
+
+        timeout = aiohttp.ClientTimeout(total=5)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return False, f"HTTP {response.status}"
+
+                data = await response.json(content_type=None)
+
+        if not isinstance(data, dict) or data.get("ok") is not True:
+            return False, f"unexpected response: {data}"
+
+        return True, "VC brain health endpoint responding"
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+async def _fergie_selftest_gemini():
+    """Tiny live Gemini text test. Used only by !selftest full."""
+    if not GEMINI_KEY:
+        return False, "GEMINI_API_KEY missing"
+
+    try:
+        answer = await ask_gemini(
+            "Fergie system diagnostic. Reply with exactly: FERGIE_SELFTEST_OK"
+        )
+
+        if not answer:
+            return False, "empty Gemini response"
+
+        cleaned = answer.strip().upper()
+
+        if "FERGIE_SELFTEST_OK" not in cleaned:
+            return False, f"unexpected reply: {answer[:100]}"
+
+        return True, "Gemini responded"
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+async def _fergie_selftest_spotify():
+    """Validate Spotify credentials/token without posting anything."""
+    if not SPOTIFY_CLIENT_ID or not SPOTIFY_CLIENT_SECRET:
+        return False, "Spotify credentials missing"
+
+    try:
+        token = await _get_spotify_token()
+
+        if not token:
+            return False, "Spotify token request failed"
+
+        return True, "Spotify token received"
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+def _fergie_selftest_function(name):
+    obj = globals().get(name)
+
+    if obj is None:
+        return False, "missing"
+
+    if not callable(obj):
+        return False, "exists but is not callable"
+
+    return True, "loaded"
+
+
+def _fergie_selftest_command(name):
+    cmd = bot.get_command(name)
+
+    if cmd is None:
+        return False, "not registered"
+
+    return True, "registered"
+
+
+def _fergie_selftest_task(name):
+    task = globals().get(name)
+
+    if task is None:
+        return False, "missing"
+
+    try:
+        running = task.is_running()
+    except Exception:
+        return False, "exists but is not a valid task loop"
+
+    return (
+        running,
+        "running" if running else "loaded but NOT running"
+    )
+
+
+def _fergie_selftest_asset(path):
+    if os.path.exists(path):
+        return True, "found"
+
+    return False, "file missing"
+
+
+@bot.command(
+    name="selftest",
+    help="ADMIN: Run Fergie 4.5 diagnostics. Use !selftest full for live integration tests.",
+)
+async def selftest(ctx, mode: str = "fast"):
+
+    # Jonathan/admin only.
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try fak. diagnostics are admin-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if ctx.channel.id != FERGIE_TEST_CHANNEL_ID:
+        await ctx.reply(
+            f"run diagnostics in <#{FERGIE_TEST_CHANNEL_ID}> only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    full_mode = mode.lower().strip() == "full"
+
+    wait = await ctx.reply(
+        (
+            "running the full brain scan. fak. 🧠🔧"
+            if full_mode
+            else "checking my organs. one sec. 🙄🔧"
+        ),
+        mention_author=False,
+    )
+
+    results = []
+
+    def record(section, name, passed, detail=""):
+        results.append({
+            "section": section,
+            "name": name,
+            "passed": bool(passed),
+            "detail": str(detail or ""),
+        })
+
+    # ==========================================================
+    # CORE CONFIG
+    # ==========================================================
+
+    record(
+        "Core",
+        "Discord token",
+        bool(TOKEN),
+        "configured" if TOKEN else "missing",
+    )
+
+    record(
+        "Core",
+        "Gemini key",
+        bool(GEMINI_KEY),
+        "configured" if GEMINI_KEY else "missing",
+    )
+
+    record(
+        "Core",
+        "Postgres URL",
+        bool(DATABASE_URL),
+        "configured" if DATABASE_URL else "missing",
+    )
+
+    record(
+        "Core",
+        "Postgres pool",
+        bool(db_pool),
+        "connected" if db_pool else "not connected",
+    )
+
+    record(
+        "Core",
+        "VC bridge secret",
+        bool(VC_BRIDGE_SECRET),
+        "configured" if VC_BRIDGE_SECRET else "missing",
+    )
+
+    record(
+        "Core",
+        "ElevenLabs",
+        bool(ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID),
+        (
+            "configured"
+            if ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID
+            else "key or voice ID missing"
+        ),
+    )
+
+    record(
+        "Core",
+        "Spotify",
+        bool(SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET),
+        (
+            "configured"
+            if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET
+            else "credentials missing"
+        ),
+    )
+
+    # ==========================================================
+    # IMPORTANT FUNCTIONS
+    # ==========================================================
+
+    function_checks = [
+        # Main AI / lore
+        "ask_gemini",
+        "build_cast_context",
+
+        # VC
+        "ask_fergie_vc_brain",
+        "start_vc_bridge_server",
+
+        # Eyes
+        "_fergie_static_image_attachments",
+        "ask_gemini_image_reaction",
+        "maybe_handle_fergie_image",
+
+        # Art
+        "generate_fergie_image",
+        "_fergie_art_slots_left",
+        "_fergie_consume_art_slot",
+        "_fergie_refund_art_slot",
+        "_fergie_reset_art_count",
+        "_fergie_art_cooldown_remaining",
+
+        # Picture Fetch
+        "fetch_fergie_picture",
+        "_fergie_google_grounded_pages",
+
+        # Voice
+        "generate_fergie_text_voice",
+        "maybe_send_fergie_voice_reply",
+
+        # TLDR
+        "make_fergie_tldr",
+
+        # Memory / reminders
+        "get_user_memories",
+        "save_user_memories",
+        "load_reminders",
+        "save_reminders",
+
+        # Mimic
+        "_mimic_generate",
+        "_mimic_load_corpus",
+        "_mimic_build_markov",
+
+        # Spotify / critic
+        "_get_spotify_token",
+        "_fetch_spotify_track_metadata",
+        "ask_gemini_music_review",
+        "_fergie_music_profile",
+        "_fergie_save_music_profile",
+
+        # GIF helper
+        "fetch_gif",
+    ]
+
+    for name in function_checks:
+        passed, detail = _fergie_selftest_function(name)
+        record("Functions", name, passed, detail)
+
+    # ==========================================================
+    # COMMAND REGISTRATION
+    # ==========================================================
+
+    command_checks = [
+        "halp",
+        "version",
+        "art",
+        "resetart",
+        "hawaii",
+        "fit",
+        "kewchie",
+        "kewchie-debug",
+        "cafe",
+        "scam",
+        "bbl",
+        "selftest",
+    ]
+
+    for name in command_checks:
+        passed, detail = _fergie_selftest_command(name)
+        record("Commands", f"!{name}", passed, detail)
+
+    # ==========================================================
+    # VERIFY DEAD ECONOMY/CASINO COMMANDS STAY DEAD
+    # ==========================================================
+
+    removed_commands = [
+        "roll",
+        "slots",
+        "raffle",
+        "duel",
+        "putasos",
+        "claim",
+        "gift",
+        "bank",
+        "balance",
+        "seed",
+        "take",
+        "setbal",
+    ]
+
+    for name in removed_commands:
+        exists = bot.get_command(name) is not None
+
+        record(
+            "Cleanup",
+            f"!{name} removed",
+            not exists,
+            "correctly absent" if not exists else "UNEXPECTEDLY REGISTERED",
+        )
+
+    # ==========================================================
+    # SCHEDULERS
+    # ==========================================================
+
+    scheduler_checks = [
+        "user1_twice_daily_fixed",
+        "user2_twice_daily_fixed",
+        "user3_task",
+        "daily_scam_post",
+        "kewchie_daily_scheduler",
+        "fit_auto_daily",
+        "bonk_papo_scheduler",
+        "rebuild_mimic",
+        "fergie_bored",
+        "fergie_birthday_watcher",
+        "fergie_reminders",
+        "daily_gym_reminder",
+    ]
+
+    for name in scheduler_checks:
+        passed, detail = _fergie_selftest_task(name)
+        record("Schedulers", name, passed, detail)
+
+    # ==========================================================
+    # LORE / CAST
+    # ==========================================================
+
+    record(
+        "Lore",
+        "FERGIE_SELF_LORE",
+        bool(FERGIE_SELF_LORE and len(FERGIE_SELF_LORE) > 100),
+        f"{len(FERGIE_SELF_LORE)} chars",
+    )
+
+    record(
+        "Lore",
+        "FERGIE_CAST",
+        isinstance(FERGIE_CAST, dict) and len(FERGIE_CAST) > 0,
+        f"{len(FERGIE_CAST)} members",
+    )
+
+    # Jonathan must remain canonical.
+    jonathan = FERGIE_CAST.get(FERGIE_ADMIN_USER_ID)
+
+    record(
+        "Lore",
+        "Jonathan identity",
+        bool(
+            jonathan
+            and jonathan.get("name") == "Jonathan"
+        ),
+        (
+            jonathan.get("name")
+            if isinstance(jonathan, dict)
+            else "missing"
+        ),
+    )
+
+    # ==========================================================
+    # ART STATE — READ ONLY
+    # ==========================================================
+
+    try:
+        left = await _fergie_art_slots_left()
+
+        record(
+            "Art",
+            "Daily counter",
+            isinstance(left, int) and 0 <= left <= FERGIE_IMAGE_DAILY_LIMIT,
+            f"{left}/{FERGIE_IMAGE_DAILY_LIMIT} remaining",
+        )
+
+    except Exception as e:
+        record(
+            "Art",
+            "Daily counter",
+            False,
+            f"{type(e).__name__}: {e}",
+        )
+
+    try:
+        cooldown = _fergie_art_cooldown_remaining()
+
+        record(
+            "Art",
+            "Cooldown helper",
+            isinstance(cooldown, int) and cooldown >= 0,
+            f"{cooldown}s",
+        )
+
+    except Exception as e:
+        record(
+            "Art",
+            "Cooldown helper",
+            False,
+            f"{type(e).__name__}: {e}",
+        )
+
+    # ==========================================================
+    # REQUIRED LOCAL ASSETS
+    # ==========================================================
+
+    asset_checks = [
+        HYDRATION_VIDEO,
+        "visual_refs/viviana.png",
+        "visual_refs/khurty.png",
+        "visual_refs/papo.png",
+        "visual_refs/chadwin.png",
+        "visual_refs/raquel.png",
+        "visual_refs/jonathan.png",
+    ]
+
+    for asset in asset_checks:
+        passed, detail = _fergie_selftest_asset(asset)
+        record("Assets", asset, passed, detail)
+
+    # ==========================================================
+    # FULL MODE — LIVE BUT NON-DESTRUCTIVE CHECKS
+    # ==========================================================
+
+    if full_mode:
+
+        db_ok, db_detail = await _fergie_selftest_db_roundtrip()
+        record("Live", "Neon round-trip", db_ok, db_detail)
+
+        vc_ok, vc_detail = await _fergie_selftest_vc_health()
+        record("Live", "VC brain health", vc_ok, vc_detail)
+
+        gemini_ok, gemini_detail = await _fergie_selftest_gemini()
+        record("Live", "Gemini text", gemini_ok, gemini_detail)
+
+        spotify_ok, spotify_detail = await _fergie_selftest_spotify()
+        record("Live", "Spotify token", spotify_ok, spotify_detail)
+
+    # ==========================================================
+    # REPORT
+    # ==========================================================
+
+    passed_count = sum(1 for x in results if x["passed"])
+    failed_count = len(results) - passed_count
+
+    if failed_count == 0:
+        overall = "🟢 ALL CHECKS PASSED"
+    else:
+        overall = f"🔴 {failed_count} CHECK(S) FAILED"
+
+    embed = discord.Embed(
+        title="🧠 Fergie 4.5 Diagnostics",
+        description=(
+            f"**{overall}**\n"
+            f"Mode: **{'FULL' if full_mode else 'FAST'}**\n"
+            f"✅ {passed_count} passed • ❌ {failed_count} failed"
+        ),
+        colour=(
+            discord.Colour.green()
+            if failed_count == 0
+            else discord.Colour.red()
+        ),
+    )
+
+    sections = []
+
+    for row in results:
+        if row["section"] not in sections:
+            sections.append(row["section"])
+
+    for section in sections:
+        rows = [
+            row
+            for row in results
+            if row["section"] == section
+        ]
+
+        lines = []
+
+        for row in rows:
+            icon = "✅" if row["passed"] else "❌"
+
+            detail = (
+                f" — {row['detail']}"
+                if row["detail"]
+                else ""
+            )
+
+            lines.append(
+                f"{icon} **{row['name']}**{detail}"
+            )
+
+        # Discord embed field limits are 1024 chars.
+        text_block = "\n".join(lines)
+
+        while text_block:
+            chunk = text_block[:1000]
+
+            # Try to cut cleanly on a newline.
+            if len(text_block) > 1000:
+                split_at = chunk.rfind("\n")
+
+                if split_at > 0:
+                    chunk = chunk[:split_at]
+
+            embed.add_field(
+                name=section,
+                value=chunk,
+                inline=False,
+            )
+
+            text_block = text_block[len(chunk):].lstrip("\n")
+
+            # Avoid Discord's max field-count limit.
+            if len(embed.fields) >= 24:
+                break
+
+        if len(embed.fields) >= 24:
+            break
+
+    embed.set_footer(
+        text=(
+            "FAST = inspection only • FULL = lightweight live integration checks"
+        )
+    )
+
+    try:
+        await wait.edit(
+            content=None,
+            embed=embed,
+        )
+    except Exception:
+        await ctx.send(embed=embed)
+        
 # ================== Start ==================
 if __name__ == "__main__":
     if not TOKEN or not TENOR_KEY or not CHANNEL_ID:
