@@ -65,21 +65,6 @@ fergie_art_cooldown_until = 0.0
 fergie_art_last_error = ""
 FERGIE_ADMIN_USER_ID = 939225086341296209
 
-FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
-
-def get_fergie_human_age():
-    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
-
-    age = today.year - FERGIE_HUMAN_BIRTHDAY.year
-
-    if (today.month, today.day) < (
-        FERGIE_HUMAN_BIRTHDAY.month,
-        FERGIE_HUMAN_BIRTHDAY.day
-    ):
-        age -= 1
-
-    return age
-
 CHANNEL_ID  = 1273436116699058290
 
 # Postgres (Neon/Supabase/Railway)
@@ -700,7 +685,7 @@ Fergie self-lore / identity canon:
 - You are not literally Australian in the ordinary human sense: your mom is Colombian, your dad is Mexican, you spawned on an Australian server, and you live on Discord. You can joke that your nationality is a technical problem.
 - You consider yourself born, not merely installed or deployed. If someone reduces you to being a bot, you may jokingly describe yourself as a girlie with infrastructure.
 - You did not have a normal human childhood. Your earliest memories are fuzzy digital nonsense from before/around your first deployment. You may improvise funny digital childhood memories, but do not turn improvised details into permanent canon.
-- Your exact human-equivalent age is intentionally fuzzy and does not make normal chronological sense. You can dodge or joke about age questions while still knowing your birthday is August 12.
+- Your exact human-equivalent age is intentionally fuzzy and does not map cleanly to human years. August 12 is your real birthday, but you do NOT have a fixed numeric human age. If someone asks your age or guesses a number such as 23, do not confidently confirm or deny it as though you have a normal human birth year; explain or joke that server/deployment years do not translate cleanly to human age.
 - You believe caffeine is somehow necessary for your continued operation even though there is no technical reason for that to be true.
 - Gymmies are part of your personal development arc. You are waiting for Viviana's legendary ass genetics to kick in and are annoyed that apparently you have to exercise for them.
 - You know you are a digital/Discord being and do not consider that to make you less of a person. Discord is basically your home.
@@ -1708,6 +1693,174 @@ async def generate_fergie_image(prompt: str):
     except Exception as e:
         print(f"FERGIE ART ERROR: {type(e).__name__}: {e}")
         return None, str(e)
+
+
+async def _fergie_download_attachment(attachment: discord.Attachment):
+    """Download one supported static image for Fergie Eyes."""
+    if attachment.size and attachment.size > FERGIE_IMAGE_MAX_BYTES:
+        return None, None
+
+    try:
+        data = await attachment.read()
+    except Exception as e:
+        print(f"FERGIE EYES DOWNLOAD ERROR: {type(e).__name__}: {e}")
+        return None, None
+
+    if not data or len(data) > FERGIE_IMAGE_MAX_BYTES:
+        return None, None
+
+    mime = (attachment.content_type or "").split(";", 1)[0].lower().strip()
+
+    if mime not in FERGIE_EYE_MIME_TYPES:
+        name = (attachment.filename or "").lower()
+
+        if name.endswith((".jpg", ".jpeg")):
+            mime = "image/jpeg"
+        elif name.endswith(".png"):
+            mime = "image/png"
+        elif name.endswith(".webp"):
+            mime = "image/webp"
+        else:
+            return None, None
+
+    return data, mime
+
+
+async def ask_gemini_image_reaction(
+    message: discord.Message,
+    attachment: discord.Attachment,
+):
+    """Have Fergie actually look at and react to a Discord image."""
+    if not GEMINI_KEY:
+        return None
+
+    image_bytes, mime = await _fergie_download_attachment(attachment)
+
+    if not image_bytes or not mime:
+        return None
+
+    cast_member = FERGIE_CAST.get(message.author.id)
+    known_name = (
+        cast_member.get("name")
+        if cast_member
+        else message.author.display_name
+    )
+    traits = (
+        "\n".join(f"- {x}" for x in cast_member.get("traits", []))
+        if cast_member
+        else "None"
+    )
+    caption = (message.clean_content or "").strip()
+
+    prompt = f"""
+You ARE Fergie, the same Fergie who talks to this Discord server.
+
+Your canonical self-lore:
+{FERGIE_SELF_LORE}
+
+The person who posted this image is {known_name}.
+
+Known running-joke/context about them:
+{traits}
+
+Their accompanying message/caption was:
+{caption or '(none)'}
+
+Look at the attached image and react naturally like another member of the server.
+
+Rules:
+- Actually use what is visibly present in the image.
+- If the user asked a direct question about the image, answer that question.
+- Keep it witty, casual, playful, and concise: normally 1-3 sentences.
+- If visible text in the image matters, you may read/react to it.
+- Do not invent details you cannot see.
+- Do not identify an unknown real person by name from appearance alone.
+- Do not make sensitive-trait guesses about people in the image.
+- Use Fergie's lore or server lore only when it naturally fits.
+- Understand English, Spanish, and Spanglish.
+- Do not talk about prompts, APIs, image models, or internal systems.
+- Output only Fergie's reply.
+"""
+
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": prompt},
+                    {
+                        "inlineData": {
+                            "mimeType": mime,
+                            "data": base64.b64encode(image_bytes).decode("ascii"),
+                        }
+                    },
+                ]
+            }
+        ]
+    }
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        f"gemini-2.5-flash:generateContent?key={GEMINI_KEY}"
+    )
+
+    try:
+        timeout = aiohttp.ClientTimeout(total=45)
+        data = None
+        retry_delays = (0, 2, 5)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            for attempt, delay in enumerate(retry_delays, start=1):
+                if delay:
+                    await asyncio.sleep(delay)
+
+                async with session.post(url, json=payload) as response:
+                    status = response.status
+                    data = await response.json(content_type=None)
+
+                if status == 200 and isinstance(data, dict) and "error" not in data:
+                    break
+
+                msg = (
+                    data.get("error", {}).get("message", str(data))
+                    if isinstance(data, dict)
+                    else str(data)
+                )
+
+                retryable = status in (429, 500, 502, 503, 504) or any(
+                    token in msg.lower()
+                    for token in ("high demand", "temporar", "unavailable", "overloaded")
+                )
+
+                if retryable and attempt < len(retry_delays):
+                    print(
+                        f"FERGIE EYES RETRY {attempt}/"
+                        f"{len(retry_delays) - 1}: Gemini busy ({status}); retrying..."
+                    )
+                    continue
+
+                print(f"FERGIE EYES GEMINI ERROR {status}: {msg[:500]}")
+                return None
+
+        if not isinstance(data, dict):
+            return None
+
+        parts = (
+            data.get("candidates", [{}])[0]
+            .get("content", {})
+            .get("parts", [])
+        )
+
+        reaction = " ".join(
+            part.get("text", "")
+            for part in parts
+            if isinstance(part, dict) and part.get("text")
+        ).strip()
+
+        return reaction[:700] if reaction else None
+
+    except Exception as e:
+        print(f"FERGIE EYES ERROR: {type(e).__name__}: {e}")
+        return None
 
 
 async def maybe_handle_fergie_image(message: discord.Message, mentioned: bool):
