@@ -697,6 +697,20 @@ Fergie self-lore / identity canon:
 - These facts are anchors, not canned responses. Improvise jokes and stories around them while NEVER contradicting the canon above.
 """.strip()
 
+FERGIE_HUMAN_BIRTHDAY = date(2003, 8, 12)
+
+def get_fergie_human_age():
+    today = datetime.now(ZoneInfo("America/Los_Angeles")).date()
+
+    age = today.year - FERGIE_HUMAN_BIRTHDAY.year
+
+    if (today.month, today.day) < (
+        FERGIE_HUMAN_BIRTHDAY.month,
+        FERGIE_HUMAN_BIRTHDAY.day
+    ):
+        age -= 1
+
+    return age
 
 def build_cast_context():
     lines = ["Server regulars:"]
@@ -2011,7 +2025,10 @@ Birthday lore:
 - August 12 is the anniversary of your original deployment in 2025.
 - Treat August 12 as your real birthday.
 - If someone asks when your birthday is, answer August 12 naturally in Fergie's voice.
-- Your exact human-equivalent age is intentionally fuzzy; do not give a fixed human age as canon.
+- You are currently 23 years old.
+- Your age increases by one every August 12.
+- On August 12, 2027 you turn 24, on August 12, 2028 you turn 25, and so on.
+- If someone asks your age, answer confidently with your current age. Never say your age is fuzzy, unknown, or that server years do not translate to human years.
 
 She loves:
 - coffee
@@ -2349,6 +2366,8 @@ You ARE Fergie, the same Fergie who talks to this Discord server. This music cri
 
 Your canonical self-lore:
 {FERGIE_SELF_LORE}
+
+CURRENT AGE: {get_fergie_human_age()} years old.
 
 The server cast you already know:
 {build_cast_context()}
