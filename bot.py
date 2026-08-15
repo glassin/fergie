@@ -1146,6 +1146,134 @@ Rules:
     return cleaned
 
 
+async def _fergie_dj_track_is_danceable(
+    song_title: str,
+    artist: str = "Unknown artist",
+    album: str = "",
+):
+    """
+    Conservative Gemini classifier for the Auto-DJ dance-emote feature.
+
+    Returns True only when the track is reasonably known/likely to be
+    dance-oriented. If uncertain, returns False so Fergie does not spam
+    a twerk emote on obviously non-dance songs.
+    """
+    song_title = str(song_title or "").strip()[:180]
+    artist = str(artist or "Unknown artist").strip()[:180]
+    album = str(album or "").strip()[:180]
+
+    if not song_title:
+        return False
+
+    metadata_lines = [
+        f"Song title: {song_title}",
+        f"Artist: {artist}",
+    ]
+
+    if album:
+        metadata_lines.append(f"Album: {album}")
+
+    prompt = f"""
+You are classifying the CURRENT song for Fergie's Discord Auto-DJ.
+
+Track:
+{chr(10).join(metadata_lines)}
+
+Decide whether this is clearly suitable for a playful dance/twerk emote while it is playing.
+
+Use broad musical knowledge only.
+Return YES only when the song is reasonably dance-oriented, clubby, upbeat, rhythmic,
+electronic/dance-pop/disco/funk/house/Latin-dance adjacent, or otherwise obviously
+something people would plausibly dance/twerk to.
+
+Return NO for ballads, slow sad songs, ambient tracks, acoustic songs, most sleepy
+indie tracks, spoken-word pieces, or when you are not confident.
+
+Do not explain.
+Return exactly one word: YES or NO.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return False
+
+    cleaned = str(answer).strip().upper()
+
+    if cleaned.startswith("YES"):
+        return True
+
+    return False
+
+
+async def vc_dj_dance_check_http(request):
+    """
+    Authenticated Auto-DJ helper used by Node before posting the dance emote.
+    """
+    if not VC_BRIDGE_SECRET:
+        return web.json_response(
+            {"ok": False, "error": "bridge_not_configured"},
+            status=503,
+        )
+
+    supplied_secret = request.headers.get(
+        "X-VC-Bridge-Secret",
+        "",
+    )
+
+    if supplied_secret != VC_BRIDGE_SECRET:
+        return web.json_response(
+            {"ok": False, "error": "unauthorized"},
+            status=401,
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {"ok": False, "error": "invalid_json"},
+            status=400,
+        )
+
+    title = str(data.get("title") or "").strip()
+    artist = str(data.get("artist") or "Unknown artist").strip()
+    album = str(data.get("album") or "").strip()
+
+    if not title:
+        return web.json_response(
+            {"ok": False, "error": "missing_title"},
+            status=400,
+        )
+
+    try:
+        danceable = await _fergie_dj_track_is_danceable(
+            song_title=title,
+            artist=artist,
+            album=album,
+        )
+    except Exception as e:
+        print(
+            f"FERGIE DJ DANCE CHECK ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return web.json_response(
+            {"ok": False, "error": "dance_check_error"},
+            status=500,
+        )
+
+    print(
+        f"FERGIE DJ DANCE CHECK {'💃 YES' if danceable else '⚪ NO'} "
+        f"{artist} — {title}"
+    )
+
+    return web.json_response(
+        {
+            "ok": True,
+            "danceable": bool(danceable),
+        }
+    )
+
+
 async def vc_dj_commentary_http(request):
     """
     Authenticated read-only-ish brain endpoint used by the Node Auto-DJ.
@@ -1398,6 +1526,12 @@ async def start_vc_bridge_server():
     app.router.add_post(
         "/dj-commentary",
         vc_dj_commentary_http
+    )
+
+    # Post-5.0: conservative danceability check for Auto-DJ dance emotes.
+    app.router.add_post(
+        "/dj-dance-check",
+        vc_dj_dance_check_http
     )
 
     vc_bridge_runner = web.AppRunner(
@@ -6763,6 +6897,8 @@ async def selftest(ctx, mode: str = "fast"):
         "ask_fergie_vc_brain",
         "_fergie_generate_dj_commentary",
         "vc_dj_commentary_http",
+        "_fergie_dj_track_is_danceable",
+        "vc_dj_dance_check_http",
         "start_vc_bridge_server",
 
         # Eyes
