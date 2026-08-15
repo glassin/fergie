@@ -2248,6 +2248,371 @@ async def _fergie_save_music_profile(
     )
 
 
+# ================== Fergie 5.0 Stage J.1: Member Taste Profiles ==================
+
+def _fergie_member_taste_key(user_id: int) -> str:
+    return f"music_taste_member:{int(user_id)}"
+
+
+async def _fergie_member_taste_profile(
+    user_id: int,
+    display_name: str = "someone",
+):
+    """
+    Load one member's persistent Spotify/DJ taste history from Neon.
+
+    J.1 is observation-only: it records history but does not yet change
+    Fergie's critic score, reward wording, or autonomous DJ choices.
+    """
+    data = await _db_get(
+        _fergie_member_taste_key(user_id)
+    )
+
+    if not isinstance(data, dict):
+        data = {}
+
+    recent_submissions = data.get(
+        "recent_submissions",
+        [],
+    )
+
+    if not isinstance(recent_submissions, list):
+        recent_submissions = []
+
+    seen_track_ids = data.get(
+        "seen_track_ids",
+        [],
+    )
+
+    if not isinstance(seen_track_ids, list):
+        seen_track_ids = []
+
+    imported_track_ids = data.get(
+        "imported_track_ids",
+        [],
+    )
+
+    if not isinstance(imported_track_ids, list):
+        imported_track_ids = []
+
+    artist_counts = data.get(
+        "artist_counts",
+        {},
+    )
+
+    if not isinstance(artist_counts, dict):
+        artist_counts = {}
+
+    return {
+        "user_id": int(user_id),
+        "display_name": (
+            data.get("display_name")
+            or display_name
+            or "someone"
+        ),
+        "reviews": int(data.get("reviews", 0) or 0),
+        "score_total": float(
+            data.get("score_total", 0.0) or 0.0
+        ),
+        "average_score": data.get("average_score"),
+        "qualified_count": int(
+            data.get("qualified_count", 0) or 0
+        ),
+        "imported_count": int(
+            data.get("imported_count", 0) or 0
+        ),
+        "recent_scores": [
+            float(value)
+            for value in data.get(
+                "recent_scores",
+                [],
+            )
+            if isinstance(value, (int, float))
+        ][-30:],
+        "recent_submissions": recent_submissions[-20:],
+        "seen_track_ids": [
+            str(value)
+            for value in seen_track_ids
+            if value
+        ][-100:],
+        "imported_track_ids": [
+            str(value)
+            for value in imported_track_ids
+            if value
+        ][-100:],
+        "artist_counts": {
+            str(key): int(value)
+            for key, value in artist_counts.items()
+            if key and isinstance(value, (int, float))
+        },
+        "updated_at": data.get("updated_at"),
+    }
+
+
+async def _fergie_save_member_taste_review(
+    *,
+    user_id: int,
+    display_name: str,
+    spotify_track_id: str,
+    song_title: str,
+    artist: str,
+    album: str,
+    score: float,
+):
+    """
+    Record one unique scored Spotify submission for this member.
+
+    Reposting the same Spotify track does not inflate the member's stats.
+    """
+    track_id = str(
+        spotify_track_id or ""
+    ).strip()
+
+    if not track_id:
+        return {
+            "ok": False,
+            "status": "missing_track_id",
+        }
+
+    try:
+        score = max(
+            0.0,
+            min(10.0, float(score)),
+        )
+    except (TypeError, ValueError):
+        return {
+            "ok": False,
+            "status": "invalid_score",
+        }
+
+    profile = await _fergie_member_taste_profile(
+        user_id,
+        display_name,
+    )
+
+    if track_id in profile["seen_track_ids"]:
+        return {
+            "ok": True,
+            "status": "already_recorded",
+            "profile": profile,
+        }
+
+    reviews = profile["reviews"] + 1
+    score_total = round(
+        profile["score_total"] + score,
+        3,
+    )
+    average_score = round(
+        score_total / reviews,
+        2,
+    )
+
+    qualified = (
+        score >= FERGIE_DJ_CANDIDATE_SCORE
+    )
+
+    recent_scores = (
+        profile["recent_scores"]
+        + [round(score, 1)]
+    )[-30:]
+
+    submission = {
+        "spotify_track_id": track_id,
+        "title": (
+            str(song_title or "")[:160]
+        ),
+        "artist": (
+            str(artist or "Unknown artist")[:160]
+        ),
+        "album": (
+            str(album or "")[:160]
+        ),
+        "score": round(score, 1),
+        "qualified": qualified,
+        "imported": False,
+        "reviewed_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+    recent_submissions = (
+        profile["recent_submissions"]
+        + [submission]
+    )[-20:]
+
+    seen_track_ids = (
+        profile["seen_track_ids"]
+        + [track_id]
+    )[-100:]
+
+    artist_counts = dict(
+        profile["artist_counts"]
+    )
+
+    artist_name = str(
+        artist or "Unknown artist"
+    ).strip()
+
+    if artist_name:
+        artist_counts[artist_name] = (
+            int(
+                artist_counts.get(
+                    artist_name,
+                    0,
+                )
+            )
+            + 1
+        )
+
+    # Bound the artist map to the 30 most frequently submitted artists.
+    if len(artist_counts) > 30:
+        artist_counts = dict(
+            sorted(
+                artist_counts.items(),
+                key=lambda item: (
+                    -int(item[1]),
+                    item[0].lower(),
+                ),
+            )[:30]
+        )
+
+    updated = {
+        **profile,
+        "display_name": (
+            display_name
+            or profile["display_name"]
+        ),
+        "reviews": reviews,
+        "score_total": score_total,
+        "average_score": average_score,
+        "qualified_count": (
+            profile["qualified_count"]
+            + (1 if qualified else 0)
+        ),
+        "recent_scores": recent_scores,
+        "recent_submissions": recent_submissions,
+        "seen_track_ids": seen_track_ids,
+        "artist_counts": artist_counts,
+        "updated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+    await _db_set(
+        _fergie_member_taste_key(user_id),
+        updated,
+    )
+
+    print(
+        f"FERGIE MEMBER TASTE REVIEW ✅ "
+        f"user={user_id} track={track_id} "
+        f"score={score:.1f} qualified={qualified} "
+        f"reviews={reviews} avg={average_score:.2f}"
+    )
+
+    return {
+        "ok": True,
+        "status": "recorded",
+        "profile": updated,
+    }
+
+
+async def _fergie_mark_member_taste_imported(
+    *,
+    user_id: int,
+    spotify_track_id: str,
+):
+    """
+    Mark a previously reviewed candidate as having actually reached the crate.
+
+    Import counting is idempotent, so notifier retries cannot inflate stats.
+    """
+    track_id = str(
+        spotify_track_id or ""
+    ).strip()
+
+    if not track_id:
+        return {
+            "ok": False,
+            "status": "missing_track_id",
+        }
+
+    profile = await _fergie_member_taste_profile(
+        user_id
+    )
+
+    if track_id in profile["imported_track_ids"]:
+        return {
+            "ok": True,
+            "status": "already_imported",
+            "profile": profile,
+        }
+
+    recent_submissions = []
+
+    for item in profile["recent_submissions"]:
+        if not isinstance(item, dict):
+            continue
+
+        updated_item = dict(item)
+
+        if (
+            str(
+                updated_item.get(
+                    "spotify_track_id",
+                    "",
+                )
+            )
+            == track_id
+        ):
+            updated_item["imported"] = True
+            updated_item["imported_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
+
+        recent_submissions.append(
+            updated_item
+        )
+
+    imported_track_ids = (
+        profile["imported_track_ids"]
+        + [track_id]
+    )[-100:]
+
+    updated = {
+        **profile,
+        "imported_count": (
+            profile["imported_count"] + 1
+        ),
+        "recent_submissions": (
+            recent_submissions[-20:]
+        ),
+        "imported_track_ids": imported_track_ids,
+        "updated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+    await _db_set(
+        _fergie_member_taste_key(user_id),
+        updated,
+    )
+
+    print(
+        f"FERGIE MEMBER TASTE IMPORT ✅ "
+        f"user={user_id} track={track_id} "
+        f"imports={updated['imported_count']}"
+    )
+
+    return {
+        "ok": True,
+        "status": "imported",
+        "profile": updated,
+    }
+
+# ================================================================================
+
+
 def _fergie_extract_music_score(review: str):
     """Read a 0-10 score from Fergie's generated review when present."""
     match = re.search(
@@ -3341,6 +3706,20 @@ async def _fergie_notify_imported_candidate(local_candidate: dict):
     candidate["imported_at"] = local_candidate.get("imported_at")
     candidate["import_notified_at"] = now_iso
 
+    if poster_id:
+        try:
+            await _fergie_mark_member_taste_imported(
+                user_id=poster_id,
+                spotify_track_id=spotify_track_id,
+            )
+        except Exception as e:
+            # Never block the proven I.4 green-light notification because
+            # member taste persistence had a temporary problem.
+            print(
+                f"FERGIE MEMBER TASTE IMPORT ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+
     await _fergie_save_dj_candidates(data)
 
     print(
@@ -3943,6 +4322,36 @@ async def on_message(message: discord.Message):
             # deduplicated private handoff to the DJ download/import channel.
             score_value = _fergie_extract_music_score(review)
             spotify_track_url = _fergie_spotify_track_url(content)
+
+            # Fergie 5.0 J.1: quietly learn this member's music history.
+            # This is observational only; J.1 does not affect today's score.
+            spotify_track_id = (
+                _spotify_track_id_from_url(
+                    spotify_track_url
+                )
+                if spotify_track_url
+                else None
+            )
+
+            if (
+                score_value is not None
+                and spotify_track_id
+            ):
+                try:
+                    await _fergie_save_member_taste_review(
+                        user_id=message.author.id,
+                        display_name=message.author.display_name,
+                        spotify_track_id=spotify_track_id,
+                        song_title=song_title,
+                        artist=artist,
+                        album=album,
+                        score=score_value,
+                    )
+                except Exception as e:
+                    print(
+                        f"FERGIE MEMBER TASTE REVIEW ERROR ❌ "
+                        f"{type(e).__name__}: {e}"
+                    )
 
             if (
                 score_value is not None
