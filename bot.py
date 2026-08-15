@@ -7295,6 +7295,133 @@ async def djimport(ctx):
         )
 
 
+
+# ================== Jonathan Existing-Crate Candidate Credit ==================
+@bot.command(
+    name="djcredit",
+    help=(
+        "JONATHAN ONLY: Reconcile a pending wanted candidate with an existing "
+        "crate track so the normal member recognition flow can run."
+    ),
+)
+async def djcredit(ctx, number: int = None):
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try fak. `!djcredit` is Jonathan-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if number is None or number < 1:
+        await ctx.reply(
+            "usage: `!djcredit <wanted number>` — check `!djwanted` first.",
+            mention_author=False,
+        )
+        return
+
+    if not FERGIE_DJ_URL or not FERGIE_DJ_API_KEY:
+        await ctx.reply(
+            "❌ my DJ server URL/API key isn't configured.",
+            mention_author=False,
+        )
+        return
+
+    # Pull the same pending list used by !djwanted so numbering stays consistent.
+    candidates = await _fergie_dj_fetch_candidates(status="pending_download")
+    if not candidates:
+        await ctx.reply("🎧 my wanted queue is empty right now.", mention_author=False)
+        return
+
+    if number > len(candidates):
+        await ctx.reply(
+            f"❌ wanted candidate #{number} doesn't exist. "
+            f"I currently have {len(candidates)} pending.",
+            mention_author=False,
+        )
+        return
+
+    candidate = candidates[number - 1]
+    spotify_track_id = str(candidate.get("spotify_track_id") or "").strip()
+    artist = str(candidate.get("artist") or "").strip()
+    title = str(candidate.get("title") or "").strip()
+
+    if not spotify_track_id:
+        await ctx.reply(
+            "❌ that wanted candidate is missing its track ID.",
+            mention_author=False,
+        )
+        return
+
+    wait = await ctx.reply(
+        f"🔎 checking my existing crate for **{artist} — {title}**...",
+        mention_author=False,
+    )
+
+    timeout = aiohttp.ClientTimeout(total=60)
+
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                f"{FERGIE_DJ_URL.rstrip('/')}/candidate/credit-existing",
+                headers={"X-Fergie-DJ-Key": FERGIE_DJ_API_KEY},
+                json={"spotify_track_id": spotify_track_id},
+            ) as response:
+                raw = await response.text()
+
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    data = {}
+
+                if response.status != 200 or not data.get("ok"):
+                    error = str(data.get("error") or raw[:300] or "unknown_error")
+
+                    if error == "no_existing_crate_match":
+                        await wait.edit(
+                            content=(
+                                f"❌ I couldn't find **{artist} — {title}** "
+                                "in my existing DJ crate, so I didn't credit anybody."
+                            )
+                        )
+                        return
+
+                    if error == "ambiguous_existing_crate_match":
+                        await wait.edit(
+                            content=(
+                                f"❌ I found more than one possible crate match for "
+                                f"**{artist} — {title}**. I didn't credit anybody."
+                            )
+                        )
+                        return
+
+                    raise RuntimeError(
+                        f"DJ credit HTTP {response.status}: {error}"
+                    )
+
+        track = data.get("track") or {}
+        matched_artist = str(track.get("artist") or artist).strip()
+        matched_title = str(track.get("title") or title).strip()
+
+        await wait.edit(
+            content=(
+                f"✅ **{artist} — {title}** matched my existing crate as "
+                f"**{matched_artist} — {matched_title}**.\n"
+                "🎧 Marked imported. My normal recognition notifier will handle "
+                "the original member credit."
+            )
+        )
+
+    except asyncio.TimeoutError:
+        await wait.edit(
+            content="❌ crate credit check timed out. Check the local DJ server logs."
+        )
+    except Exception as exc:
+        print(f"DJCREDIT ERROR ❌ {type(exc).__name__}: {exc}")
+        await wait.edit(
+            content="❌ crate credit failed. Check the local DJ server logs."
+        )
+
+
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
 
@@ -7393,6 +7520,7 @@ async def halp(ctx, *, command: str | None = None):
             "`!resetart` — Reset today's Art count back to 0 and restore the full daily allowance\n"
             "`!fergieget <artist> <song>` — Download a song through Soulseek into Fergie's DJ crate\n"
             "`!djimport` — Import all valid files currently in Soulseek staging into the DJ crate\n"
+            "`!djcredit <#>` — Credit a pending wanted song already present in the DJ crate\n"
             "`!auxboardtest` — Preview the current Aux League board without consuming Sunday's post\n"
             f"`!selftest` / `!selftest full` — Fergie 5.0 diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
         ),
@@ -7899,6 +8027,7 @@ async def selftest(ctx, mode: str = "fast"):
         "djapprove",
         "fergieget",
         "djimport",
+        "djcredit",
         "selftest",
         "auxboardtest",
     ]
