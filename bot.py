@@ -6433,6 +6433,182 @@ async def _fit_wait_ready():
     await bot.wait_until_ready()
     await asyncio.sleep(86400)
 
+# ================== Fergie DJ Soulseek Preview Helpers ==================
+async def _fergie_soulseek_search_preview(query: str):
+    """
+    Ask the authenticated local DJ server to search Soulseek.
+
+    IMPORTANT: this helper is preview-only. The local endpoint currently
+    returns eligible search results and does not start a download.
+    """
+    query = str(query or "").strip()
+
+    if not query:
+        raise ValueError("empty Soulseek search query")
+
+    if not FERGIE_DJ_URL:
+        raise RuntimeError("FERGIE_DJ_URL missing")
+
+    if not FERGIE_DJ_API_KEY:
+        raise RuntimeError("FERGIE_DJ_API_KEY missing")
+
+    timeout = aiohttp.ClientTimeout(total=35)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(
+            f"{FERGIE_DJ_URL}/soulseek/search",
+            headers={
+                "X-Fergie-DJ-Key": FERGIE_DJ_API_KEY,
+            },
+            params={
+                "q": query,
+            },
+        ) as response:
+            body = await response.text()
+
+            if response.status != 200:
+                raise RuntimeError(
+                    f"Soulseek search HTTP {response.status}: {body[:300]}"
+                )
+
+            try:
+                data = json.loads(body)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Soulseek search returned invalid JSON: {type(e).__name__}"
+                ) from e
+
+    if not isinstance(data, dict) or not data.get("ok"):
+        raise RuntimeError(
+            f"Soulseek search rejected: {data if isinstance(data, dict) else type(data).__name__}"
+        )
+
+    results = data.get("results", [])
+
+    if not isinstance(results, list):
+        results = []
+
+    return {
+        "query": str(data.get("query") or query),
+        "search_id": str(data.get("search_id") or ""),
+        "search_complete": bool(data.get("search_complete")),
+        "file_count": int(data.get("file_count") or 0),
+        "response_count": int(data.get("response_count") or 0),
+        "results": results,
+    }
+
+
+def _fergie_rank_soulseek_preview_results(results: list, artist: str, title: str):
+    """
+    Rank already-quality-filtered Soulseek results.
+
+    The local DJ server is the authority for allowed formats:
+    FLAC, M4A, or MP3 at exactly 320 kbps.
+    """
+    artist_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(artist or "").casefold())
+        if len(token) >= 2
+    }
+    title_tokens = {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(title or "").casefold())
+        if len(token) >= 2
+    }
+
+    ranked = []
+
+    for item in results:
+        if not isinstance(item, dict):
+            continue
+
+        filename = str(item.get("filename") or "").strip()
+        filename_lower = filename.casefold()
+
+        artist_hits = sum(1 for token in artist_tokens if token in filename_lower)
+        title_hits = sum(1 for token in title_tokens if token in filename_lower)
+
+        free_slot = bool(item.get("free_upload_slot"))
+
+        try:
+            queue_length = max(0, int(item.get("queue_length") or 0))
+        except (TypeError, ValueError):
+            queue_length = 999999
+
+        try:
+            upload_speed = max(0, int(item.get("upload_speed") or 0))
+        except (TypeError, ValueError):
+            upload_speed = 0
+
+        # Metadata relevance first, then practical peer availability.
+        score = (
+            artist_hits * 1000
+            + title_hits * 1500
+            + (500 if free_slot else 0)
+            - min(queue_length, 500) * 2
+            + min(upload_speed // 10000, 300)
+        )
+
+        ranked.append((score, item))
+
+    ranked.sort(
+        key=lambda pair: (
+            -pair[0],
+            0 if bool(pair[1].get("free_upload_slot")) else 1,
+            int(pair[1].get("queue_length") or 0)
+            if str(pair[1].get("queue_length") or "0").isdigit()
+            else 999999,
+            -int(pair[1].get("upload_speed") or 0)
+            if str(pair[1].get("upload_speed") or "0").isdigit()
+            else 0,
+        )
+    )
+
+    return [item for _, item in ranked]
+
+
+async def _fergie_selftest_soulseek_bridge():
+    """Read-only check that Railway can reach the local slskd bridge."""
+    if not FERGIE_DJ_URL:
+        return False, "FERGIE_DJ_URL missing"
+
+    if not FERGIE_DJ_API_KEY:
+        return False, "FERGIE_DJ_API_KEY missing"
+
+    timeout = aiohttp.ClientTimeout(total=15)
+
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                f"{FERGIE_DJ_URL}/soulseek/status",
+                headers={
+                    "X-Fergie-DJ-Key": FERGIE_DJ_API_KEY,
+                },
+            ) as response:
+                body = await response.text()
+
+                if response.status != 200:
+                    return False, f"HTTP {response.status}: {body[:150]}"
+
+                try:
+                    data = json.loads(body)
+                except Exception:
+                    return False, "invalid JSON"
+
+        if not isinstance(data, dict) or not data.get("ok"):
+            return False, f"bridge rejected: {data}"
+
+        reachable = bool(data.get("slskd_reachable"))
+
+        if not reachable:
+            return False, "DJ server reachable but slskd is not"
+
+        return True, "DJ server + slskd bridge reachable"
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
 # ================== Fergie DJ Wanted Queue ==================
 @bot.command(
     name="djwanted",
@@ -6527,6 +6703,201 @@ async def djwanted(ctx):
         )
 
 
+# ================== Fergie DJ Download Preview ==================
+@bot.command(
+    name="djdownload",
+    help=(
+        "ADMIN: Preview the best allowed Soulseek result for a numbered "
+        "!djwanted candidate. This does NOT download anything yet."
+    ),
+)
+async def djdownload(ctx, candidate_number: int | None = None):
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try fak. downloads are admin-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if candidate_number is None:
+        await ctx.reply(
+            "use `!djdownload <number>` after `!djwanted` — like `!djdownload 1`.",
+            mention_author=False,
+        )
+        return
+
+    if candidate_number < 1:
+        await ctx.reply(
+            "candidate numbers start at 1, babes. 🙄",
+            mention_author=False,
+        )
+        return
+
+    wait = await ctx.reply(
+        f"🔎 checking Soulseek for wanted candidate **#{candidate_number}**. "
+        "preview only — i'm not downloading anything yet.",
+        mention_author=False,
+    )
+
+    try:
+        candidates = await _fergie_fetch_local_dj_candidates()
+
+        if not isinstance(candidates, list):
+            raise RuntimeError(
+                f"unexpected candidate payload: {type(candidates).__name__}"
+            )
+
+        pending = [
+            item
+            for item in candidates
+            if isinstance(item, dict)
+            and str(item.get("status") or "").strip().lower() == "pending_download"
+        ][:15]
+
+        if not pending:
+            await wait.edit(
+                content="🎧 my wanted queue is empty. there is literally nothing to preview."
+            )
+            return
+
+        if candidate_number > len(pending):
+            await wait.edit(
+                content=(
+                    f"❌ candidate **#{candidate_number}** isn't in the current wanted queue. "
+                    f"use `!djwanted` again — i currently show **{len(pending)}**."
+                )
+            )
+            return
+
+        candidate = pending[candidate_number - 1]
+        title = str(candidate.get("title") or "").strip()
+        artist = str(candidate.get("artist") or "").strip()
+        album = str(candidate.get("album") or "").strip()
+
+        if not title:
+            await wait.edit(
+                content="❌ that candidate has no title, so i'm not sending a garbage search."
+            )
+            return
+
+        query = " ".join(
+            part
+            for part in (artist, title)
+            if part
+        ).strip()
+
+        search = await _fergie_soulseek_search_preview(query)
+        ranked = _fergie_rank_soulseek_preview_results(
+            search.get("results", []),
+            artist=artist,
+            title=title,
+        )
+
+        if not ranked:
+            await wait.edit(
+                content=(
+                    f"🎧 Soulseek search finished for **{artist or 'Unknown artist'} — {title}**, "
+                    "but I found **no files that pass our quality rules** "
+                    "(320 kbps MP3, FLAC, or M4A)."
+                )
+            )
+            return
+
+        best = ranked[0]
+
+        filename = str(best.get("filename") or "Unknown file").strip()
+        username = str(best.get("username") or "Unknown peer").strip()
+        fmt = str(best.get("format") or "?").upper()
+
+        bitrate = best.get("bitrate_kbps")
+        bitrate_text = (
+            f"{bitrate} kbps"
+            if bitrate not in (None, "", 0)
+            else "lossless/unspecified bitrate"
+        )
+
+        try:
+            size_mb = float(best.get("size_bytes") or 0) / (1024 * 1024)
+        except (TypeError, ValueError):
+            size_mb = 0.0
+
+        try:
+            queue_length = int(best.get("queue_length") or 0)
+        except (TypeError, ValueError):
+            queue_length = 0
+
+        free_slot = bool(best.get("free_upload_slot"))
+
+        try:
+            upload_speed_kbps = int(best.get("upload_speed") or 0) / 1024
+        except (TypeError, ValueError):
+            upload_speed_kbps = 0.0
+
+        embed = discord.Embed(
+            title="🔎 Soulseek Download Preview",
+            description=(
+                f"**Wanted #{candidate_number}:** "
+                f"{artist or 'Unknown artist'} — {title}\n\n"
+                "**Nothing has been downloaded.**"
+            ),
+            colour=discord.Colour.blurple(),
+        )
+
+        embed.add_field(
+            name="Best eligible result",
+            value=f"`{filename[:950]}`",
+            inline=False,
+        )
+        embed.add_field(
+            name="Quality",
+            value=f"**{fmt}** • {bitrate_text} • {size_mb:.2f} MB",
+            inline=False,
+        )
+        embed.add_field(
+            name="Peer",
+            value=(
+                f"**{username}** • "
+                f"{'free slot ✅' if free_slot else 'no free slot ⚠️'} • "
+                f"queue {queue_length} • "
+                f"~{upload_speed_kbps:.0f} KB/s"
+            ),
+            inline=False,
+        )
+
+        if album:
+            embed.add_field(
+                name="Spotify candidate album",
+                value=album[:1024],
+                inline=False,
+            )
+
+        embed.set_footer(
+            text=(
+                f"{len(ranked)} eligible result(s) • "
+                "allowed: 320 MP3 / FLAC / M4A • preview only"
+            )
+        )
+
+        await wait.edit(content=None, embed=embed)
+
+    except asyncio.TimeoutError:
+        await wait.edit(
+            content=(
+                "❌ Soulseek preview timed out. nothing was downloaded. "
+                "check the local DJ/slskd/tunnel status."
+            )
+        )
+
+    except Exception as e:
+        print(f"FERGIE DJ DOWNLOAD PREVIEW ERROR ❌ {type(e).__name__}: {e}")
+        await wait.edit(
+            content=(
+                "❌ I couldn't preview that Soulseek download. "
+                "nothing was downloaded. check the DJ/slskd logs."
+            )
+        )
+
+
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
 
@@ -6608,6 +6979,8 @@ async def halp(ctx, *, command: str | None = None):
             "Post a **Spotify track link** — Fergie reviews/rates it and learns member taste\n"
             "• **7.5+/10** can enter the DJ candidate pipeline for the local crate\n"
             "`!djwanted` — Admin: show Fergie's pending download/wanted queue\n"
+            "`!djdownload <number>` — Admin: preview the best eligible Soulseek file; does **not** download yet\n"
+            "• Soulseek eligibility: **320 kbps MP3, FLAC, or M4A only**\n"
             "• Imported candidates are detected automatically and the poster gets a crate confirmation\n"
             "• Autonomous DJ uses a light taste nudge while preserving rotation/repeat protections\n"
             "• **Aux League:** ratings earn weekly points; crate imports earn a **+3 bonus**\n"
@@ -7073,6 +7446,9 @@ async def selftest(ctx, mode: str = "fast"):
         "_fergie_fetch_local_dj_candidates",
         "_fergie_notify_imported_candidate",
         "_fergie_selftest_dj_wanted_queue",
+        "_fergie_soulseek_search_preview",
+        "_fergie_rank_soulseek_preview_results",
+        "_fergie_selftest_soulseek_bridge",
 
         # Fergie 5.0 taste / reputation
         "_fergie_member_taste_profile",
@@ -7118,6 +7494,7 @@ async def selftest(ctx, mode: str = "fast"):
         "scam",
         "bbl",
         "djwanted",
+        "djdownload",
         "selftest",
         "auxboardtest",
     ]
@@ -7345,6 +7722,9 @@ async def selftest(ctx, mode: str = "fast"):
 
         wanted_ok, wanted_detail = await _fergie_selftest_dj_wanted_queue()
         record("Live", "DJ wanted queue", wanted_ok, wanted_detail)
+
+        soulseek_ok, soulseek_detail = await _fergie_selftest_soulseek_bridge()
+        record("Live", "Soulseek bridge", soulseek_ok, soulseek_detail)
 
         aux_ok, aux_detail = await _fergie_selftest_aux_league_readonly()
         record("Live", "Aux League read-only", aux_ok, aux_detail)
