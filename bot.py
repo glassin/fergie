@@ -7096,6 +7096,110 @@ async def djapprove(ctx, candidate_number: int | None = None):
         )
 
 
+
+# ================== Jonathan Direct-to-Crate Music Request ==================
+@bot.command(
+    name="fergieget",
+    help=(
+        "JONATHAN ONLY: Search Soulseek for a song, enforce Fergie's audio "
+        "quality rules, and send the best eligible result into the existing "
+        "download -> staging -> DJ crate pipeline."
+    ),
+)
+async def fergieget(ctx, *, query: str = ""):
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try fak. `!fergieget` is Jonathan-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    query = str(query or "").strip()
+
+    if not query:
+        await ctx.reply(
+            "use `!fergieget <artist> <song>` — like "
+            "`!fergieget Tame Impala Eventually`.",
+            mention_author=False,
+        )
+        return
+
+    if not FERGIE_DJ_URL:
+        await ctx.reply("❌ my DJ server URL isn't configured.", mention_author=False)
+        return
+
+    if not FERGIE_DJ_API_KEY:
+        await ctx.reply("❌ my DJ API key isn't configured.", mention_author=False)
+        return
+
+    wait = await ctx.reply(
+        f"💿 looking for **{query[:300]}** on Soulseek. "
+        "i'll only take 320 MP3, FLAC, or M4A.",
+        mention_author=False,
+    )
+
+    try:
+        # Reuse the exact proven download endpoint/helper used by !djapprove.
+        # The existing local staging/import watcher handles moving the finished
+        # file into Fergie's real DJ crate.
+        result = await _fergie_soulseek_approve_download(query)
+
+        filename = str(result.get("filename") or "Unknown file").strip()
+        username = str(result.get("username") or "Unknown peer").strip()
+        fmt = str(result.get("format") or "?").upper()
+        bitrate = result.get("bitrate_kbps")
+
+        if fmt == "MP3" and bitrate not in (320, "320"):
+            raise RuntimeError(
+                f"local server returned unsafe MP3 bitrate: {bitrate!r}"
+            )
+        if fmt not in {"MP3", "FLAC", "M4A"}:
+            raise RuntimeError(
+                f"local server returned unsupported format: {fmt!r}"
+            )
+
+        quality = fmt
+        if fmt == "MP3":
+            quality += " • 320 kbps"
+
+        embed = discord.Embed(
+            title="💿 FergieGet Accepted",
+            description=(
+                f"**{query[:500]}**\n\n"
+                "slskd accepted the download. the existing staging/import "
+                "pipeline will move it into my DJ crate when it finishes."
+            ),
+            colour=discord.Colour.green(),
+        )
+        embed.add_field(
+            name="Selected file",
+            value=f"`{filename[:950]}`",
+            inline=False,
+        )
+        embed.add_field(name="Quality", value=quality, inline=True)
+        embed.add_field(name="Peer", value=username[:1024], inline=True)
+        embed.set_footer(
+            text="Jonathan-only • 320 MP3 / FLAC / M4A • existing importer handles the crate"
+        )
+        await wait.edit(content=None, embed=embed)
+
+    except asyncio.TimeoutError:
+        await wait.edit(
+            content=(
+                "❌ `!fergieget` timed out. I can't confirm whether slskd "
+                "accepted it; check the local DJ/slskd logs before retrying."
+            )
+        )
+    except Exception as e:
+        print(f"FERGIEGET ERROR ❌ {type(e).__name__}: {e}")
+        await wait.edit(
+            content=(
+                "❌ I couldn't start that download. Nothing was marked as "
+                "imported. Check the DJ/slskd logs."
+            )
+        )
+
+
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
 
@@ -7192,6 +7296,7 @@ async def halp(ctx, *, command: str | None = None):
         name="🔐 Jonathan-only",
         value=(
             "`!resetart` — Reset today's Art count back to 0 and restore the full daily allowance\n"
+            "`!fergieget <artist> <song>` — Download a song through Soulseek into Fergie's DJ crate\n"
             "`!auxboardtest` — Preview the current Aux League board without consuming Sunday's post\n"
             f"`!selftest` / `!selftest full` — Fergie 5.0 diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
         ),
@@ -7696,6 +7801,7 @@ async def selftest(ctx, mode: str = "fast"):
         "djwanted",
         "djdownload",
         "djapprove",
+        "fergieget",
         "selftest",
         "auxboardtest",
     ]
