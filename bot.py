@@ -112,6 +112,18 @@ SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 SPOTIFY_PLAYLIST_ID = os.getenv("SPOTIFY_PLAYLIST_ID", "6l190qy5x9xY8Uk3bb2FYl")
 SPOTIFY_MARKET = os.getenv("SPOTIFY_MARKET", "US")
 KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
+
+# ---------- Fergie 5.0 Stage I.1: Spotify Critic -> DJ Candidates ----------
+FERGIE_DJ_CANDIDATE_SCORE = float(
+    os.getenv("FERGIE_DJ_CANDIDATE_SCORE", "7.5")
+)
+FERGIE_DJ_CANDIDATE_HISTORY_LIMIT = int(
+    os.getenv("FERGIE_DJ_CANDIDATE_HISTORY_LIMIT", "100")
+)
+FERGIE_DJ_CANDIDATE_CHANNEL_ID = int(
+    os.getenv("FERGIE_DJ_CANDIDATE_CHANNEL_ID", str(FERGIE_TEST_CHANNEL_ID))
+)
+# ---------------------------------------------------------------------------
 # -----------------------------------------
 
 # ---------- Fit (Discord CDN images) ----------
@@ -2657,6 +2669,188 @@ async def _fetch_spotify_track_metadata(spotify_url: str):
         return None
 
 
+# ================== Fergie 5.0 Stage I.1: DJ Candidate Handoff ==================
+
+def _fergie_spotify_track_url(text: str):
+    """Return a clean canonical Spotify track URL from arbitrary message text."""
+    track_id = _spotify_track_id_from_url(text or "")
+    if not track_id:
+        return None
+    return f"https://open.spotify.com/track/{track_id}"
+
+
+def _fergie_dj_candidate_reward_line(
+    song_title: str,
+    artist: str,
+    score: float,
+    already_queued: bool = False,
+):
+    """Short Fergie-style reward when somebody gets a song through aux court."""
+    label = (
+        f"{song_title} by {artist}"
+        if artist and artist != "Unknown artist"
+        else song_title
+    )
+
+    if already_queued:
+        lines = [
+            f"girl you already got **{label}** past my aux inspection. it's on my DJ list. 🙄🎧",
+            f"not you submitting **{label}** again. i already approved her. behave. 💅🎧",
+            f"**{label}** already has DJ privileges. collect your tiny victory and go. 🙄",
+        ]
+    else:
+        lines = [
+            f"fine. **{score:.1f}/10** cleared aux court. i'm sending **{label}** to my DJ pipeline. 🙄🎧",
+            f"okayyyy you cooked. **{label}** earned DJ consideration at **{score:.1f}/10**. 💅🎧",
+            f"ugh, reward unlocked. **{label}** made the DJ cut with **{score:.1f}/10**. don't get smug. 🙄",
+            f"aux privileges granted. **{label}** scored **{score:.1f}/10**, so i'm stealing it for DJ Fergie. 🎧",
+        ]
+
+    return random.choice(lines)
+
+
+async def _fergie_load_dj_candidates():
+    data = await _db_get("fergie_dj_candidates")
+
+    if not isinstance(data, dict):
+        data = {}
+
+    items = data.get("items")
+
+    if not isinstance(items, list):
+        items = []
+
+    return {"items": items}
+
+
+async def _fergie_save_dj_candidates(data: dict):
+    items = data.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    data["items"] = items[-FERGIE_DJ_CANDIDATE_HISTORY_LIMIT:]
+    await _db_set("fergie_dj_candidates", data)
+
+
+async def _fergie_handoff_dj_candidate(
+    *,
+    spotify_url: str,
+    song_title: str,
+    artist: str,
+    album: str,
+    score: float,
+    poster_id: int,
+    poster_display_name: str,
+):
+    """
+    Send a qualifying Spotify review to the private DJ test/download channel.
+
+    I.1 intentionally does NOT download audio and does NOT touch the live crate.
+    The private handoff is the controlled boundary for the later downloader/importer.
+    """
+    track_id = _spotify_track_id_from_url(spotify_url or "")
+
+    if not track_id:
+        return {"ok": False, "status": "invalid_spotify_track"}
+
+    data = await _fergie_load_dj_candidates()
+    items = data.get("items", [])
+
+    existing = next(
+        (
+            item
+            for item in items
+            if str(item.get("spotify_track_id", "")) == track_id
+        ),
+        None,
+    )
+
+    if existing:
+        print(
+            f"FERGIE DJ CANDIDATE ALREADY EXISTS ⚪ "
+            f"track={track_id} score={score:.1f}"
+        )
+        return {
+            "ok": True,
+            "status": "already_queued",
+            "candidate": existing,
+        }
+
+    channel = bot.get_channel(FERGIE_DJ_CANDIDATE_CHANNEL_ID)
+
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(
+                FERGIE_DJ_CANDIDATE_CHANNEL_ID
+            )
+        except Exception as e:
+            print(
+                "FERGIE DJ CANDIDATE CHANNEL ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+            return {"ok": False, "status": "channel_unavailable"}
+
+    candidate = {
+        "spotify_track_id": track_id,
+        "spotify_url": spotify_url,
+        "title": song_title,
+        "artist": artist,
+        "album": album or "",
+        "score": round(float(score), 1),
+        "poster_id": int(poster_id),
+        "poster_display_name": poster_display_name or "someone",
+        "status": "pending_download",
+        "submitted_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    lines = [
+        "🎧 **FERGIE DJ CANDIDATE — STAGE I.1**",
+        f"**Score:** {candidate['score']:.1f}/10",
+        f"**Track:** {song_title}",
+        f"**Artist:** {artist}",
+    ]
+
+    if album:
+        lines.append(f"**Album:** {album}")
+
+    lines.extend(
+        [
+            f"**Posted by:** <@{poster_id}>",
+            f"**Spotify:** {spotify_url}",
+            "**Status:** `pending_download`",
+        ]
+    )
+
+    try:
+        handoff_message = await channel.send("\n".join(lines))
+    except Exception as e:
+        print(
+            "FERGIE DJ CANDIDATE SEND ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return {"ok": False, "status": "send_failed"}
+
+    candidate["handoff_message_id"] = handoff_message.id
+    candidate["handoff_channel_id"] = channel.id
+
+    items.append(candidate)
+    data["items"] = items
+    await _fergie_save_dj_candidates(data)
+
+    print(
+        f"FERGIE DJ CANDIDATE SENT ✅ "
+        f"track={track_id} score={score:.1f} "
+        f"title={song_title!r} artist={artist!r}"
+    )
+
+    return {
+        "ok": True,
+        "status": "sent",
+        "candidate": candidate,
+    }
+
+
 async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
     token = await _get_spotify_token()
     if not token: return []
@@ -3432,6 +3626,52 @@ async def on_message(message: discord.Message):
                 review,
                 mention_author=False,
             )
+
+            # Fergie 5.0 Stage I.1:
+            # qualifying critic scores get a witty public reward plus a
+            # deduplicated private handoff to the DJ download/import channel.
+            score_value = _fergie_extract_music_score(review)
+            spotify_track_url = _fergie_spotify_track_url(content)
+
+            if (
+                score_value is not None
+                and score_value >= FERGIE_DJ_CANDIDATE_SCORE
+                and spotify_track_url
+            ):
+                try:
+                    candidate_result = await _fergie_handoff_dj_candidate(
+                        spotify_url=spotify_track_url,
+                        song_title=song_title,
+                        artist=artist,
+                        album=album,
+                        score=score_value,
+                        poster_id=message.author.id,
+                        poster_display_name=message.author.display_name,
+                    )
+
+                    if candidate_result.get("ok"):
+                        reward = _fergie_dj_candidate_reward_line(
+                            song_title=song_title,
+                            artist=artist,
+                            score=score_value,
+                            already_queued=(
+                                candidate_result.get("status")
+                                == "already_queued"
+                            ),
+                        )
+
+                        await message.reply(
+                            reward,
+                            mention_author=False,
+                        )
+
+                except Exception as e:
+                    # Never break the proven critic because the DJ handoff is down.
+                    print(
+                        "FERGIE DJ CANDIDATE PIPELINE ERROR ❌ "
+                        f"{type(e).__name__}: {e}"
+                    )
+
             return
 
         # Gemini/Spotify failure fallback: keep the large verdict pool so this
