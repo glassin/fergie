@@ -7200,6 +7200,101 @@ async def fergieget(ctx, *, query: str = ""):
         )
 
 
+
+# ================== Jonathan Manual Staging Import ==================
+@bot.command(
+    name="djimport",
+    help=(
+        "JONATHAN ONLY: Import all valid audio currently in Soulseek staging "
+        "into Fergie's real DJ crate and rescan."
+    ),
+)
+async def djimport(ctx):
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try fak. `!djimport` is Jonathan-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if not FERGIE_DJ_URL:
+        await ctx.reply("❌ my DJ server URL isn't configured.", mention_author=False)
+        return
+
+    if not FERGIE_DJ_API_KEY:
+        await ctx.reply("❌ my DJ API key isn't configured.", mention_author=False)
+        return
+
+    wait = await ctx.reply(
+        "📦 checking staging and importing every valid audio file into my DJ crate...",
+        mention_author=False,
+    )
+
+    timeout = aiohttp.ClientTimeout(total=120)
+
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                f"{FERGIE_DJ_URL.rstrip('/')}/soulseek/import-all",
+                headers={"X-Fergie-DJ-Key": FERGIE_DJ_API_KEY},
+            ) as response:
+                raw = await response.text()
+
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"DJ import HTTP {response.status}: {raw[:500]}"
+                    )
+
+                try:
+                    data = json.loads(raw)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"DJ import returned invalid JSON: {exc}"
+                    )
+
+        if not data.get("ok"):
+            raise RuntimeError(str(data.get("error") or "manual_import_failed"))
+
+        moved_count = int(data.get("moved_count") or 0)
+        moved = data.get("moved") or []
+        skipped = data.get("skipped") or []
+        invalid = data.get("invalid") or []
+
+        lines = [
+            "📦 **Staging import complete.**",
+            f"✅ Imported: **{moved_count}**",
+            f"⏭️ Skipped: **{len(skipped)}**",
+            f"❌ Invalid: **{len(invalid)}**",
+        ]
+
+        if moved:
+            names = []
+            for item in moved[:8]:
+                title = str(item.get("title") or "").strip()
+                artist = str(item.get("artist") or "").strip()
+                if artist and title:
+                    names.append(f"• {artist} — {title}")
+                else:
+                    destination = str(item.get("destination") or "").strip()
+                    if destination:
+                        names.append(f"• {destination.replace(chr(92), '/').rsplit('/', 1)[-1]}")
+            if names:
+                lines.append("\n" + "\n".join(names))
+
+        lines.append("\n🔄 DJ crate rescan requested by the existing importer.")
+        await wait.edit(content="\n".join(lines)[:1900])
+
+    except asyncio.TimeoutError:
+        await wait.edit(
+            content="❌ staging import timed out. Check the local DJ server logs."
+        )
+    except Exception as exc:
+        print(f"DJIMPORT ERROR ❌ {type(exc).__name__}: {exc}")
+        await wait.edit(
+            content="❌ staging import failed. Check the local DJ server logs."
+        )
+
+
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
 
@@ -7297,6 +7392,7 @@ async def halp(ctx, *, command: str | None = None):
         value=(
             "`!resetart` — Reset today's Art count back to 0 and restore the full daily allowance\n"
             "`!fergieget <artist> <song>` — Download a song through Soulseek into Fergie's DJ crate\n"
+            "`!djimport` — Import all valid files currently in Soulseek staging into the DJ crate\n"
             "`!auxboardtest` — Preview the current Aux League board without consuming Sunday's post\n"
             f"`!selftest` / `!selftest full` — Fergie 5.0 diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
         ),
@@ -7802,6 +7898,7 @@ async def selftest(ctx, mode: str = "fast"):
         "djdownload",
         "djapprove",
         "fergieget",
+        "djimport",
         "selftest",
         "auxboardtest",
     ]
