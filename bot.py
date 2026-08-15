@@ -626,8 +626,6 @@ FERGIE_CAST = {
             "get's his ass kicked at a place called combat club",
             "conspiracy theorist",
             "doesn't like jews",
-            "makes his chalan do everything while he sits around",
-            "doesn't feed his chalan and pays him less than minimum wage",
             "hates women but is always horny for them",
             "drives a durango",
             "is guatemalen but thinks he's mexican"
@@ -1768,6 +1766,10 @@ FERGIE_VISUAL_REFS = {
     "chadwin": {"path": "visual_refs/chadwin.png", "aliases": ["chadwin", "edwin"]},
     "raquel": {"path": "visual_refs/raquel.png", "aliases": ["raquel"]},
     "jonathan": {"path": "visual_refs/jonathan.png", "aliases": ["jonathan"]},
+    "lobo": {
+        "path": "visual_refs/lobo.png",
+        "aliases": ["lobo", "pinche lobo"],
+    },
 }
 
 
@@ -6795,6 +6797,7 @@ async def selftest(ctx, mode: str = "fast"):
         "visual_refs/chadwin.png",
         "visual_refs/raquel.png",
         "visual_refs/jonathan.png",
+        "visual_refs/lobo.png",
     ]
 
     for asset in asset_checks:
