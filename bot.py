@@ -6703,6 +6703,59 @@ async def djwanted(ctx):
         )
 
 
+async def _fergie_soulseek_approve_download(query: str):
+    """
+    Tell the authenticated local DJ server to perform a fresh Soulseek search,
+    enforce its server-side quality gate, select the best current result,
+    and enqueue the download in slskd.
+    """
+    query = str(query or "").strip()
+
+    if not query:
+        raise ValueError("empty Soulseek download query")
+    if not FERGIE_DJ_URL:
+        raise RuntimeError("FERGIE_DJ_URL missing")
+    if not FERGIE_DJ_API_KEY:
+        raise RuntimeError("FERGIE_DJ_API_KEY missing")
+
+    timeout = aiohttp.ClientTimeout(total=45)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.post(
+            f"{FERGIE_DJ_URL}/soulseek/download",
+            headers={
+                "X-Fergie-DJ-Key": FERGIE_DJ_API_KEY,
+                "Content-Type": "application/json",
+            },
+            json={"query": query},
+        ) as response:
+            body = await response.text()
+
+            try:
+                data = json.loads(body)
+            except Exception as e:
+                raise RuntimeError(
+                    f"Soulseek download returned invalid JSON "
+                    f"(HTTP {response.status}): {body[:300]}"
+                ) from e
+
+            if response.status != 200:
+                detail = data.get("error") if isinstance(data, dict) else body[:300]
+                raise RuntimeError(
+                    f"Soulseek download HTTP {response.status}: {detail}"
+                )
+
+    if not isinstance(data, dict):
+        raise RuntimeError("Soulseek download returned unexpected payload")
+
+    if not data.get("ok") or not data.get("download_started"):
+        raise RuntimeError(
+            f"Soulseek download was not started: {data.get('error') or data}"
+        )
+
+    return data
+
+
 # ================== Fergie DJ Download Preview ==================
 @bot.command(
     name="djdownload",
@@ -6898,6 +6951,151 @@ async def djdownload(ctx, candidate_number: int | None = None):
         )
 
 
+# ================== Fergie DJ Manual Download Approval ==================
+@bot.command(
+    name="djapprove",
+    help=(
+        "ADMIN: Approve a numbered !djwanted candidate for a real Soulseek "
+        "download. The local server performs a fresh search and enforces "
+        "320 kbps MP3 / FLAC / M4A."
+    ),
+)
+async def djapprove(ctx, candidate_number: int | None = None):
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try fak. download approval is admin-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if candidate_number is None:
+        await ctx.reply(
+            "use `!djapprove <number>` after `!djwanted` — like `!djapprove 1`.",
+            mention_author=False,
+        )
+        return
+
+    if candidate_number < 1:
+        await ctx.reply(
+            "candidate numbers start at 1, babes. 🙄",
+            mention_author=False,
+        )
+        return
+
+    wait = await ctx.reply(
+        f"💿 approving wanted candidate **#{candidate_number}** — "
+        "doing a fresh Soulseek search now.",
+        mention_author=False,
+    )
+
+    try:
+        candidates = await _fergie_fetch_local_dj_candidates()
+
+        if not isinstance(candidates, list):
+            raise RuntimeError(
+                f"unexpected candidate payload: {type(candidates).__name__}"
+            )
+
+        pending = [
+            item
+            for item in candidates
+            if isinstance(item, dict)
+            and str(item.get("status") or "").strip().lower() == "pending_download"
+        ][:15]
+
+        if not pending:
+            await wait.edit(
+                content="🎧 my wanted queue is empty. there is nothing to approve."
+            )
+            return
+
+        if candidate_number > len(pending):
+            await wait.edit(
+                content=(
+                    f"❌ candidate **#{candidate_number}** isn't in the current wanted queue. "
+                    f"use `!djwanted` again — I currently show **{len(pending)}**."
+                )
+            )
+            return
+
+        candidate = pending[candidate_number - 1]
+        title = str(candidate.get("title") or "").strip()
+        artist = str(candidate.get("artist") or "").strip()
+
+        if not title:
+            await wait.edit(
+                content="❌ that candidate has no title, so I refused the download."
+            )
+            return
+
+        query = " ".join(part for part in (artist, title) if part).strip()
+        result = await _fergie_soulseek_approve_download(query)
+
+        filename = str(result.get("filename") or "Unknown file").strip()
+        username = str(result.get("username") or "Unknown peer").strip()
+        fmt = str(result.get("format") or "?").upper()
+        bitrate = result.get("bitrate_kbps")
+
+        if fmt == "MP3" and bitrate not in (320, "320"):
+            raise RuntimeError(
+                f"local server returned unsafe MP3 bitrate after approval: {bitrate!r}"
+            )
+        if fmt not in {"MP3", "FLAC", "M4A"}:
+            raise RuntimeError(
+                f"local server returned unsupported format after approval: {fmt!r}"
+            )
+
+        quality = fmt
+        if fmt == "MP3":
+            quality += " • 320 kbps"
+
+        embed = discord.Embed(
+            title="💿 Soulseek Download Approved",
+            description=(
+                f"**Wanted #{candidate_number}:** "
+                f"{artist or 'Unknown artist'} — {title}\n\n"
+                "slskd accepted the download request."
+            ),
+            colour=discord.Colour.green(),
+        )
+        embed.add_field(
+            name="Selected file",
+            value=f"`{filename[:950]}`",
+            inline=False,
+        )
+        embed.add_field(
+            name="Quality",
+            value=quality,
+            inline=True,
+        )
+        embed.add_field(
+            name="Peer",
+            value=username[:1024],
+            inline=True,
+        )
+        embed.set_footer(
+            text="allowed: 320 MP3 / FLAC / M4A • download enqueued"
+        )
+
+        await wait.edit(content=None, embed=embed)
+
+    except asyncio.TimeoutError:
+        await wait.edit(
+            content=(
+                "❌ download approval timed out. I cannot confirm a download "
+                "was started; check the local DJ/slskd logs before retrying."
+            )
+        )
+    except Exception as e:
+        print(f"FERGIE DJ APPROVE ERROR ❌ {type(e).__name__}: {e}")
+        await wait.edit(
+            content=(
+                "❌ I couldn't approve that download. I did **not** mark it "
+                "as imported. Check the DJ/slskd logs."
+            )
+        )
+
+
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
 
@@ -6980,6 +7178,7 @@ async def halp(ctx, *, command: str | None = None):
             "• **7.5+/10** can enter the DJ candidate pipeline for the local crate\n"
             "`!djwanted` — Admin: show Fergie's pending download/wanted queue\n"
             "`!djdownload <number>` — Admin: preview the best eligible Soulseek file; does **not** download yet\n"
+            "`!djapprove <number>` — Admin: approve a wanted candidate for a real Soulseek download\n"
             "• Soulseek eligibility: **320 kbps MP3, FLAC, or M4A only**\n"
             "• Imported candidates are detected automatically and the poster gets a crate confirmation\n"
             "• Autonomous DJ uses a light taste nudge while preserving rotation/repeat protections\n"
@@ -7448,6 +7647,7 @@ async def selftest(ctx, mode: str = "fast"):
         "_fergie_selftest_dj_wanted_queue",
         "_fergie_soulseek_search_preview",
         "_fergie_rank_soulseek_preview_results",
+        "_fergie_soulseek_approve_download",
         "_fergie_selftest_soulseek_bridge",
 
         # Fergie 5.0 taste / reputation
@@ -7495,6 +7695,7 @@ async def selftest(ctx, mode: str = "fast"):
         "bbl",
         "djwanted",
         "djdownload",
+        "djapprove",
         "selftest",
         "auxboardtest",
     ]
