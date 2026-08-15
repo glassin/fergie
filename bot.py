@@ -2349,6 +2349,138 @@ async def _fergie_member_taste_profile(
     }
 
 
+def _fergie_aux_reputation(profile: dict):
+    """
+    Stage J.2 reputation derived only from persisted J.1 history.
+
+    Reputation is informational in J.2. It does NOT alter critic scores,
+    candidate qualification, DJ playback, or autonomous song selection.
+    """
+    reviews = max(0, int(profile.get("reviews", 0) or 0))
+    average = float(profile.get("average_score") or 0.0)
+    qualified = max(0, int(profile.get("qualified_count", 0) or 0))
+    imported = max(0, int(profile.get("imported_count", 0) or 0))
+
+    qualification_rate = (
+        qualified / reviews
+        if reviews
+        else 0.0
+    )
+
+    # Require history before granting stronger reputations. Imports are
+    # deliberately valuable because they prove a recommendation actually
+    # survived the full critic -> candidate -> crate pipeline.
+    if reviews == 0:
+        tier = "unrated"
+    elif reviews < 3:
+        tier = "on_probation"
+    elif (
+        reviews >= 10
+        and average >= 8.25
+        and qualification_rate >= 0.70
+        and imported >= 5
+    ):
+        tier = "aux_royalty"
+    elif (
+        reviews >= 6
+        and average >= 7.75
+        and qualification_rate >= 0.60
+        and imported >= 2
+    ):
+        tier = "trusted_aux"
+    elif (
+        reviews >= 3
+        and average >= 7.00
+        and qualification_rate >= 0.35
+    ):
+        tier = "decent_aux"
+    elif (
+        reviews >= 3
+        and average < 6.00
+    ):
+        tier = "aux_hazard"
+    else:
+        tier = "questionable_aux"
+
+    labels = {
+        "unrated": "Unrated",
+        "on_probation": "Aux Probation",
+        "aux_hazard": "Aux Hazard",
+        "questionable_aux": "Questionable Aux",
+        "decent_aux": "Decent Aux",
+        "trusted_aux": "Trusted Aux",
+        "aux_royalty": "Aux Royalty",
+    }
+
+    return {
+        "tier": tier,
+        "label": labels[tier],
+        "reviews": reviews,
+        "average_score": round(average, 2) if reviews else None,
+        "qualified_count": qualified,
+        "imported_count": imported,
+        "qualification_rate": round(qualification_rate, 3),
+    }
+
+
+async def _fergie_refresh_member_aux_reputation(
+    user_id: int,
+    display_name: str = "someone",
+):
+    """
+    Recalculate and persist the member's current aux reputation.
+    """
+    profile = await _fergie_member_taste_profile(
+        user_id,
+        display_name,
+    )
+
+    reputation = _fergie_aux_reputation(profile)
+    previous = profile.get("aux_reputation")
+
+    updated = {
+        **profile,
+        "aux_reputation": reputation,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    await _db_set(
+        _fergie_member_taste_key(user_id),
+        updated,
+    )
+
+    previous_tier = (
+        previous.get("tier")
+        if isinstance(previous, dict)
+        else None
+    )
+
+    if previous_tier != reputation["tier"]:
+        print(
+            f"FERGIE AUX REPUTATION CHANGE 🧠 "
+            f"user={user_id} "
+            f"{previous_tier or 'none'}->{reputation['tier']} "
+            f"reviews={reputation['reviews']} "
+            f"avg={reputation['average_score']} "
+            f"qualified={reputation['qualified_count']} "
+            f"imported={reputation['imported_count']}"
+        )
+    else:
+        print(
+            f"FERGIE AUX REPUTATION ✅ "
+            f"user={user_id} tier={reputation['tier']} "
+            f"reviews={reputation['reviews']} "
+            f"avg={reputation['average_score']}"
+        )
+
+    return {
+        "profile": updated,
+        "reputation": reputation,
+        "changed": previous_tier != reputation["tier"],
+        "previous_tier": previous_tier,
+    }
+
+
 async def _fergie_save_member_taste_review(
     *,
     user_id: int,
@@ -2503,6 +2635,13 @@ async def _fergie_save_member_taste_review(
         updated,
     )
 
+    # Stage J.2: derive reputation from the newly updated J.1 history.
+    reputation_result = await _fergie_refresh_member_aux_reputation(
+        user_id,
+        display_name,
+    )
+    updated = reputation_result["profile"]
+
     print(
         f"FERGIE MEMBER TASTE REVIEW ✅ "
         f"user={user_id} track={track_id} "
@@ -2597,6 +2736,13 @@ async def _fergie_mark_member_taste_imported(
         _fergie_member_taste_key(user_id),
         updated,
     )
+
+    # Stage J.2: an actual crate import is a strong reputation signal.
+    reputation_result = await _fergie_refresh_member_aux_reputation(
+        user_id,
+        profile.get("display_name") or "someone",
+    )
+    updated = reputation_result["profile"]
 
     print(
         f"FERGIE MEMBER TASTE IMPORT ✅ "
