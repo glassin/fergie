@@ -847,6 +847,134 @@ Relationship and perspective rules:
     return cleaned
 
 
+async def _fergie_dj_artist_taste_signals():
+    """
+    J.4: aggregate a deliberately weak artist-level signal from all persisted
+    member taste profiles.
+
+    Guardrails:
+    - member must have 3+ reviews and >= 7.0 average to contribute
+    - only 7.5+ submissions contribute
+    - each member contributes at most 2 hits per artist
+    - global artist signal is capped at 4 hits
+    - no member/user identity is returned to the VC service
+    """
+    if not db_pool:
+        return {}
+
+    try:
+        async with db_pool.acquire() as con:
+            rows = await con.fetch(
+                """
+                SELECT value
+                FROM public.kv
+                WHERE key LIKE 'music_taste_member:%'
+                """
+            )
+    except Exception as e:
+        print(
+            f"FERGIE DJ TASTE SIGNAL DB ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return {}
+
+    artist_signal = {}
+
+    for row in rows:
+        profile = row["value"]
+
+        if isinstance(profile, str):
+            try:
+                profile = json.loads(profile)
+            except Exception:
+                continue
+
+        if not isinstance(profile, dict):
+            continue
+
+        reviews = int(profile.get("reviews", 0) or 0)
+        average = float(profile.get("average_score") or 0.0)
+
+        if reviews < 3 or average < 7.0:
+            continue
+
+        submissions = profile.get("recent_submissions", [])
+        if not isinstance(submissions, list):
+            continue
+
+        member_hits = {}
+
+        for item in submissions[-20:]:
+            if not isinstance(item, dict):
+                continue
+
+            try:
+                score = float(item.get("score") or 0.0)
+            except (TypeError, ValueError):
+                continue
+
+            artist = str(item.get("artist") or "").strip()
+
+            if (
+                not artist
+                or score < FERGIE_DJ_CANDIDATE_SCORE
+            ):
+                continue
+
+            key = artist.casefold()
+            member_hits[key] = min(
+                2,
+                member_hits.get(key, 0) + 1,
+            )
+
+        for artist_key, hits in member_hits.items():
+            artist_signal[artist_key] = min(
+                4,
+                artist_signal.get(artist_key, 0) + hits,
+            )
+
+    return artist_signal
+
+
+async def vc_dj_taste_http(request):
+    """
+    J.4 read-only endpoint for the VC autonomous picker.
+    Uses the same bridge secret already protecting /vc-brain.
+    """
+    if not VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "bridge_not_configured",
+            },
+            status=503,
+        )
+
+    supplied_secret = request.headers.get(
+        "X-VC-Bridge-Secret",
+        "",
+    )
+
+    if supplied_secret != VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "unauthorized",
+            },
+            status=401,
+        )
+
+    signals = await _fergie_dj_artist_taste_signals()
+
+    return web.json_response(
+        {
+            "ok": True,
+            "artist_signals": signals,
+            "max_bonus": 0.08,
+        }
+    )
+
+
 async def vc_brain_health(request):
     return web.json_response({
         "ok": True,
@@ -995,6 +1123,12 @@ async def start_vc_bridge_server():
     app.router.add_post(
         "/vc-brain",
         vc_brain_http
+    )
+
+    # Fergie 5.0 J.4: read-only taste signal for autonomous DJ selection.
+    app.router.add_get(
+        "/dj-taste-signals",
+        vc_dj_taste_http
     )
 
     vc_bridge_runner = web.AppRunner(
