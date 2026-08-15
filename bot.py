@@ -983,6 +983,216 @@ async def vc_dj_taste_http(request):
     )
 
 
+async def _fergie_generate_dj_commentary(
+    song_title: str,
+    artist: str = "Unknown artist",
+    album: str = "",
+):
+    """
+    Generate ONE short spoken Auto-DJ thought for a currently playing track.
+
+    This deliberately uses only track metadata plus Fergie's persisted
+    artist-level critic history. It must not invent precise musical facts
+    (lyrics, instruments, timestamps, production details) when Gemini does not
+    genuinely know them.
+    """
+    song_title = str(song_title or "").strip()[:180]
+    artist = str(artist or "Unknown artist").strip()[:180]
+    album = str(album or "").strip()[:180]
+
+    if not song_title:
+        return None
+
+    profile = await _fergie_music_profile(artist)
+
+    reviews = int(profile.get("reviews", 0) or 0)
+    average_score = profile.get("average_score")
+    recent_songs = [
+        str(item)
+        for item in profile.get("recent_songs", [])
+        if item
+    ][-4:]
+    recent_scores = [
+        float(item)
+        for item in profile.get("recent_scores", [])
+        if isinstance(item, (int, float))
+    ][-4:]
+
+    history_bits = []
+
+    if reviews:
+        history_bits.append(
+            f"You have encountered/reviewed {artist} {reviews} time(s) before."
+        )
+
+    if average_score is not None:
+        history_bits.append(
+            f"Your recent average opinion of this artist is about {float(average_score):.1f}/10."
+        )
+
+    if recent_songs:
+        history_bits.append(
+            "Recent songs you remember from this artist: "
+            + ", ".join(recent_songs)
+            + "."
+        )
+
+    if recent_scores:
+        history_bits.append(
+            "Recent scores: "
+            + ", ".join(f"{score:.1f}/10" for score in recent_scores)
+            + "."
+        )
+
+    history_text = (
+        " ".join(history_bits)
+        if history_bits
+        else "No stored artist-history signal yet. React fresh."
+    )
+
+    metadata_lines = [
+        f"Song title: {song_title}",
+        f"Artist: {artist}",
+    ]
+
+    if album:
+        metadata_lines.append(f"Album: {album}")
+
+    prompt = f"""
+You ARE Fergie, the same Fergie who is currently DJing live in Discord voice chat.
+
+Current track:
+{chr(10).join(metadata_lines)}
+
+Your own established artist history:
+{history_text}
+
+Your identity/personality canon:
+{FERGIE_SELF_LORE}
+
+Write ONE very short natural spoken DJ thought about the CURRENT track.
+
+Rules:
+- Usually 1 sentence. Absolute maximum 2 short sentences.
+- Aim for roughly 8 to 22 spoken words.
+- Sound spontaneous, opinionated, bratty, warm, and like Fergie — not like a music journalist.
+- This is NOT a full review and NOT a score. Never give a numeric rating.
+- Do not say "up next", "now playing", or mechanically re-announce the full track title unless it sounds natural.
+- You may say why this artist/song fits your taste, what broad mood it gives you, or make a short personal Fergie-style observation.
+- If you genuinely know the song, you may reference a broad well-known quality.
+- NEVER invent exact lyrics, instruments, timestamps, production techniques, samples, key changes, BPM, or other precise musical facts you cannot know from the supplied context.
+- If you are not confident about song-specific facts, stay subjective and high-level instead of pretending.
+- Do not mention prompts, metadata, databases, stored history, APIs, Gemini, or that you are an AI.
+- No markdown, bullets, quotation marks, emojis, or stage directions.
+- Return ONLY the line Fergie should say aloud.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    cleaned = re.sub(r"\\s+", " ", str(answer)).strip()
+    cleaned = cleaned.strip('"').strip("'").strip()
+
+    if (
+        not cleaned
+        or cleaned.startswith("Gemini error:")
+        or cleaned.startswith("error:")
+    ):
+        return None
+
+    # Keep the spoken interjection short even if Gemini gets chatty.
+    if len(cleaned) > 220:
+        cleaned = cleaned[:220].rsplit(" ", 1)[0].rstrip(" ,;:-") + "."
+
+    return cleaned
+
+
+async def vc_dj_commentary_http(request):
+    """
+    Authenticated read-only-ish brain endpoint used by the Node Auto-DJ.
+    It generates text only; it does not change playback or DJ state.
+    """
+    if not VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "bridge_not_configured",
+            },
+            status=503,
+        )
+
+    supplied_secret = request.headers.get(
+        "X-VC-Bridge-Secret",
+        "",
+    )
+
+    if supplied_secret != VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "unauthorized",
+            },
+            status=401,
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_json",
+            },
+            status=400,
+        )
+
+    title = str(data.get("title") or "").strip()
+    artist = str(data.get("artist") or "Unknown artist").strip()
+    album = str(data.get("album") or "").strip()
+
+    if not title:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "missing_title",
+            },
+            status=400,
+        )
+
+    try:
+        commentary = await _fergie_generate_dj_commentary(
+            song_title=title,
+            artist=artist,
+            album=album,
+        )
+    except Exception as e:
+        print(
+            f"FERGIE DJ COMMENTARY BRAIN ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "commentary_error",
+            },
+            status=500,
+        )
+
+    print(
+        f"FERGIE DJ COMMENTARY BRAIN 🧠 "
+        f"{artist} — {title}: {commentary!r}"
+    )
+
+    return web.json_response(
+        {
+            "ok": True,
+            "commentary": commentary or "",
+        }
+    )
+
+
 async def vc_brain_health(request):
     return web.json_response({
         "ok": True,
@@ -1137,6 +1347,12 @@ async def start_vc_bridge_server():
     app.router.add_get(
         "/dj-taste-signals",
         vc_dj_taste_http
+    )
+
+    # Post-5.0: Gemini-powered spoken commentary for autonomous DJ tracks.
+    app.router.add_post(
+        "/dj-commentary",
+        vc_dj_commentary_http
     )
 
     vc_bridge_runner = web.AppRunner(
@@ -6500,6 +6716,8 @@ async def selftest(ctx, mode: str = "fast"):
 
         # VC
         "ask_fergie_vc_brain",
+        "_fergie_generate_dj_commentary",
+        "vc_dj_commentary_http",
         "start_vc_bridge_server",
 
         # Eyes
