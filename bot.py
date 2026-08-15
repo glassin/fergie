@@ -626,6 +626,8 @@ FERGIE_CAST = {
             "get's his ass kicked at a place called combat club",
             "conspiracy theorist",
             "doesn't like jews",
+            "makes his chalan do everything while he sits around",
+            "doesn't feed his chalan and pays him less than minimum wage",
             "hates women but is always horny for them",
             "drives a durango",
             "is guatemalen but thinks he's mexican"
