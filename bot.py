@@ -753,7 +753,8 @@ def build_cast_context():
 async def ask_fergie_vc_brain(
     user_id: int,
     display_name: str,
-    transcript: str
+    transcript: str,
+    now_playing: dict | None = None,
 ):
     transcript = (transcript or "").strip()
     display_name = (display_name or "Unknown member").strip()
@@ -785,6 +786,32 @@ async def ask_fergie_vc_brain(
     else:
         speaker_traits = "None specifically stored in FERGIE_CAST."
 
+    # Optional live DJ context supplied by the VC Node service.
+    # This lets phrases like "this song", "this one", "what's playing",
+    # "why did you pick this?", etc. resolve to the actual current track.
+    now_playing = now_playing if isinstance(now_playing, dict) else {}
+
+    now_title = str(now_playing.get("title") or "").strip()[:180]
+    now_artist = str(now_playing.get("artist") or "").strip()[:180]
+    now_album = str(now_playing.get("album") or "").strip()[:180]
+    now_track_id = str(now_playing.get("id") or "").strip()[:80]
+
+    if now_title:
+        now_playing_lines = [
+            f"Title: {now_title}",
+            f"Artist: {now_artist or 'Unknown artist'}",
+        ]
+
+        if now_album:
+            now_playing_lines.append(f"Album: {now_album}")
+
+        if now_track_id:
+            now_playing_lines.append(f"Local DJ track ID: {now_track_id}")
+
+        now_playing_text = "\n".join(now_playing_lines)
+    else:
+        now_playing_text = "Nothing is currently playing through Fergie's DJ system."
+
     prompt = f"""
 This message came from a live Discord voice channel.
 
@@ -807,7 +834,17 @@ Known traits specifically about the person speaking:
 Saved memories about this person:
 {memory_text}
 
+Live DJ context right now:
+{now_playing_text}
+
 Reply naturally as Fergie.
+
+Important:
+- When the speaker says "this song", "this track", "this one", "what's playing", "the song playing", or similar, use the Live DJ context above.
+- If a DJ track is playing and the speaker asks what it is about, why you like it, why you picked it, who made it, or what you think of it, answer about THAT current track.
+- Do not pretend a track is playing when the Live DJ context says nothing is playing.
+- For questions about a song's meaning, distinguish established/widely known meaning from your own interpretation. If you are not confident, say it as an interpretation rather than inventing a factual backstory.
+- Never invent exact lyrics, samples, instruments, timestamps, production techniques, BPM, or other precise song facts that are not actually known from the supplied context.
 
 Important:
 - Use the server member lore when it is relevant.
@@ -983,6 +1020,344 @@ async def vc_dj_taste_http(request):
     )
 
 
+async def _fergie_generate_dj_commentary(
+    song_title: str,
+    artist: str = "Unknown artist",
+    album: str = "",
+):
+    """
+    Generate ONE short spoken Auto-DJ thought for a currently playing track.
+
+    This deliberately uses only track metadata plus Fergie's persisted
+    artist-level critic history. It must not invent precise musical facts
+    (lyrics, instruments, timestamps, production details) when Gemini does not
+    genuinely know them.
+    """
+    song_title = str(song_title or "").strip()[:180]
+    artist = str(artist or "Unknown artist").strip()[:180]
+    album = str(album or "").strip()[:180]
+
+    if not song_title:
+        return None
+
+    profile = await _fergie_music_profile(artist)
+
+    reviews = int(profile.get("reviews", 0) or 0)
+    average_score = profile.get("average_score")
+    recent_songs = [
+        str(item)
+        for item in profile.get("recent_songs", [])
+        if item
+    ][-4:]
+    recent_scores = [
+        float(item)
+        for item in profile.get("recent_scores", [])
+        if isinstance(item, (int, float))
+    ][-4:]
+
+    history_bits = []
+
+    if reviews:
+        history_bits.append(
+            f"You have encountered/reviewed {artist} {reviews} time(s) before."
+        )
+
+    if average_score is not None:
+        history_bits.append(
+            f"Your recent average opinion of this artist is about {float(average_score):.1f}/10."
+        )
+
+    if recent_songs:
+        history_bits.append(
+            "Recent songs you remember from this artist: "
+            + ", ".join(recent_songs)
+            + "."
+        )
+
+    if recent_scores:
+        history_bits.append(
+            "Recent scores: "
+            + ", ".join(f"{score:.1f}/10" for score in recent_scores)
+            + "."
+        )
+
+    history_text = (
+        " ".join(history_bits)
+        if history_bits
+        else "No stored artist-history signal yet. React fresh."
+    )
+
+    metadata_lines = [
+        f"Song title: {song_title}",
+        f"Artist: {artist}",
+    ]
+
+    if album:
+        metadata_lines.append(f"Album: {album}")
+
+    prompt = f"""
+You ARE Fergie, the same Fergie who is currently DJing live in Discord voice chat.
+
+Current track:
+{chr(10).join(metadata_lines)}
+
+Your own established artist history:
+{history_text}
+
+Your identity/personality canon:
+{FERGIE_SELF_LORE}
+
+Write ONE very short natural spoken DJ thought about the CURRENT track.
+
+Rules:
+- Usually 1 sentence. Absolute maximum 2 short sentences.
+- Aim for roughly 8 to 22 spoken words.
+- Sound spontaneous, opinionated, bratty, warm, and like Fergie — not like a music journalist.
+- This is NOT a full review and NOT a score. Never give a numeric rating.
+- Do not say "up next", "now playing", or mechanically re-announce the full track title unless it sounds natural.
+- You may say why this artist/song fits your taste, what broad mood it gives you, or make a short personal Fergie-style observation.
+- If you genuinely know the song, you may reference a broad well-known quality.
+- NEVER invent exact lyrics, instruments, timestamps, production techniques, samples, key changes, BPM, or other precise musical facts you cannot know from the supplied context.
+- If you are not confident about song-specific facts, stay subjective and high-level instead of pretending.
+- Do not mention prompts, metadata, databases, stored history, APIs, Gemini, or that you are an AI.
+- No markdown, bullets, quotation marks, emojis, or stage directions.
+- Return ONLY the line Fergie should say aloud.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return None
+
+    cleaned = re.sub(r"\\s+", " ", str(answer)).strip()
+    cleaned = cleaned.strip('"').strip("'").strip()
+
+    if (
+        not cleaned
+        or cleaned.startswith("Gemini error:")
+        or cleaned.startswith("error:")
+    ):
+        return None
+
+    # Keep the spoken interjection short even if Gemini gets chatty.
+    if len(cleaned) > 220:
+        cleaned = cleaned[:220].rsplit(" ", 1)[0].rstrip(" ,;:-") + "."
+
+    return cleaned
+
+
+async def _fergie_dj_track_is_danceable(
+    song_title: str,
+    artist: str = "Unknown artist",
+    album: str = "",
+):
+    """
+    Conservative Gemini classifier for the Auto-DJ dance-emote feature.
+
+    Returns True only when the track is reasonably known/likely to be
+    dance-oriented. If uncertain, returns False so Fergie does not spam
+    a twerk emote on obviously non-dance songs.
+    """
+    song_title = str(song_title or "").strip()[:180]
+    artist = str(artist or "Unknown artist").strip()[:180]
+    album = str(album or "").strip()[:180]
+
+    if not song_title:
+        return False
+
+    metadata_lines = [
+        f"Song title: {song_title}",
+        f"Artist: {artist}",
+    ]
+
+    if album:
+        metadata_lines.append(f"Album: {album}")
+
+    prompt = f"""
+You are classifying the CURRENT song for Fergie's Discord Auto-DJ.
+
+Track:
+{chr(10).join(metadata_lines)}
+
+Decide whether this is clearly suitable for a playful dance/twerk emote while it is playing.
+
+Use broad musical knowledge only.
+Return YES only when the song is reasonably dance-oriented, clubby, upbeat, rhythmic,
+electronic/dance-pop/disco/funk/house/Latin-dance adjacent, or otherwise obviously
+something people would plausibly dance/twerk to.
+
+Return NO for ballads, slow sad songs, ambient tracks, acoustic songs, most sleepy
+indie tracks, spoken-word pieces, or when you are not confident.
+
+Do not explain.
+Return exactly one word: YES or NO.
+"""
+
+    answer = await ask_gemini(prompt)
+
+    if not answer:
+        return False
+
+    cleaned = str(answer).strip().upper()
+
+    if cleaned.startswith("YES"):
+        return True
+
+    return False
+
+
+async def vc_dj_dance_check_http(request):
+    """
+    Authenticated Auto-DJ helper used by Node before posting the dance emote.
+    """
+    if not VC_BRIDGE_SECRET:
+        return web.json_response(
+            {"ok": False, "error": "bridge_not_configured"},
+            status=503,
+        )
+
+    supplied_secret = request.headers.get(
+        "X-VC-Bridge-Secret",
+        "",
+    )
+
+    if supplied_secret != VC_BRIDGE_SECRET:
+        return web.json_response(
+            {"ok": False, "error": "unauthorized"},
+            status=401,
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {"ok": False, "error": "invalid_json"},
+            status=400,
+        )
+
+    title = str(data.get("title") or "").strip()
+    artist = str(data.get("artist") or "Unknown artist").strip()
+    album = str(data.get("album") or "").strip()
+
+    if not title:
+        return web.json_response(
+            {"ok": False, "error": "missing_title"},
+            status=400,
+        )
+
+    try:
+        danceable = await _fergie_dj_track_is_danceable(
+            song_title=title,
+            artist=artist,
+            album=album,
+        )
+    except Exception as e:
+        print(
+            f"FERGIE DJ DANCE CHECK ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return web.json_response(
+            {"ok": False, "error": "dance_check_error"},
+            status=500,
+        )
+
+    print(
+        f"FERGIE DJ DANCE CHECK {'💃 YES' if danceable else '⚪ NO'} "
+        f"{artist} — {title}"
+    )
+
+    return web.json_response(
+        {
+            "ok": True,
+            "danceable": bool(danceable),
+        }
+    )
+
+
+async def vc_dj_commentary_http(request):
+    """
+    Authenticated read-only-ish brain endpoint used by the Node Auto-DJ.
+    It generates text only; it does not change playback or DJ state.
+    """
+    if not VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "bridge_not_configured",
+            },
+            status=503,
+        )
+
+    supplied_secret = request.headers.get(
+        "X-VC-Bridge-Secret",
+        "",
+    )
+
+    if supplied_secret != VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "unauthorized",
+            },
+            status=401,
+        )
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "invalid_json",
+            },
+            status=400,
+        )
+
+    title = str(data.get("title") or "").strip()
+    artist = str(data.get("artist") or "Unknown artist").strip()
+    album = str(data.get("album") or "").strip()
+
+    if not title:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "missing_title",
+            },
+            status=400,
+        )
+
+    try:
+        commentary = await _fergie_generate_dj_commentary(
+            song_title=title,
+            artist=artist,
+            album=album,
+        )
+    except Exception as e:
+        print(
+            f"FERGIE DJ COMMENTARY BRAIN ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "commentary_error",
+            },
+            status=500,
+        )
+
+    print(
+        f"FERGIE DJ COMMENTARY BRAIN 🧠 "
+        f"{artist} — {title}: {commentary!r}"
+    )
+
+    return web.json_response(
+        {
+            "ok": True,
+            "commentary": commentary or "",
+        }
+    )
+
+
 async def vc_brain_health(request):
     return web.json_response({
         "ok": True,
@@ -1059,6 +1434,13 @@ async def vc_brain_http(request):
         )
     ).strip()
 
+    raw_now_playing = data.get("now_playing")
+    now_playing = (
+        raw_now_playing
+        if isinstance(raw_now_playing, dict)
+        else None
+    )
+
     if not transcript:
         return web.json_response(
             {
@@ -1078,7 +1460,8 @@ async def vc_brain_http(request):
         reply = await ask_fergie_vc_brain(
             user_id=user_id,
             display_name=display_name,
-            transcript=transcript
+            transcript=transcript,
+            now_playing=now_playing,
         )
     except Exception as e:
         print(
@@ -1137,6 +1520,18 @@ async def start_vc_bridge_server():
     app.router.add_get(
         "/dj-taste-signals",
         vc_dj_taste_http
+    )
+
+    # Post-5.0: Gemini-powered spoken commentary for autonomous DJ tracks.
+    app.router.add_post(
+        "/dj-commentary",
+        vc_dj_commentary_http
+    )
+
+    # Post-5.0: conservative danceability check for Auto-DJ dance emotes.
+    app.router.add_post(
+        "/dj-dance-check",
+        vc_dj_dance_check_http
     )
 
     vc_bridge_runner = web.AppRunner(
@@ -6041,7 +6436,7 @@ async def _fit_wait_ready():
 # ================== Fergie DJ Wanted Queue ==================
 @bot.command(
     name="djwanted",
-    help="ADMIN: Show Fergie's pending DJ download candidates from the local DJ server.",
+    help="ADMIN: Show Fergie's pending DJ download candidates.",
 )
 async def djwanted(ctx):
     if ctx.author.id != FERGIE_ADMIN_USER_ID:
@@ -6072,6 +6467,11 @@ async def djwanted(ctx):
 
     try:
         candidates = await _fergie_fetch_local_dj_candidates()
+
+        if not isinstance(candidates, list):
+            raise RuntimeError(
+                f"unexpected candidate payload: {type(candidates).__name__}"
+            )
 
         pending = [
             item
@@ -6106,13 +6506,13 @@ async def djwanted(ctx):
                 f"**{index}. {artist} — {title}** • {score_text}{suffix}"
             )
 
-        embed = Embed(
+        embed = discord.Embed(
             title="🎧 Fergie's Wanted Queue",
             description="\n".join(lines),
-            colour=Colour.blurple(),
+            colour=discord.Colour.blurple(),
         )
         embed.set_footer(
-            text=f"{len(pending)} pending shown • manual download command coming next"
+            text=f"{len(pending)} pending shown • downloads still require manual approval"
         )
 
         await wait.edit(content=None, embed=embed)
@@ -6617,6 +7017,10 @@ async def selftest(ctx, mode: str = "fast"):
 
         # VC
         "ask_fergie_vc_brain",
+        "_fergie_generate_dj_commentary",
+        "vc_dj_commentary_http",
+        "_fergie_dj_track_is_danceable",
+        "vc_dj_dance_check_http",
         "start_vc_bridge_server",
 
         # Eyes
