@@ -6213,53 +6213,48 @@ async def _fergie_selftest_db_roundtrip():
 
 
 async def _fergie_selftest_vc_health():
-    """Check Fergie's local Python VC brain bridge without touching Discord VC."""
-    try:
-        url = f"http://127.0.0.1:{VC_BRIDGE_PORT}/health"
+    """
+    Architecture-safe VC bridge diagnostic.
 
-        timeout = aiohttp.ClientTimeout(total=5)
-
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(url) as response:
-                if response.status != 200:
-                    return False, f"HTTP {response.status}"
-
-                data = await response.json(content_type=None)
-
-        if not isinstance(data, dict) or data.get("ok") is not True:
-            return False, f"unexpected response: {data}"
-
-        return True, "VC brain health endpoint responding"
-
-    except Exception as e:
-        return False, f"{type(e).__name__}: {e}"
-
-
-async def _fergie_selftest_dj_taste_endpoint():
-    """Read-only J.4 taste-signal endpoint check; no VC playback or state changes."""
+    The separate fergie-vc Node service reaches this Python service over its
+    Railway/public URL. Do not assume 127.0.0.1 can validate that cross-service
+    path from inside this container.
+    """
     if not VC_BRIDGE_SECRET:
         return False, "VC bridge secret missing"
 
+    if not callable(globals().get("vc_brain_http")):
+        return False, "vc_brain_http handler missing"
+
+    if not callable(globals().get("ask_fergie_vc_brain")):
+        return False, "VC brain function missing"
+
+    if vc_bridge_runner is None:
+        return False, "Python VC bridge runner not started"
+
+    return True, f"Python VC bridge loaded • port={VC_BRIDGE_PORT}"
+
+
+async def _fergie_selftest_dj_taste_endpoint():
+    """
+    Read-only J.4 taste diagnostic.
+
+    Exercise the same signal collector used by /dj-taste-signals without
+    pretending the separate VC service lives on localhost.
+    """
+    if not VC_BRIDGE_SECRET:
+        return False, "VC bridge secret missing"
+
+    if not callable(globals().get("vc_dj_taste_http")):
+        return False, "dj-taste-signals handler missing"
+
     try:
-        url = f"http://127.0.0.1:{VC_BRIDGE_PORT}/dj-taste-signals"
-        timeout = aiohttp.ClientTimeout(total=5)
+        signals = await _fergie_dj_artist_taste_signals()
 
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(
-                url,
-                headers={"X-VC-Bridge-Secret": VC_BRIDGE_SECRET},
-            ) as response:
-                if response.status != 200:
-                    return False, f"HTTP {response.status}"
+        if not isinstance(signals, dict):
+            return False, f"unexpected signal data: {type(signals).__name__}"
 
-                data = await response.json(content_type=None)
-
-        signals = data.get("artist_signals") if isinstance(data, dict) else None
-
-        if data.get("ok") is not True or not isinstance(signals, dict):
-            return False, f"unexpected response: {data}"
-
-        return True, f"read-only endpoint responding • {len(signals)} artist signal(s)"
+        return True, f"taste signal collector healthy • {len(signals)} artist signal(s)"
 
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
@@ -6662,12 +6657,27 @@ async def selftest(ctx, mode: str = "fast"):
     # ==========================================================
 
     try:
-        candidates = await _fergie_load_dj_candidates()
+        candidate_data = await _fergie_load_dj_candidates()
+
+        if isinstance(candidate_data, dict):
+            candidate_items = candidate_data.get("items", [])
+        elif isinstance(candidate_data, list):
+            # Backward-compatible fallback for any older ledger shape.
+            candidate_items = candidate_data
+        else:
+            candidate_items = None
+
+        candidate_ok = isinstance(candidate_items, list)
+
         record(
             "DJ 5.0",
             "Candidate ledger",
-            isinstance(candidates, list),
-            f"{len(candidates) if isinstance(candidates, list) else 0} candidate(s)",
+            candidate_ok,
+            (
+                f"{len(candidate_items)} candidate(s)"
+                if candidate_ok
+                else f"invalid ledger type: {type(candidate_data).__name__}"
+            ),
         )
     except Exception as e:
         record("DJ 5.0", "Candidate ledger", False, f"{type(e).__name__}: {e}")
@@ -6799,10 +6809,10 @@ async def selftest(ctx, mode: str = "fast"):
         record("Live", "Neon round-trip", db_ok, db_detail)
 
         vc_ok, vc_detail = await _fergie_selftest_vc_health()
-        record("Live", "VC brain health", vc_ok, vc_detail)
+        record("Live", "VC bridge runtime", vc_ok, vc_detail)
 
         taste_ok, taste_detail = await _fergie_selftest_dj_taste_endpoint()
-        record("Live", "DJ taste endpoint", taste_ok, taste_detail)
+        record("Live", "DJ taste signal", taste_ok, taste_detail)
 
         aux_ok, aux_detail = await _fergie_selftest_aux_league_readonly()
         record("Live", "Aux League read-only", aux_ok, aux_detail)
