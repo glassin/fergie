@@ -2770,6 +2770,8 @@ async def _fergie_send_candidate_to_local_dj(candidate: dict):
         "poster_id": str(candidate.get("poster_id", "")),
         "poster_display_name": candidate.get("poster_display_name", ""),
         "submitted_at": candidate.get("submitted_at", ""),
+        "source_channel_id": str(candidate.get("source_channel_id", "")),
+        "source_message_id": str(candidate.get("source_message_id", "")),
     }
 
     timeout = aiohttp.ClientTimeout(total=20)
@@ -2858,6 +2860,8 @@ async def _fergie_handoff_dj_candidate(
     score: float,
     poster_id: int,
     poster_display_name: str,
+    source_channel_id: int | None = None,
+    source_message_id: int | None = None,
 ):
     """
     Send a qualifying Spotify review to the private DJ test/download channel.
@@ -2918,6 +2922,16 @@ async def _fergie_handoff_dj_candidate(
         "poster_display_name": poster_display_name or "someone",
         "status": "pending_download",
         "submitted_at": datetime.now(timezone.utc).isoformat(),
+        "source_channel_id": (
+            int(source_channel_id)
+            if source_channel_id is not None
+            else None
+        ),
+        "source_message_id": (
+            int(source_message_id)
+            if source_message_id is not None
+            else None
+        ),
     }
 
     lines = [
@@ -3182,6 +3196,178 @@ def _pick_three_times_today_pt(n: int = 3):
         times.add(rand_dt())
     return list(times)
 
+
+# ================== Fergie 5.0 Stage I.4: Imported Candidate Green-Light ==================
+
+def _fergie_dj_import_confirmation_line(candidate: dict):
+    title = str(candidate.get("title") or "that song").strip()
+    artist = str(candidate.get("artist") or "Unknown artist").strip()
+
+    label = (
+        f"**{title}** by **{artist}**"
+        if artist and artist != "Unknown artist"
+        else f"**{title}**"
+    )
+
+    lines = [
+        f"ugh fine, {label} is officially in my DJ crate now. you contributed something useful for once. 🙄🎧",
+        f"okayyyy. {label} made it all the way into my crate. aux citizenship granted. 💅🎧",
+        f"green light. ✅ {label} is in my crate now. don't let this tiny victory change you.",
+        f"fine. i adopted {label}. it's officially playable in my DJ crate now. 🎧🙄",
+    ]
+
+    return random.choice(lines)
+
+
+async def _fergie_fetch_local_dj_candidates():
+    if not FERGIE_DJ_URL or not FERGIE_DJ_API_KEY:
+        return []
+
+    timeout = aiohttp.ClientTimeout(total=20)
+
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                f"{FERGIE_DJ_URL}/candidate/list",
+                headers={
+                    "X-Fergie-DJ-Key": FERGIE_DJ_API_KEY,
+                },
+            ) as response:
+                if response.status != 200:
+                    body = await response.text()
+                    print(
+                        f"FERGIE DJ IMPORT WATCH ERROR ❌ "
+                        f"status={response.status} body={body[:300]}"
+                    )
+                    return []
+
+                data = await response.json(content_type=None)
+
+        if not isinstance(data, dict) or not data.get("ok"):
+            return []
+
+        candidates = data.get("candidates", [])
+
+        return candidates if isinstance(candidates, list) else []
+
+    except Exception as e:
+        print(
+            f"FERGIE DJ IMPORT WATCH ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return []
+
+
+async def _fergie_notify_imported_candidate(local_candidate: dict):
+    spotify_track_id = str(
+        local_candidate.get("spotify_track_id") or ""
+    ).strip()
+
+    if not spotify_track_id:
+        return False
+
+    data = await _fergie_load_dj_candidates()
+    items = data.get("items", [])
+
+    candidate = next(
+        (
+            item
+            for item in items
+            if str(item.get("spotify_track_id") or "") == spotify_track_id
+        ),
+        None,
+    )
+
+    if not candidate:
+        return False
+
+    if candidate.get("import_notified_at"):
+        return False
+
+    poster_id = candidate.get("poster_id")
+
+    try:
+        poster_id = int(poster_id)
+    except (TypeError, ValueError):
+        poster_id = None
+
+    source_channel_id = candidate.get("source_channel_id")
+
+    try:
+        source_channel_id = int(source_channel_id)
+    except (TypeError, ValueError):
+        # Backward compatibility for I.1/I.3 candidates created before
+        # source channel tracking existed.
+        source_channel_id = CHANNEL_ID
+
+    channel = bot.get_channel(source_channel_id)
+
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(source_channel_id)
+        except Exception:
+            channel = None
+
+    if channel is None:
+        # Final fallback: private candidate/test channel.
+        channel = bot.get_channel(FERGIE_DJ_CANDIDATE_CHANNEL_ID)
+
+    if channel is None:
+        return False
+
+    line = _fergie_dj_import_confirmation_line(candidate)
+
+    content = (
+        f"<@{poster_id}> {line}"
+        if poster_id
+        else line
+    )
+
+    try:
+        await channel.send(content)
+    except Exception as e:
+        print(
+            f"FERGIE DJ IMPORT NOTIFY ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return False
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    candidate["status"] = "imported"
+    candidate["local_handoff_status"] = "imported"
+    candidate["imported_track_id"] = local_candidate.get("imported_track_id")
+    candidate["imported_file_name"] = local_candidate.get("imported_file_name")
+    candidate["imported_at"] = local_candidate.get("imported_at")
+    candidate["import_notified_at"] = now_iso
+
+    await _fergie_save_dj_candidates(data)
+
+    print(
+        f"FERGIE DJ IMPORT GREEN-LIGHT ✅ "
+        f"spotify={spotify_track_id} poster={poster_id} "
+        f"file={candidate.get('imported_file_name')!r}"
+    )
+
+    return True
+
+
+@tasks.loop(seconds=30)
+async def fergie_dj_import_notifier():
+    candidates = await _fergie_fetch_local_dj_candidates()
+
+    for candidate in candidates:
+        if str(candidate.get("status") or "").lower() != "imported":
+            continue
+
+        await _fergie_notify_imported_candidate(candidate)
+
+
+@fergie_dj_import_notifier.before_loop
+async def _wait_for_fergie_dj_import_notifier():
+    await bot.wait_until_ready()
+
+
 # ================== Events ==================
 @bot.event
 async def on_ready():
@@ -3217,6 +3403,9 @@ async def on_ready():
     
     fergie_reminders.start()
     daily_gym_reminder.start()
+
+    if not fergie_dj_import_notifier.is_running():
+        fergie_dj_import_notifier.start()
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
@@ -3769,6 +3958,8 @@ async def on_message(message: discord.Message):
                         score=score_value,
                         poster_id=message.author.id,
                         poster_display_name=message.author.display_name,
+                        source_channel_id=message.channel.id,
+                        source_message_id=message.id,
                     )
 
                     if candidate_result.get("ok"):
