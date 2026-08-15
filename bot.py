@@ -4878,6 +4878,48 @@ async def resetart(ctx):
         )
 
 
+
+@bot.command(name="auxboardtest")
+async def auxboardtest(ctx):
+    """
+    J.5 Jonathan-only preview of the current Aux League leaderboard.
+
+    It uses the real leaderboard renderer but never writes posted_at,
+    so the real Sunday post is not consumed by testing.
+    """
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try. this button belongs to Jonathan. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        week_key = _fergie_aux_week_key()
+        data = await _fergie_load_aux_week(week_key)
+
+        await ctx.send(
+            "🧪 **AUX LEAGUE TEST — Sunday post is NOT being consumed**\n\n"
+            + _fergie_aux_leaderboard_message(data)
+        )
+
+        print(
+            f"FERGIE AUX LEAGUE TEST 🧪 "
+            f"admin={ctx.author.id} week={week_key} "
+            f"events={len(data.get('events', []))} "
+            f"imports={len(data.get('imports', []))}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE AUX LEAGUE TEST ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        await ctx.reply(
+            "aux board test face-planted. check Railway. 🙄",
+            mention_author=False,
+        )
+
 @bot.event
 async def on_message(message: discord.Message):
 
