@@ -130,6 +130,14 @@ FERGIE_DJ_URL = os.getenv(
     "https://dj.fergielicious.live",
 ).strip().rstrip("/")
 FERGIE_DJ_API_KEY = os.getenv("FERGIE_DJ_API_KEY", "").strip()
+
+# Fergie 5.0 Stage J.5: weekly Aux League leaderboard.
+FERGIE_AUX_LEAGUE_CHANNEL_ID = int(
+    os.getenv("FERGIE_AUX_LEAGUE_CHANNEL_ID", str(CHANNEL_ID))
+)
+FERGIE_AUX_LEAGUE_SUNDAY_HOUR = int(
+    os.getenv("FERGIE_AUX_LEAGUE_SUNDAY_HOUR", "12")
+)
 # ---------------------------------------------------------------------------
 # -----------------------------------------
 
@@ -2382,6 +2390,391 @@ async def _fergie_save_music_profile(
     )
 
 
+
+# ================== Fergie 5.0 Stage J.5: Weekly Aux League ==================
+
+def _fergie_aux_points_for_score(score: float) -> int:
+    try:
+        score = float(score)
+    except (TypeError, ValueError):
+        return 0
+
+    if score >= 10.0:
+        return 15
+    if score >= 9.0:
+        return 9
+    if score >= 8.0:
+        return 6
+    if score >= 7.5:
+        return 4
+    if score >= 7.0:
+        return 2
+    if score >= 6.0:
+        return 1
+    return 0
+
+
+def _fergie_aux_week_key(dt: datetime | None = None) -> str:
+    tz = ZoneInfo("America/Los_Angeles")
+
+    if dt is None:
+        dt = datetime.now(tz)
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc).astimezone(tz)
+    else:
+        dt = dt.astimezone(tz)
+
+    # Monday-start week, represented by Monday's local date.
+    monday = (dt - timedelta(days=dt.weekday())).date()
+    return monday.isoformat()
+
+
+async def _fergie_load_aux_week(week_key: str):
+    data = await _db_get(f"fergie_aux_league:{week_key}")
+
+    if not isinstance(data, dict):
+        data = {}
+
+    events = data.get("events")
+    if not isinstance(events, list):
+        events = []
+
+    imports = data.get("imports")
+    if not isinstance(imports, list):
+        imports = []
+
+    return {
+        "week_key": week_key,
+        "events": events,
+        "imports": imports,
+        "posted_at": data.get("posted_at"),
+        "message_id": data.get("message_id"),
+    }
+
+
+async def _fergie_save_aux_week(data: dict):
+    await _db_set(
+        f"fergie_aux_league:{data['week_key']}",
+        data,
+    )
+
+
+async def _fergie_aux_record_review(
+    *,
+    user_id: int,
+    display_name: str,
+    spotify_track_id: str,
+    song_title: str,
+    artist: str,
+    score: float,
+):
+    """
+    Record one unique scored submission in this week's Aux League.
+
+    Same member + same Spotify track only earns review points once.
+    """
+    track_id = str(spotify_track_id or "").strip()
+    if not track_id:
+        return None
+
+    week_key = _fergie_aux_week_key()
+    data = await _fergie_load_aux_week(week_key)
+
+    duplicate = any(
+        isinstance(item, dict)
+        and str(item.get("spotify_track_id") or "") == track_id
+        and str(item.get("user_id") or "") == str(user_id)
+        for item in data["events"]
+    )
+
+    if duplicate:
+        return data
+
+    points = _fergie_aux_points_for_score(score)
+
+    data["events"].append(
+        {
+            "user_id": int(user_id),
+            "display_name": display_name or "someone",
+            "spotify_track_id": track_id,
+            "title": str(song_title or "")[:160],
+            "artist": str(artist or "Unknown artist")[:160],
+            "score": round(float(score), 1),
+            "points": int(points),
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+    # Keep a generous bounded weekly history.
+    data["events"] = data["events"][-500:]
+
+    await _fergie_save_aux_week(data)
+
+    print(
+        f"FERGIE AUX LEAGUE POINTS 🏆 "
+        f"user={user_id} track={track_id} score={float(score):.1f} "
+        f"points=+{points} week={week_key}"
+    )
+
+    return data
+
+
+async def _fergie_aux_record_import(
+    *,
+    user_id: int,
+    display_name: str,
+    spotify_track_id: str,
+    song_title: str,
+    artist: str,
+):
+    """
+    +3 bonus when an approved song actually reaches the DJ crate.
+    Import bonus is awarded once per member+track.
+    """
+    track_id = str(spotify_track_id or "").strip()
+    if not track_id:
+        return None
+
+    week_key = _fergie_aux_week_key()
+    data = await _fergie_load_aux_week(week_key)
+
+    duplicate = any(
+        isinstance(item, dict)
+        and str(item.get("spotify_track_id") or "") == track_id
+        and str(item.get("user_id") or "") == str(user_id)
+        for item in data["imports"]
+    )
+
+    if duplicate:
+        return data
+
+    data["imports"].append(
+        {
+            "user_id": int(user_id),
+            "display_name": display_name or "someone",
+            "spotify_track_id": track_id,
+            "title": str(song_title or "")[:160],
+            "artist": str(artist or "Unknown artist")[:160],
+            "points": 3,
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+
+    data["imports"] = data["imports"][-500:]
+    await _fergie_save_aux_week(data)
+
+    print(
+        f"FERGIE AUX LEAGUE IMPORT BONUS 🎧 "
+        f"user={user_id} track={track_id} points=+3 week={week_key}"
+    )
+
+    return data
+
+
+def _fergie_aux_week_summary(data: dict):
+    standings = {}
+    events = [
+        item for item in data.get("events", [])
+        if isinstance(item, dict)
+    ]
+    imports = [
+        item for item in data.get("imports", [])
+        if isinstance(item, dict)
+    ]
+
+    for item in events:
+        uid = str(item.get("user_id") or "")
+        if not uid:
+            continue
+
+        row = standings.setdefault(
+            uid,
+            {
+                "user_id": uid,
+                "display_name": item.get("display_name") or "someone",
+                "points": 0,
+                "submissions": 0,
+                "imports": 0,
+            },
+        )
+        row["points"] += int(item.get("points", 0) or 0)
+        row["submissions"] += 1
+
+    for item in imports:
+        uid = str(item.get("user_id") or "")
+        if not uid:
+            continue
+
+        row = standings.setdefault(
+            uid,
+            {
+                "user_id": uid,
+                "display_name": item.get("display_name") or "someone",
+                "points": 0,
+                "submissions": 0,
+                "imports": 0,
+            },
+        )
+        row["points"] += 3
+        row["imports"] += 1
+
+    ordered = sorted(
+        standings.values(),
+        key=lambda row: (
+            -row["points"],
+            -row["imports"],
+            -row["submissions"],
+            row["display_name"].lower(),
+        ),
+    )
+
+    highest = max(
+        events,
+        key=lambda item: float(item.get("score", 0.0) or 0.0),
+        default=None,
+    )
+
+    lowest = min(
+        events,
+        key=lambda item: float(item.get("score", 0.0) or 0.0),
+        default=None,
+    )
+
+    most_imports = None
+    if ordered:
+        most_imports = max(
+            ordered,
+            key=lambda row: row["imports"],
+        )
+        if most_imports["imports"] <= 0:
+            most_imports = None
+
+    return {
+        "standings": ordered,
+        "highest": highest,
+        "lowest": lowest,
+        "most_imports": most_imports,
+    }
+
+
+def _fergie_aux_leaderboard_message(data: dict):
+    summary = _fergie_aux_week_summary(data)
+    standings = summary["standings"]
+
+    if not standings:
+        return (
+            "🏆 **FERGIE'S WEEKLY AUX LEADERBOARD**\n"
+            "nobody submitted anything scoreable this week. embarrassing. 🙄🎧"
+        )
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = ["🏆 **FERGIE'S WEEKLY AUX LEADERBOARD**", ""]
+
+    for index, row in enumerate(standings[:10]):
+        prefix = medals[index] if index < 3 else f"**{index + 1}.**"
+        lines.append(
+            f"{prefix} <@{row['user_id']}> — **{row['points']} pts** "
+            f"({row['submissions']} submission"
+            f"{'' if row['submissions'] == 1 else 's'}, "
+            f"{row['imports']} crate add"
+            f"{'' if row['imports'] == 1 else 's'})"
+        )
+
+    highest = summary["highest"]
+    if highest:
+        lines.extend(
+            [
+                "",
+                f"🔥 **Highest Rated:** {highest.get('title') or 'Unknown'} — "
+                f"{float(highest.get('score', 0.0)):.1f}/10",
+            ]
+        )
+
+    if summary["most_imports"]:
+        row = summary["most_imports"]
+        lines.append(
+            f"🎧 **Most Crate Adds:** <@{row['user_id']}> — {row['imports']}"
+        )
+
+    lowest = summary["lowest"]
+    if lowest:
+        lines.append(
+            f"💀 **Lowest Rated:** {lowest.get('title') or 'Unknown'} — "
+            f"{float(lowest.get('score', 0.0)):.1f}/10"
+        )
+
+    winner = standings[0]
+    lines.extend(
+        [
+            "",
+            random.choice(
+                [
+                    f"<@{winner['user_id']}> wins the aux this week. don't become unbearable about it. 🙄",
+                    f"fine. <@{winner['user_id']}> had the least embarrassing aux this week. congratulations i guess. 🎧",
+                    f"<@{winner['user_id']}> takes the crown. everybody else please reflect on your choices. 💅",
+                    f"aux court has spoken: <@{winner['user_id']}> wins. deeply annoying but legally binding. 👩‍⚖️🎧",
+                ]
+            ),
+        ]
+    )
+
+    return "\n".join(lines)
+
+
+async def _fergie_post_weekly_aux_leaderboard():
+    tz = ZoneInfo("America/Los_Angeles")
+    now = datetime.now(tz)
+
+    # Sunday only, at/after the configured hour.
+    if now.weekday() != 6 or now.hour < FERGIE_AUX_LEAGUE_SUNDAY_HOUR:
+        return False
+
+    week_key = _fergie_aux_week_key(now)
+    data = await _fergie_load_aux_week(week_key)
+
+    # Exactly once per week, even if Railway restarts later Sunday.
+    if data.get("posted_at"):
+        return False
+
+    channel = bot.get_channel(FERGIE_AUX_LEAGUE_CHANNEL_ID)
+
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(FERGIE_AUX_LEAGUE_CHANNEL_ID)
+        except Exception as e:
+            print(
+                f"FERGIE AUX LEAGUE CHANNEL ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+            return False
+
+    message = await channel.send(
+        _fergie_aux_leaderboard_message(data)
+    )
+
+    data["posted_at"] = datetime.now(timezone.utc).isoformat()
+    data["message_id"] = message.id
+    await _fergie_save_aux_week(data)
+
+    print(
+        f"FERGIE AUX LEAGUE POSTED 🏆 week={week_key} "
+        f"channel={channel.id} message={message.id}"
+    )
+
+    return True
+
+
+@tasks.loop(minutes=15)
+async def fergie_aux_league_watcher():
+    await _fergie_post_weekly_aux_leaderboard()
+
+
+@fergie_aux_league_watcher.before_loop
+async def _wait_for_fergie_aux_league():
+    await bot.wait_until_ready()
+
+# ================================================================================
+
 # ================== Fergie 5.0 Stage J.1: Member Taste Profiles ==================
 
 def _fergie_member_taste_key(user_id: int) -> str:
@@ -2768,6 +3161,22 @@ async def _fergie_save_member_taste_review(
         _fergie_member_taste_key(user_id),
         updated,
     )
+
+    # Stage J.5: weekly points use the same unique scored submission.
+    try:
+        await _fergie_aux_record_review(
+            user_id=user_id,
+            display_name=display_name,
+            spotify_track_id=track_id,
+            song_title=song_title,
+            artist=artist_name,
+            score=score,
+        )
+    except Exception as e:
+        print(
+            f"FERGIE AUX LEAGUE REVIEW ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
 
     # Stage J.2: derive reputation from the newly updated J.1 history.
     reputation_result = await _fergie_refresh_member_aux_reputation(
@@ -4040,6 +4449,24 @@ async def _fergie_notify_imported_candidate(local_candidate: dict):
                 f"{type(e).__name__}: {e}"
             )
 
+    if poster_id:
+        try:
+            await _fergie_aux_record_import(
+                user_id=poster_id,
+                display_name=(
+                    candidate.get("poster_display_name")
+                    or "someone"
+                ),
+                spotify_track_id=spotify_track_id,
+                song_title=candidate.get("title") or "",
+                artist=candidate.get("artist") or "Unknown artist",
+            )
+        except Exception as e:
+            print(
+                f"FERGIE AUX LEAGUE IMPORT ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+
     await _fergie_save_dj_candidates(data)
 
     print(
@@ -4105,6 +4532,9 @@ async def on_ready():
 
     if not fergie_dj_import_notifier.is_running():
         fergie_dj_import_notifier.start()
+
+    if not fergie_aux_league_watcher.is_running():
+        fergie_aux_league_watcher.start()
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
