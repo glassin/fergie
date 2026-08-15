@@ -753,7 +753,8 @@ def build_cast_context():
 async def ask_fergie_vc_brain(
     user_id: int,
     display_name: str,
-    transcript: str
+    transcript: str,
+    now_playing: dict | None = None,
 ):
     transcript = (transcript or "").strip()
     display_name = (display_name or "Unknown member").strip()
@@ -785,6 +786,32 @@ async def ask_fergie_vc_brain(
     else:
         speaker_traits = "None specifically stored in FERGIE_CAST."
 
+    # Optional live DJ context supplied by the VC Node service.
+    # This lets phrases like "this song", "this one", "what's playing",
+    # "why did you pick this?", etc. resolve to the actual current track.
+    now_playing = now_playing if isinstance(now_playing, dict) else {}
+
+    now_title = str(now_playing.get("title") or "").strip()[:180]
+    now_artist = str(now_playing.get("artist") or "").strip()[:180]
+    now_album = str(now_playing.get("album") or "").strip()[:180]
+    now_track_id = str(now_playing.get("id") or "").strip()[:80]
+
+    if now_title:
+        now_playing_lines = [
+            f"Title: {now_title}",
+            f"Artist: {now_artist or 'Unknown artist'}",
+        ]
+
+        if now_album:
+            now_playing_lines.append(f"Album: {now_album}")
+
+        if now_track_id:
+            now_playing_lines.append(f"Local DJ track ID: {now_track_id}")
+
+        now_playing_text = "\n".join(now_playing_lines)
+    else:
+        now_playing_text = "Nothing is currently playing through Fergie's DJ system."
+
     prompt = f"""
 This message came from a live Discord voice channel.
 
@@ -807,7 +834,17 @@ Known traits specifically about the person speaking:
 Saved memories about this person:
 {memory_text}
 
+Live DJ context right now:
+{now_playing_text}
+
 Reply naturally as Fergie.
+
+Important:
+- When the speaker says "this song", "this track", "this one", "what's playing", "the song playing", or similar, use the Live DJ context above.
+- If a DJ track is playing and the speaker asks what it is about, why you like it, why you picked it, who made it, or what you think of it, answer about THAT current track.
+- Do not pretend a track is playing when the Live DJ context says nothing is playing.
+- For questions about a song's meaning, distinguish established/widely known meaning from your own interpretation. If you are not confident, say it as an interpretation rather than inventing a factual backstory.
+- Never invent exact lyrics, samples, instruments, timestamps, production techniques, BPM, or other precise song facts that are not actually known from the supplied context.
 
 Important:
 - Use the server member lore when it is relevant.
@@ -1269,6 +1306,13 @@ async def vc_brain_http(request):
         )
     ).strip()
 
+    raw_now_playing = data.get("now_playing")
+    now_playing = (
+        raw_now_playing
+        if isinstance(raw_now_playing, dict)
+        else None
+    )
+
     if not transcript:
         return web.json_response(
             {
@@ -1288,7 +1332,8 @@ async def vc_brain_http(request):
         reply = await ask_fergie_vc_brain(
             user_id=user_id,
             display_name=display_name,
-            transcript=transcript
+            transcript=transcript,
+            now_playing=now_playing,
         )
     except Exception as e:
         print(
