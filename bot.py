@@ -6703,7 +6703,7 @@ async def djwanted(ctx):
         )
 
 
-async def _fergie_soulseek_approve_download(query: str):
+async def _fergie_soulseek_approve_download(query: str, *, direct_import: bool = False):
     """
     Tell the authenticated local DJ server to perform a fresh Soulseek search,
     enforce its server-side quality gate, select the best current result,
@@ -6727,7 +6727,7 @@ async def _fergie_soulseek_approve_download(query: str):
                 "X-Fergie-DJ-Key": FERGIE_DJ_API_KEY,
                 "Content-Type": "application/json",
             },
-            json={"query": query},
+            json={"query": query, "direct_import": bool(direct_import)},
         ) as response:
             body = await response.text()
 
@@ -7142,7 +7142,7 @@ async def fergieget(ctx, *, query: str = ""):
         # Reuse the exact proven download endpoint/helper used by !djapprove.
         # The existing local staging/import watcher handles moving the finished
         # file into Fergie's real DJ crate.
-        result = await _fergie_soulseek_approve_download(query)
+        result = await _fergie_soulseek_approve_download(query, direct_import=True)
 
         filename = str(result.get("filename") or "Unknown file").strip()
         username = str(result.get("username") or "Unknown peer").strip()
