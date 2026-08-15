@@ -76,8 +76,8 @@ DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
 REPLY_CHANCE = 0.10
 
 # Version/info (for !version)
-BOT_VERSION = "Fergie 4.5"
-BUILD_TAG   = "Eyes • Ears • Mouth"
+BOT_VERSION = "Fergie 5.0"
+BUILD_TAG   = "DJ • Taste • Aux League • Eyes • Ears • Mouth"
 
 # Specific member IDs
 USER1_ID = 1028310674318839878
@@ -6062,7 +6062,7 @@ async def halp(ctx, *, command: str | None = None):
         return
 
     e = Embed(
-        title="🙄 Fergie Halp Desk",
+        title="🙄 Fergie 5.0 Halp Desk",
         description=(
             "fine. here's the stuff you people keep making me do.\n"
             "Use `!halp <command>` if you need details on a specific `!` command."
@@ -6109,9 +6109,24 @@ async def halp(ctx, *, command: str | None = None):
     )
 
     e.add_field(
+        name="🎧 Fergie 5.0 DJ & Spotify",
+        value=(
+            "Post a **Spotify track link** — Fergie reviews/rates it and learns member taste\n"
+            "• **7.5+/10** can enter the DJ candidate pipeline for the local crate\n"
+            "• Imported candidates are detected automatically and the poster gets a crate confirmation\n"
+            "• Autonomous DJ uses a light taste nudge while preserving rotation/repeat protections\n"
+            "• **Aux League:** ratings earn weekly points; crate imports earn a **+3 bonus**\n"
+            "• Fergie posts the weekly Aux leaderboard automatically on Sunday"
+        ),
+        inline=False
+    )
+
+    e.add_field(
         name="🔐 Jonathan-only",
         value=(
-            "`!resetart` — Reset today's Art count back to 0 and restore the full daily allowance"
+            "`!resetart` — Reset today's Art count back to 0 and restore the full daily allowance\n"
+            "`!auxboardtest` — Preview the current Aux League board without consuming Sunday's post\n"
+            f"`!selftest` / `!selftest full` — Fergie 5.0 diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
         ),
         inline=False
     )
@@ -6138,6 +6153,8 @@ async def version(ctx):
         ("Build", BUILD_TAG),
         ("DB", db_status),
         ("VC Brain", "ready ✅" if VC_BRIDGE_SECRET else "not configured ❌"),
+        ("DJ API", "configured ✅" if FERGIE_DJ_API_KEY else "not configured ❌"),
+        ("Aux League", f"Sunday {FERGIE_AUX_LEAGUE_SUNDAY_HOUR}:00 PT • <#{FERGIE_AUX_LEAGUE_CHANNEL_ID}>"),
         ("Art", f"{FERGIE_IMAGE_DAILY_LIMIT}/day"),
         ("Picture Fetch", "Google Search"),
         ("Fit Channel", f"<#{FIT_CHANNEL_ID}>"),
@@ -6148,7 +6165,7 @@ async def version(ctx):
         e.add_field(name=n, value=v, inline=False)
     await ctx.send(embed=e)
     
-# ================== Fergie 4.5 Self-Test ==================
+# ================== Fergie 5.0 Self-Test ==================
 # Admin-only diagnostics.
 #
 # !selftest       = fast/non-invasive checks
@@ -6213,6 +6230,57 @@ async def _fergie_selftest_vc_health():
             return False, f"unexpected response: {data}"
 
         return True, "VC brain health endpoint responding"
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+async def _fergie_selftest_dj_taste_endpoint():
+    """Read-only J.4 taste-signal endpoint check; no VC playback or state changes."""
+    if not VC_BRIDGE_SECRET:
+        return False, "VC bridge secret missing"
+
+    try:
+        url = f"http://127.0.0.1:{VC_BRIDGE_PORT}/dj-taste-signals"
+        timeout = aiohttp.ClientTimeout(total=5)
+
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                url,
+                headers={"X-VC-Bridge-Secret": VC_BRIDGE_SECRET},
+            ) as response:
+                if response.status != 200:
+                    return False, f"HTTP {response.status}"
+
+                data = await response.json(content_type=None)
+
+        signals = data.get("artist_signals") if isinstance(data, dict) else None
+
+        if data.get("ok") is not True or not isinstance(signals, dict):
+            return False, f"unexpected response: {data}"
+
+        return True, f"read-only endpoint responding • {len(signals)} artist signal(s)"
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+async def _fergie_selftest_aux_league_readonly():
+    """Read current J.5 weekly ledger without posting or mutating it."""
+    try:
+        week_key = _fergie_aux_week_key()
+        data = await _fergie_load_aux_week(week_key)
+        summary = _fergie_aux_week_summary(data)
+
+        if not isinstance(data, dict) or not isinstance(summary, dict):
+            return False, "unexpected Aux League data"
+
+        return (
+            True,
+            f"week={week_key} • {len(data.get('events', []))} review(s) • "
+            f"{len(data.get('imports', []))} crate add(s) • "
+            f"{len(summary.get('standings', []))} member(s)",
+        )
 
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
@@ -6306,7 +6374,7 @@ def _fergie_selftest_asset(path):
 
 @bot.command(
     name="selftest",
-    help="ADMIN: Run Fergie 4.5 diagnostics. Use !selftest full for live integration tests.",
+    help="ADMIN: Run Fergie 5.0 diagnostics. Use !selftest full for safe live integration tests.",
 )
 async def selftest(ctx, mode: str = "fast"):
 
@@ -6387,6 +6455,20 @@ async def selftest(ctx, mode: str = "fast"):
 
     record(
         "Core",
+        "DJ API key",
+        bool(FERGIE_DJ_API_KEY),
+        "configured" if FERGIE_DJ_API_KEY else "missing",
+    )
+
+    record(
+        "Core",
+        "Aux League channel",
+        bool(FERGIE_AUX_LEAGUE_CHANNEL_ID),
+        f"<#{FERGIE_AUX_LEAGUE_CHANNEL_ID}>" if FERGIE_AUX_LEAGUE_CHANNEL_ID else "missing",
+    )
+
+    record(
+        "Core",
         "ElevenLabs",
         bool(ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID),
         (
@@ -6462,6 +6544,33 @@ async def selftest(ctx, mode: str = "fast"):
         "_fergie_music_profile",
         "_fergie_save_music_profile",
 
+        # Fergie 5.0 DJ candidate / local crate
+        "_fergie_load_dj_candidates",
+        "_fergie_save_dj_candidates",
+        "_fergie_send_candidate_to_local_dj",
+        "_fergie_handoff_dj_candidate",
+        "_fergie_fetch_local_dj_candidates",
+        "_fergie_notify_imported_candidate",
+
+        # Fergie 5.0 taste / reputation
+        "_fergie_member_taste_profile",
+        "_fergie_aux_reputation",
+        "_fergie_refresh_member_aux_reputation",
+        "_fergie_save_member_taste_review",
+        "_fergie_mark_member_taste_imported",
+        "_fergie_taste_reaction_context",
+        "_fergie_dj_artist_taste_signals",
+
+        # Fergie 5.0 Aux League
+        "_fergie_aux_points_for_score",
+        "_fergie_load_aux_week",
+        "_fergie_save_aux_week",
+        "_fergie_aux_record_review",
+        "_fergie_aux_record_import",
+        "_fergie_aux_week_summary",
+        "_fergie_aux_leaderboard_message",
+        "_fergie_post_weekly_aux_leaderboard",
+
         # GIF helper
         "fetch_gif",
     ]
@@ -6487,6 +6596,7 @@ async def selftest(ctx, mode: str = "fast"):
         "scam",
         "bbl",
         "selftest",
+        "auxboardtest",
     ]
 
     for name in command_checks:
@@ -6539,11 +6649,52 @@ async def selftest(ctx, mode: str = "fast"):
         "fergie_birthday_watcher",
         "fergie_reminders",
         "daily_gym_reminder",
+        "fergie_dj_import_notifier",
+        "fergie_aux_league_watcher",
     ]
 
     for name in scheduler_checks:
         passed, detail = _fergie_selftest_task(name)
         record("Schedulers", name, passed, detail)
+
+    # ==========================================================
+    # FERGIE 5.0 DJ / TASTE / AUX STATE — READ ONLY
+    # ==========================================================
+
+    try:
+        candidates = await _fergie_load_dj_candidates()
+        record(
+            "DJ 5.0",
+            "Candidate ledger",
+            isinstance(candidates, list),
+            f"{len(candidates) if isinstance(candidates, list) else 0} candidate(s)",
+        )
+    except Exception as e:
+        record("DJ 5.0", "Candidate ledger", False, f"{type(e).__name__}: {e}")
+
+    try:
+        week_key = _fergie_aux_week_key()
+        aux_data = await _fergie_load_aux_week(week_key)
+        record(
+            "DJ 5.0",
+            "Aux League ledger",
+            isinstance(aux_data, dict),
+            (
+                f"week={week_key} • {len(aux_data.get('events', []))} review(s) • "
+                f"{len(aux_data.get('imports', []))} crate add(s)"
+                if isinstance(aux_data, dict)
+                else "invalid data"
+            ),
+        )
+    except Exception as e:
+        record("DJ 5.0", "Aux League ledger", False, f"{type(e).__name__}: {e}")
+
+    record(
+        "DJ 5.0",
+        "Sunday watcher config",
+        0 <= FERGIE_AUX_LEAGUE_SUNDAY_HOUR <= 23,
+        f"{FERGIE_AUX_LEAGUE_SUNDAY_HOUR}:00 PT • <#{FERGIE_AUX_LEAGUE_CHANNEL_ID}>",
+    )
 
     # ==========================================================
     # LORE / CAST
@@ -6650,6 +6801,12 @@ async def selftest(ctx, mode: str = "fast"):
         vc_ok, vc_detail = await _fergie_selftest_vc_health()
         record("Live", "VC brain health", vc_ok, vc_detail)
 
+        taste_ok, taste_detail = await _fergie_selftest_dj_taste_endpoint()
+        record("Live", "DJ taste endpoint", taste_ok, taste_detail)
+
+        aux_ok, aux_detail = await _fergie_selftest_aux_league_readonly()
+        record("Live", "Aux League read-only", aux_ok, aux_detail)
+
         gemini_ok, gemini_detail = await _fergie_selftest_gemini()
         record("Live", "Gemini text", gemini_ok, gemini_detail)
 
@@ -6669,7 +6826,7 @@ async def selftest(ctx, mode: str = "fast"):
         overall = f"🔴 {failed_count} CHECK(S) FAILED"
 
     embed = discord.Embed(
-        title="🧠 Fergie 4.5 Diagnostics",
+        title="🧠 Fergie 5.0 Diagnostics",
         description=(
             f"**{overall}**\n"
             f"Mode: **{'FULL' if full_mode else 'FAST'}**\n"
@@ -6740,7 +6897,7 @@ async def selftest(ctx, mode: str = "fast"):
 
     embed.set_footer(
         text=(
-            "FAST = inspection only • FULL = lightweight live integration checks"
+            "FAST = inspection/read-only • FULL = safe live checks; no playback/import/post triggers"
         )
     )
 
