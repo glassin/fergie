@@ -123,6 +123,13 @@ FERGIE_DJ_CANDIDATE_HISTORY_LIMIT = int(
 FERGIE_DJ_CANDIDATE_CHANNEL_ID = int(
     os.getenv("FERGIE_DJ_CANDIDATE_CHANNEL_ID", str(FERGIE_TEST_CHANNEL_ID))
 )
+
+# Fergie 5.0 Stage I.3: Railway -> authenticated local DJ candidate receiver.
+FERGIE_DJ_URL = os.getenv(
+    "FERGIE_DJ_URL",
+    "https://dj.fergielicious.live",
+).strip().rstrip("/")
+FERGIE_DJ_API_KEY = os.getenv("FERGIE_DJ_API_KEY", "").strip()
 # ---------------------------------------------------------------------------
 # -----------------------------------------
 
@@ -2733,6 +2740,115 @@ async def _fergie_save_dj_candidates(data: dict):
     await _db_set("fergie_dj_candidates", data)
 
 
+async def _fergie_send_candidate_to_local_dj(candidate: dict):
+    """
+    Send candidate metadata to the authenticated local DJ server.
+
+    This is metadata only. The local DJ server still does not download audio.
+    Failure is isolated so the critic/private-channel handoff continues working.
+    """
+    if not FERGIE_DJ_URL:
+        return {
+            "ok": False,
+            "status": "dj_url_missing",
+        }
+
+    if not FERGIE_DJ_API_KEY:
+        print("FERGIE DJ CANDIDATE LOCAL SKIP ⚪ FERGIE_DJ_API_KEY missing")
+        return {
+            "ok": False,
+            "status": "dj_api_key_missing",
+        }
+
+    payload = {
+        "spotify_track_id": candidate.get("spotify_track_id"),
+        "spotify_url": candidate.get("spotify_url"),
+        "title": candidate.get("title"),
+        "artist": candidate.get("artist"),
+        "album": candidate.get("album", ""),
+        "score": candidate.get("score"),
+        "poster_id": str(candidate.get("poster_id", "")),
+        "poster_display_name": candidate.get("poster_display_name", ""),
+        "submitted_at": candidate.get("submitted_at", ""),
+    }
+
+    timeout = aiohttp.ClientTimeout(total=20)
+
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                f"{FERGIE_DJ_URL}/candidate",
+                headers={
+                    "X-Fergie-DJ-Key": FERGIE_DJ_API_KEY,
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            ) as response:
+                body = await response.text()
+
+                if response.status != 200:
+                    print(
+                        f"FERGIE DJ CANDIDATE LOCAL ERROR ❌ "
+                        f"status={response.status} body={body[:500]}"
+                    )
+                    return {
+                        "ok": False,
+                        "status": f"http_{response.status}",
+                    }
+
+                try:
+                    data = json.loads(body)
+                except Exception:
+                    print(
+                        "FERGIE DJ CANDIDATE LOCAL ERROR ❌ invalid JSON response"
+                    )
+                    return {
+                        "ok": False,
+                        "status": "invalid_response",
+                    }
+
+        if not data.get("ok"):
+            print(
+                f"FERGIE DJ CANDIDATE LOCAL ERROR ❌ "
+                f"response={data}"
+            )
+            return {
+                "ok": False,
+                "status": "remote_rejected",
+            }
+
+        print(
+            f"FERGIE DJ CANDIDATE LOCAL ✅ "
+            f"track={candidate.get('spotify_track_id')} "
+            f"status={data.get('status')}"
+        )
+
+        return {
+            "ok": True,
+            "status": data.get("status") or "accepted",
+            "response": data,
+        }
+
+    except asyncio.TimeoutError:
+        print(
+            f"FERGIE DJ CANDIDATE LOCAL ERROR ❌ timeout url={FERGIE_DJ_URL}"
+        )
+        return {
+            "ok": False,
+            "status": "timeout",
+        }
+
+    except Exception as e:
+        print(
+            f"FERGIE DJ CANDIDATE LOCAL ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return {
+            "ok": False,
+            "status": "exception",
+        }
+
+
 async def _fergie_handoff_dj_candidate(
     *,
     spotify_url: str,
@@ -2833,6 +2949,12 @@ async def _fergie_handoff_dj_candidate(
 
     candidate["handoff_message_id"] = handoff_message.id
     candidate["handoff_channel_id"] = channel.id
+
+    # Stage I.3: send the same approved candidate to the local receiver.
+    # This does not block or invalidate the private Discord handoff if the
+    # tunnel/local server is temporarily unavailable.
+    local_result = await _fergie_send_candidate_to_local_dj(candidate)
+    candidate["local_handoff_status"] = local_result.get("status")
 
     items.append(candidate)
     data["items"] = items
