@@ -4675,6 +4675,7 @@ def _fergie_is_tldr_request(text: str) -> bool:
         r"\bwhat\s+did\s+i\s+miss\b",
         r"^(?:the\s+)?t\.?l\.?d\.?r\.?\??$",
         r"^(?:today'?s?\s+)?(?:recap|summary)\??$",
+        r"^(?:recap|summarize|summarise)\s+(?:today|the\s+day)\??$",
     ]
     return any(re.search(pattern, cleaned, flags=re.IGNORECASE) for pattern in patterns)
 
@@ -6080,7 +6081,7 @@ async def halp(ctx, *, command: str | None = None):
             "`@fergie <anything>` — Talk to me normally; I understand English, Spanish & Spanglish\n"
             "`@fergie say <text>` — Make me say it as a voice post\n"
             "`@fergie show me a picture of <thing>` — Find a real picture with Google Search\n"
-            "`@fergie give me the tldr` — Recap today's accessible server yapping\n"
+            "`@fergie tldr` / `@fergie recap` — Recap today's accessible server yapping\n"
             "`@fergie` + image — I'll look at the image and react\n"
             "I may also randomly butt into chat, react to images, or answer with a voice post."
         ),
