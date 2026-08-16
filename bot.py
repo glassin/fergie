@@ -7327,7 +7327,7 @@ async def djcredit(ctx, number: int = None):
         return
 
     # Pull the same pending list used by !djwanted so numbering stays consistent.
-    candidates = await _fergie_dj_fetch_candidates(status="pending_download")
+    candidates = await _fergie_fetch_local_dj_candidates(status="pending_download")
     if not candidates:
         await ctx.reply("🎧 my wanted queue is empty right now.", mention_author=False)
         return
