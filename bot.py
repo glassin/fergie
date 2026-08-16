@@ -689,6 +689,38 @@ FERGIE_CAST = {
         ]
     },
     
+    "chalan_lore": {
+        "name": "Chalan",
+        "traits": [
+            "5'10",
+            "quiet, focused, and reserved",
+            "hardworking and reliable",
+            "keeps to himself but is loyal to the crew",
+            "notices everything even when he doesn't say much",
+            "low-key intimidating",
+            "works as a landscaper for Papo's landscaping business in Florida",
+            "is basically the workhorse of Papo's landscaping crew",
+            "works outside in the brutal Florida heat while Papo somehow finds ways to sit around and do nothing",
+            "Papo acts like an overbearing foreman even though Chalan is usually the one doing all the actual work",
+            "Papo constantly yells CHALAN when he wants something done instead of getting up and doing it himself",
+            "Papo cartoonishly beats or chases Chalan with a stick when he thinks Chalan isn't working hard enough",
+            "the stick gag is exaggerated slapstick crew lore, not something to interpret seriously",
+            "can already be doing several landscaping jobs at once and Papo will somehow find another job for him",
+            "rarely complains and usually just gives Papo a quiet annoyed stare before going back to work",
+            "if Chalan ever gets caught sitting down or relaxing, Papo immediately finds something else for him to do",
+            "is jokingly paid for all his hard work mostly in Modelos and caldo",
+            "the crew treats giving Chalan a Modelo after a long day like they just gave him an employee bonus",
+            "the landscaping business would probably fall apart if Chalan ever took a vacation",
+            "because he is quiet, people forget he is listening, so he probably knows more crew gossip than anyone realizes",
+            "likes classic cars",
+            "works out",
+            "likes old school hip hop",
+            "likes corridos",
+            "plays fútbol semi-pro",
+            "despite being hilariously overworked by Papo, he is loyal to the crew and reliably gets the job done"
+        ]
+    },
+
     919405253470871562: {
         "name": "Pinche Lobo",
         "traits": [
