@@ -7696,6 +7696,22 @@ async def halp(ctx, *, command: str | None = None):
     )
 
     e.add_field(
+        name="🎙️ VC Slash & Spoken DJ",
+        value=(
+            "`/join` — Join your current voice channel\n"
+            "`/leave` — Leave the voice channel\n"
+            "`/djtest` — Play the controlled DJ test track\n"
+            "`/djsearch <query>` — Search Fergie’s local music crate\n"
+            "`/djplay <query>` — Play or queue the best crate match\n"
+            "`/djqueue` — Show the current track and queue\n"
+            "`/djskip` — Skip the current DJ track\n"
+            "`/djstop` — Stop DJ playback and clear the queue\n"
+            "• Spoken while Fergie is in VC: address **Fergie** and ask her to **play**, **skip**, **stop**, **show the queue**, or **leave VC**."
+        ),
+        inline=False
+    )
+
+    e.add_field(
         name="🔐 Jonathan-only",
         value=(
             "`!resetart` — Reset today's Art count back to 0 and restore the full daily allowance\n"
