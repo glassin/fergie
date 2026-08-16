@@ -4382,6 +4382,87 @@ async def _fergie_send_candidate_to_local_dj(candidate: dict):
         }
 
 
+async def _fergie_resync_stranded_dj_candidates(limit: int = 15):
+    """
+    Retry persistent pending candidates whose original local handoff failed.
+
+    This is deliberately recovery-only: candidates already accepted by the local
+    DJ server are left alone, and imported candidates are never re-sent.
+    """
+    data = await _fergie_load_dj_candidates()
+    items = data.get("items", [])
+
+    if not isinstance(items, list):
+        return {"attempted": 0, "synced": 0, "failed": 0}
+
+    accepted_statuses = {
+        "accepted",
+        "pending_download",
+        "already_exists",
+        "already_queued",
+        "duplicate",
+        "imported",
+    }
+
+    stranded = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        if str(item.get("status") or "").strip().lower() != "pending_download":
+            continue
+
+        local_status = str(item.get("local_handoff_status") or "").strip().lower()
+
+        if local_status in accepted_statuses:
+            continue
+
+        if not str(item.get("spotify_track_id") or "").strip():
+            continue
+
+        stranded.append(item)
+
+        if len(stranded) >= max(1, int(limit)):
+            break
+
+    if not stranded:
+        return {"attempted": 0, "synced": 0, "failed": 0}
+
+    synced = 0
+    failed = 0
+    changed = False
+
+    for candidate in stranded:
+        result = await _fergie_send_candidate_to_local_dj(candidate)
+        new_status = str(result.get("status") or "unknown").strip() or "unknown"
+        candidate["local_handoff_status"] = new_status
+        candidate["local_handoff_retry_at"] = datetime.now(timezone.utc).isoformat()
+        changed = True
+
+        if result.get("ok"):
+            synced += 1
+            print(
+                "FERGIE DJ CANDIDATE RESYNC ✅ "
+                f"track={candidate.get('spotify_track_id')} status={new_status}"
+            )
+        else:
+            failed += 1
+            print(
+                "FERGIE DJ CANDIDATE RESYNC ❌ "
+                f"track={candidate.get('spotify_track_id')} status={new_status}"
+            )
+
+    if changed:
+        await _fergie_save_dj_candidates(data)
+
+    return {
+        "attempted": len(stranded),
+        "synced": synced,
+        "failed": failed,
+    }
+
+
 async def _fergie_handoff_dj_candidate(
     *,
     spotify_url: str,
@@ -6680,6 +6761,13 @@ async def djwanted(ctx):
     )
 
     try:
+        # Recovery bridge: a qualifying Spotify candidate is persisted even when
+        # the home DJ stack is offline. Before reading the local wanted queue,
+        # retry only those persistent candidates whose original local handoff
+        # never succeeded. This makes !djwanted recover songs Fergie lurked while
+        # the local DJ server/tunnel was unavailable.
+        resync = await _fergie_resync_stranded_dj_candidates()
+
         candidates = await _fergie_fetch_local_dj_candidates()
 
         if not isinstance(candidates, list):
@@ -6695,9 +6783,18 @@ async def djwanted(ctx):
         ]
 
         if not pending:
-            await wait.edit(
-                content="🎧 my wanted queue is empty right now. shocking restraint."
-            )
+            if resync.get("attempted") and resync.get("failed"):
+                await wait.edit(
+                    content=(
+                        "⚠️ i found "
+                        f"**{resync['failed']}** stranded DJ candidate(s), but i still "
+                        "couldn't sync them to the local DJ server. check the DJ stack/tunnel."
+                    )
+                )
+            else:
+                await wait.edit(
+                    content="🎧 my wanted queue is empty right now. shocking restraint."
+                )
             return
 
         pending = pending[:15]
@@ -6725,9 +6822,11 @@ async def djwanted(ctx):
             description="\n".join(lines),
             colour=discord.Colour.blurple(),
         )
-        embed.set_footer(
-            text=f"{len(pending)} pending shown • downloads still require manual approval"
-        )
+        footer = f"{len(pending)} pending shown • downloads still require manual approval"
+        if resync.get("synced"):
+            footer += f" • recovered {resync['synced']} stranded"
+
+        embed.set_footer(text=footer)
 
         await wait.edit(content=None, embed=embed)
 
