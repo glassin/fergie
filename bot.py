@@ -7438,6 +7438,133 @@ async def djcredit(ctx, number: int = None):
         )
 
 
+
+# ================== DJ Crate Listing ==================
+@bot.command(
+    name="djcrate",
+    help="Show Fergie's DJ crate with pagination. Usage: !djcrate [page]",
+)
+async def djcrate(ctx, page: int = 1):
+    if not FERGIE_DJ_URL or not FERGIE_DJ_API_KEY:
+        await ctx.reply(
+            "❌ my DJ server URL/API key isn't configured.",
+            mention_author=False,
+        )
+        return
+
+    try:
+        page = int(page)
+    except Exception:
+        page = 1
+
+    if page < 1:
+        page = 1
+
+    timeout = aiohttp.ClientTimeout(total=30)
+
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                f"{FERGIE_DJ_URL.rstrip('/')}/crate/list",
+                headers={"X-Fergie-DJ-Key": FERGIE_DJ_API_KEY},
+            ) as response:
+                raw = await response.text()
+
+                if response.status != 200:
+                    raise RuntimeError(
+                        f"DJ crate HTTP {response.status}: {raw[:500]}"
+                    )
+
+                try:
+                    data = json.loads(raw)
+                except Exception as exc:
+                    raise RuntimeError(
+                        f"DJ crate returned invalid JSON: {exc}"
+                    )
+
+        tracks = data.get("tracks") if isinstance(data, dict) else None
+
+        if not isinstance(tracks, list):
+            raise RuntimeError("DJ crate response missing tracks list")
+
+        total = len(tracks)
+
+        if total == 0:
+            await ctx.reply(
+                "🎧 my DJ crate is empty right now.",
+                mention_author=False,
+            )
+            return
+
+        per_page = 15
+        total_pages = max(1, (total + per_page - 1) // per_page)
+
+        if page > total_pages:
+            await ctx.reply(
+                f"❌ crate page {page} doesn't exist. I have {total_pages} page(s).",
+                mention_author=False,
+            )
+            return
+
+        start = (page - 1) * per_page
+        end = min(start + per_page, total)
+        page_tracks = tracks[start:end]
+
+        embed = discord.Embed(
+            title="🎧 Fergie's DJ Crate",
+            description=f"**{total} track(s)** • page **{page}/{total_pages}**",
+        )
+
+        lines = []
+        for index, item in enumerate(page_tracks, start=start + 1):
+            if not isinstance(item, dict):
+                continue
+
+            artist = str(item.get("artist") or "Unknown Artist").strip()
+            title = str(
+                item.get("title") or item.get("file_name") or "Unknown Title"
+            ).strip()
+            album = str(item.get("album") or "").strip()
+            track_id = item.get("id")
+
+            line = f"**{index}. {artist} — {title}**"
+            meta = []
+
+            if album:
+                meta.append(album)
+
+            if track_id is not None:
+                meta.append(f"track {track_id}")
+
+            if meta:
+                line += "\n" + " • ".join(meta)
+
+            lines.append(line)
+
+        embed.description += "\n\n" + "\n\n".join(lines)
+
+        if total_pages > 1:
+            embed.set_footer(
+                text=f"Use !djcrate <page> • showing {start + 1}-{end} of {total}"
+            )
+        else:
+            embed.set_footer(text=f"showing all {total} tracks")
+
+        await ctx.reply(embed=embed, mention_author=False)
+
+    except asyncio.TimeoutError:
+        await ctx.reply(
+            "❌ my DJ crate lookup timed out. Check the local DJ server.",
+            mention_author=False,
+        )
+    except Exception as exc:
+        print(f"DJCRATE ERROR ❌ {type(exc).__name__}: {exc}")
+        await ctx.reply(
+            "❌ I couldn't read my DJ crate right now.",
+            mention_author=False,
+        )
+
+
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
 
@@ -7537,6 +7664,7 @@ async def halp(ctx, *, command: str | None = None):
             "`!fergieget <artist> <song>` — Download a song through Soulseek into Fergie's DJ crate\n"
             "`!djimport` — Import all valid files currently in Soulseek staging into the DJ crate\n"
             "`!djcredit <#>` — Credit a pending wanted song already present in the DJ crate\n"
+            "`!djcrate [page]` — Show Fergie's full DJ crate with pagination\n"
             "`!auxboardtest` — Preview the current Aux League board without consuming Sunday's post\n"
             f"`!selftest` / `!selftest full` — Fergie 5.0 diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
         ),
@@ -8044,6 +8172,7 @@ async def selftest(ctx, mode: str = "fast"):
         "fergieget",
         "djimport",
         "djcredit",
+        "djcrate",
         "selftest",
         "auxboardtest",
     ]
