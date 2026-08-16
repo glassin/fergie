@@ -7326,21 +7326,37 @@ async def djcredit(ctx, number: int = None):
         )
         return
 
-    # Pull the same pending list used by !djwanted so numbering stays consistent.
-    candidates = await _fergie_fetch_local_dj_candidates(status="pending_download")
-    if not candidates:
-        await ctx.reply("🎧 my wanted queue is empty right now.", mention_author=False)
-        return
+    # Pull the exact same list and apply the exact same pending filter
+    # used by !djwanted so the displayed numbering matches !djcredit.
+    candidates = await _fergie_fetch_local_dj_candidates()
 
-    if number > len(candidates):
+    if not isinstance(candidates, list):
         await ctx.reply(
-            f"❌ wanted candidate #{number} doesn't exist. "
-            f"I currently have {len(candidates)} pending.",
+            "❌ I couldn't read my wanted queue right now.",
             mention_author=False,
         )
         return
 
-    candidate = candidates[number - 1]
+    pending = [
+        item
+        for item in candidates
+        if isinstance(item, dict)
+        and str(item.get("status") or "").strip().lower() == "pending_download"
+    ][:15]
+
+    if not pending:
+        await ctx.reply("🎧 my wanted queue is empty right now.", mention_author=False)
+        return
+
+    if number > len(pending):
+        await ctx.reply(
+            f"❌ wanted candidate #{number} doesn't exist. "
+            f"I currently have {len(pending)} pending.",
+            mention_author=False,
+        )
+        return
+
+    candidate = pending[number - 1]
     spotify_track_id = str(candidate.get("spotify_track_id") or "").strip()
     artist = str(candidate.get("artist") or "").strip()
     title = str(candidate.get("title") or "").strip()
