@@ -2191,6 +2191,7 @@ FERGIE_VISUAL_REFS = {
     "khurty": {"path": "visual_refs/khurty.png", "aliases": ["khurty", "kurtie"]},
     "papo": {"path": "visual_refs/papo.png", "aliases": ["papo", "sancho", "miguel"]},
     "chadwin": {"path": "visual_refs/chadwin.png", "aliases": ["chadwin", "edwin"]},
+    "chalan": {"path": "visual_refs/chalan.png", "aliases": ["chalan"]},
     "raquel": {"path": "visual_refs/raquel.png", "aliases": ["raquel"]},
     "jonathan": {"path": "visual_refs/jonathan.png", "aliases": ["jonathan"]},
     "lobo": {
@@ -8411,6 +8412,7 @@ async def selftest(ctx, mode: str = "fast"):
         "visual_refs/khurty.png",
         "visual_refs/papo.png",
         "visual_refs/chadwin.png",
+        "visual_refs/chalan.png",
         "visual_refs/raquel.png",
         "visual_refs/jonathan.png",
         "visual_refs/lobo.png",
