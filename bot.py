@@ -402,6 +402,103 @@ async def gemini_on_cooldown(message):
     gemini_cooldowns[user_id] = now
     return False
 
+# ================== Fergie Movie Club Foundation ==================
+
+MOVIE_CLUB_JSON_PATH = os.getenv(
+    "MOVIE_CLUB_JSON_PATH",
+    "fergie_movie_club_master_v4_guidance_engine.json",
+).strip()
+
+movie_club_data = {}
+movie_club_load_error = None
+
+
+def _load_movie_club_data():
+    """
+    Load the Movie Club master JSON once at startup.
+
+    Foundation only:
+    - Does not change any existing commands.
+    - Does not change DJ/VC behavior.
+    - Does not modify the source JSON.
+    """
+    global movie_club_data, movie_club_load_error
+
+    movie_club_data = {}
+    movie_club_load_error = None
+
+    try:
+        with open(
+            MOVIE_CLUB_JSON_PATH,
+            "r",
+            encoding="utf-8",
+        ) as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError("Movie Club JSON root must be an object")
+
+        required_sections = {
+            "works",
+            "journeys",
+            "franchises",
+            "watch_progress",
+            "fergie_guidance",
+            "validation",
+        }
+
+        missing_sections = sorted(
+            section
+            for section in required_sections
+            if section not in data
+        )
+
+        if missing_sections:
+            raise ValueError(
+                "Movie Club JSON missing required sections: "
+                + ", ".join(missing_sections)
+            )
+
+        validation = data.get("validation", {})
+
+        expected_horror_count = int(
+            validation.get("existing_horror_work_count_expected", 0) or 0
+        )
+        actual_horror_count = int(
+            validation.get("existing_horror_work_count", 0) or 0
+        )
+
+        if expected_horror_count and actual_horror_count != expected_horror_count:
+            raise ValueError(
+                "Movie Club Horror Canon validation failed: "
+                f"expected {expected_horror_count}, "
+                f"found {actual_horror_count}"
+            )
+
+        movie_club_data = data
+
+        print(
+            "MOVIE CLUB JSON LOADED ✅ "
+            f"works={len(data.get('works', []))} "
+            f"journeys={len(data.get('journeys', {}))} "
+            f"franchises={len(data.get('franchises', {}))}"
+        )
+
+    except Exception as e:
+        movie_club_load_error = (
+            f"{type(e).__name__}: {e}"
+        )
+        print(
+            "MOVIE CLUB JSON LOAD ERROR ❌ "
+            f"{movie_club_load_error}"
+        )
+
+
+# Load Movie Club data during bot startup/import.
+_load_movie_club_data()
+
+# ==============================================================
+
 # ---------- Postgres KV (JSON) helpers ----------
 db_pool: asyncpg.Pool | None = None
 
@@ -449,6 +546,26 @@ async def _db_init():
                       channel_id BIGINT NOT NULL,
                       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                       content TEXT NOT NULL
+                    )
+                """)
+                # Post-5.0 DJ popularity: server-wide play/finish/skip telemetry.
+                # Skip counts keep per-member history so repeated skipping by one
+                # person has diminishing influence instead of dominating the rank.
+                await con.execute("""
+                    CREATE TABLE IF NOT EXISTS public.dj_popularity (
+                      guild_id BIGINT NOT NULL,
+                      track_id TEXT NOT NULL,
+                      title TEXT NOT NULL DEFAULT '',
+                      artist TEXT NOT NULL DEFAULT '',
+                      plays INTEGER NOT NULL DEFAULT 0,
+                      finishes INTEGER NOT NULL DEFAULT 0,
+                      skips INTEGER NOT NULL DEFAULT 0,
+                      manual_skips INTEGER NOT NULL DEFAULT 0,
+                      voice_skips INTEGER NOT NULL DEFAULT 0,
+                      skip_member_counts JSONB NOT NULL DEFAULT '{}'::jsonb,
+                      first_played TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      last_played TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                      PRIMARY KEY (guild_id, track_id)
                     )
                 """)
                 row = await con.fetchrow(
@@ -1013,6 +1130,225 @@ async def _fergie_dj_artist_taste_signals():
     return artist_signal
 
 
+async def _fergie_record_dj_event(
+    guild_id: int,
+    track_id,
+    title: str,
+    artist: str,
+    event: str,
+    user_id: int | None = None,
+    source: str = "auto",
+):
+    """Persist one DJ playback/finish/skip event for server popularity ranking."""
+    if not db_pool:
+        return False
+
+    guild_id = int(guild_id)
+    track_id = str(track_id or "").strip()
+    title = str(title or "Unknown title").strip()[:300]
+    artist = str(artist or "Unknown artist").strip()[:300]
+    event = str(event or "").strip().lower()
+    source = str(source or "auto").strip().lower()
+
+    if not track_id or event not in {"play", "finish", "skip"}:
+        return False
+
+    try:
+        async with db_pool.acquire() as con:
+            async with con.transaction():
+                await con.execute(
+                    """
+                    INSERT INTO public.dj_popularity
+                        (guild_id, track_id, title, artist)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (guild_id, track_id) DO UPDATE SET
+                        title = EXCLUDED.title,
+                        artist = EXCLUDED.artist,
+                        last_played = NOW()
+                    """,
+                    guild_id, track_id, title, artist,
+                )
+
+                if event == "play":
+                    await con.execute(
+                        """
+                        UPDATE public.dj_popularity
+                        SET plays = plays + 1, last_played = NOW()
+                        WHERE guild_id = $1 AND track_id = $2
+                        """,
+                        guild_id, track_id,
+                    )
+
+                elif event == "finish":
+                    await con.execute(
+                        """
+                        UPDATE public.dj_popularity
+                        SET finishes = finishes + 1, last_played = NOW()
+                        WHERE guild_id = $1 AND track_id = $2
+                        """,
+                        guild_id, track_id,
+                    )
+
+                else:
+                    row = await con.fetchrow(
+                        """
+                        SELECT skips, manual_skips, voice_skips, skip_member_counts
+                        FROM public.dj_popularity
+                        WHERE guild_id = $1 AND track_id = $2
+                        FOR UPDATE
+                        """,
+                        guild_id, track_id,
+                    )
+
+                    member_counts = row["skip_member_counts"] if row else {}
+                    if isinstance(member_counts, str):
+                        try:
+                            member_counts = json.loads(member_counts)
+                        except Exception:
+                            member_counts = {}
+                    if not isinstance(member_counts, dict):
+                        member_counts = {}
+
+                    member_key = str(user_id) if user_id is not None else "unknown"
+                    member_counts[member_key] = int(member_counts.get(member_key, 0) or 0) + 1
+
+                    await con.execute(
+                        """
+                        UPDATE public.dj_popularity
+                        SET skips = skips + 1,
+                            manual_skips = manual_skips + CASE WHEN $3 = 'manual' THEN 1 ELSE 0 END,
+                            voice_skips = voice_skips + CASE WHEN $3 = 'voice' THEN 1 ELSE 0 END,
+                            skip_member_counts = $4::jsonb,
+                            last_played = NOW()
+                        WHERE guild_id = $1 AND track_id = $2
+                        """,
+                        guild_id, track_id, source, json.dumps(member_counts),
+                    )
+
+        return True
+    except Exception as e:
+        print(
+            f"FERGIE DJ POPULARITY EVENT ERROR ❌ event={event} "
+            f"guild={guild_id} track={track_id} {type(e).__name__}: {e}"
+        )
+        return False
+
+
+async def vc_dj_popularity_event_http(request):
+    """Authenticated Node -> Python bridge for DJ popularity telemetry."""
+    if not VC_BRIDGE_SECRET:
+        return web.json_response({"ok": False, "error": "bridge_not_configured"}, status=503)
+
+    if request.headers.get("X-VC-Bridge-Secret", "") != VC_BRIDGE_SECRET:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+
+    try:
+        data = await request.json()
+    except Exception:
+        return web.json_response({"ok": False, "error": "invalid_json"}, status=400)
+
+    try:
+        guild_id = int(data.get("guild_id"))
+    except (TypeError, ValueError):
+        return web.json_response({"ok": False, "error": "invalid_guild_id"}, status=400)
+
+    event = str(data.get("event") or "").strip().lower()
+    try:
+        user_id = int(data["user_id"]) if data.get("user_id") is not None else None
+    except (TypeError, ValueError):
+        user_id = None
+
+    ok = await _fergie_record_dj_event(
+        guild_id=guild_id,
+        track_id=data.get("track_id"),
+        title=data.get("title"),
+        artist=data.get("artist"),
+        event=event,
+        user_id=user_id,
+        source=str(data.get("source") or "auto"),
+    )
+
+    return web.json_response({"ok": bool(ok)})
+
+
+async def _fergie_dj_popularity_signals(guild_id: int):
+    """Return conservative per-track server-popularity signals for Auto-DJ."""
+    if not db_pool:
+        return {}
+
+    try:
+        async with db_pool.acquire() as con:
+            rows = await con.fetch(
+                """
+                SELECT track_id, plays, finishes, skip_member_counts, last_played
+                FROM public.dj_popularity
+                WHERE guild_id = $1 AND plays >= 3
+                """,
+                int(guild_id),
+            )
+    except Exception as e:
+        print(f"FERGIE DJ POPULARITY SIGNAL DB ERROR ❌ {type(e).__name__}: {e}")
+        return {}
+
+    signals = {}
+    for row in rows:
+        counts = row["skip_member_counts"] or {}
+        if isinstance(counts, str):
+            try:
+                counts = json.loads(counts)
+            except Exception:
+                counts = {}
+        if not isinstance(counts, dict):
+            counts = {}
+
+        effective_skips = 0.0
+        for raw_count in counts.values():
+            try:
+                count = max(0, int(raw_count))
+            except (TypeError, ValueError):
+                count = 0
+            for n in range(1, count + 1):
+                effective_skips += 1.0 / math.sqrt(n)
+
+        finishes = int(row["finishes"] or 0)
+        plays = int(row["plays"] or 0)
+        denominator = finishes + effective_skips
+        retention = (finishes / denominator * 100.0) if denominator else 100.0
+
+        last_played = row["last_played"]
+        if isinstance(last_played, datetime):
+            if last_played.tzinfo is None:
+                last_played = last_played.replace(tzinfo=timezone.utc)
+            recency_days = max(0.0, (datetime.now(timezone.utc) - last_played).total_seconds() / 86400.0)
+        else:
+            recency_days = 0.0
+
+        signals[str(row["track_id"])] = {
+            "plays": plays,
+            "retention": retention,
+            "recency_days": recency_days,
+        }
+
+    return signals
+
+
+async def vc_dj_popularity_signals_http(request):
+    """Authenticated read-only per-track popularity signal for Auto-DJ."""
+    if not VC_BRIDGE_SECRET:
+        return web.json_response({"ok": False, "error": "bridge_not_configured"}, status=503)
+
+    if request.headers.get("X-VC-Bridge-Secret", "") != VC_BRIDGE_SECRET:
+        return web.json_response({"ok": False, "error": "unauthorized"}, status=401)
+
+    try:
+        guild_id = int(request.query.get("guild_id", ""))
+    except (TypeError, ValueError):
+        return web.json_response({"ok": False, "error": "invalid_guild_id"}, status=400)
+
+    signals = await _fergie_dj_popularity_signals(guild_id)
+    return web.json_response({"ok": True, "track_signals": signals})
+
+
 async def vc_dj_taste_http(request):
     """
     J.4 read-only endpoint for the VC autonomous picker.
@@ -1552,6 +1888,17 @@ async def start_vc_bridge_server():
     app.router.add_get(
         "/dj-taste-signals",
         vc_dj_taste_http
+    )
+
+    # Post-5.0 DJ popularity telemetry from the Node voice/DJ service.
+    app.router.add_post(
+        "/dj-popularity-event",
+        vc_dj_popularity_event_http
+    )
+
+    app.router.add_get(
+        "/dj-popularity-signals",
+        vc_dj_popularity_signals_http
     )
 
     # Post-5.0: Gemini-powered spoken commentary for autonomous DJ tracks.
@@ -2235,11 +2582,19 @@ async def generate_fergie_image(prompt: str):
         names = ", ".join(name for name, _ in refs)
         parts.append({"text": (
             f"Create this requested image: {prompt.strip()}\n\n"
-            f"The attached reference image(s) show the established visual designs for: {names}. "
-            "Preserve each referenced character's recognizable face, hair, skin tone, body/build, glasses, "
-            "piercings, tattoos, and other defining visual features. Adapt clothing, pose, expression, lighting, "
-            "and setting only as the user's request requires. Do not merge character identities. "
-            "If more than one reference is attached, keep them as distinct people."
+f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for: {names}. "
+"Character identity is immutable. Each referenced character MUST remain the same character "
+"throughout the entire image and across EVERY PANEL of a multi-panel comic. "
+"Preserve that character's exact recognizable face, hair, skin tone, body/build, glasses, "
+"piercings, tattoos, and other defining sprite features. "
+"Do NOT swap, replace, merge, blend, duplicate, or transform one established character into another. "
+"If multiple established characters appear, keep each one as a separate, visually distinct person "
+"and match each person ONLY to their own attached reference. "
+"Aliases such as Papo/Miguel/Sancho, Chadwin/Edwin, Lobo/Pinche Lobo, "
+"Kurtie/Khurty, and Viv/Viviana refer to the SAME established character, not different characters. "
+"For multi-panel comics, character identity and defining sprite appearance MUST remain consistent "
+"from the first panel through the final panel. Clothing, pose, expression, action, lighting, "
+"and setting may change only when requested; identity-defining features must not."
         )})
         for name, path in refs:
             data = _fergie_load_visual_ref(path)
@@ -7642,6 +7997,131 @@ async def djcredit(ctx, number: int = None):
 
 
 
+# ================== DJ Popularity Ranking ==================
+@bot.command(
+    name="djrank",
+    help="JONATHAN ONLY: Show Fergie's server-wide DJ popularity rankings. Usage: !djrank [limit]",
+)
+async def djrank(ctx, limit: int = 15):
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try fak. `!djrank` is Jonathan-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if not db_pool:
+        await ctx.reply(
+            "❌ my database isn't connected, so I can't rank the aux yet.",
+            mention_author=False,
+        )
+        return
+
+    limit = max(1, min(int(limit or 15), 25))
+    guild_id = ctx.guild.id if ctx.guild else 0
+
+    try:
+        async with db_pool.acquire() as con:
+            rows = await con.fetch(
+                """
+                SELECT track_id, title, artist, plays, finishes, skips,
+                       manual_skips, voice_skips, skip_member_counts, last_played
+                FROM public.dj_popularity
+                WHERE guild_id = $1 AND plays >= 3
+                ORDER BY plays DESC, last_played DESC
+                """,
+                guild_id,
+            )
+    except Exception as e:
+        print(f"DJRANK DB ERROR ❌ {type(e).__name__}: {e}")
+        await ctx.reply(
+            "❌ I couldn't read the DJ popularity table right now.",
+            mention_author=False,
+        )
+        return
+
+    ranked = []
+    for row in rows:
+        counts = row["skip_member_counts"] or {}
+        if isinstance(counts, str):
+            try:
+                counts = json.loads(counts)
+            except Exception:
+                counts = {}
+        if not isinstance(counts, dict):
+            counts = {}
+
+        # Fairness rule: a member's repeated skips have diminishing influence.
+        # First skip = 1.0, second = .707, third = .577, etc.
+        effective_skips = 0.0
+        for raw_count in counts.values():
+            try:
+                count = max(0, int(raw_count))
+            except (TypeError, ValueError):
+                count = 0
+            for n in range(1, count + 1):
+                effective_skips += 1.0 / math.sqrt(n)
+
+        finishes = int(row["finishes"] or 0)
+        denominator = finishes + effective_skips
+        retention = (finishes / denominator * 100.0) if denominator else 100.0
+
+        ranked.append({
+            "title": str(row["title"] or "Unknown title"),
+            "artist": str(row["artist"] or "Unknown artist"),
+            "plays": int(row["plays"] or 0),
+            "finishes": finishes,
+            "skips": int(row["skips"] or 0),
+            "manual_skips": int(row["manual_skips"] or 0),
+            "voice_skips": int(row["voice_skips"] or 0),
+            "unique_skippers": len([k for k in counts if k != "unknown"]),
+            "effective_skips": effective_skips,
+            "retention": retention,
+            "last_played": row["last_played"],
+        })
+
+    ranked.sort(key=lambda item: (item["retention"], item["plays"]), reverse=True)
+    ranked = ranked[:limit]
+
+    if not ranked:
+        await ctx.reply(
+            "🎧 not enough play history yet. I need at least 3 plays on a song before I rank it.",
+            mention_author=False,
+        )
+        return
+
+    lines = []
+    for index, item in enumerate(ranked, start=1):
+        retention = item["retention"]
+        if item["plays"] >= 5 and retention < 45 and item["unique_skippers"] >= 2:
+            verdict = "REMOVE CANDIDATE"
+        elif retention >= 80:
+            verdict = "HOT"
+        elif retention >= 60:
+            verdict = "GOOD"
+        else:
+            verdict = "MIXED"
+
+        lines.append(
+            f"**{index}. {item['artist']} — {item['title']}** — **{retention:.0f}%** {verdict}\n"
+            f"plays {item['plays']} • finished {item['finishes']} • skipped {item['skips']} "
+            f"(manual {item['manual_skips']} / voice {item['voice_skips']}) • "
+            f"{item['unique_skippers']} unique skipper(s)"
+        )
+
+    embed = discord.Embed(
+        title="Fergie's DJ Rank",
+        description=(
+            "Server-wide listening history. Repeated skips from the same member "
+            "have diminishing weight so one person can't tank a song by themselves.\n\n"
+            + "\n\n".join(lines)
+        ),
+        colour=discord.Colour.blurple(),
+    )
+    embed.set_footer(text="3+ plays required • retention = finished vs weighted skips")
+    await ctx.reply(embed=embed, mention_author=False)
+
+
 # ================== DJ Crate Listing ==================
 @bot.command(
     name="djcrate",
@@ -7884,6 +8364,7 @@ async def halp(ctx, *, command: str | None = None):
             "`!djimport` — Import all valid files currently in Soulseek staging into the DJ crate\n"
             "`!djcredit <#>` — Credit a pending wanted song already present in the DJ crate\n"
             "`!djcrate [page]` — Show Fergie's full DJ crate with pagination\n"
+            "`!djrank [limit]` — Rank songs by server-wide DJ retention/popularity\n"
             "`!auxboardtest` — Preview the current Aux League board without consuming Sunday's post\n"
             f"`!selftest` / `!selftest full` — Fergie 5.0 diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
         ),
@@ -8283,6 +8764,10 @@ async def selftest(ctx, mode: str = "fast"):
         "ask_fergie_vc_brain",
         "_fergie_generate_dj_commentary",
         "vc_dj_commentary_http",
+        "_fergie_record_dj_event",
+        "vc_dj_popularity_event_http",
+        "_fergie_dj_popularity_signals",
+        "vc_dj_popularity_signals_http",
         "_fergie_dj_track_is_danceable",
         "vc_dj_dance_check_http",
         "start_vc_bridge_server",
@@ -8392,6 +8877,7 @@ async def selftest(ctx, mode: str = "fast"):
         "djimport",
         "djcredit",
         "djcrate",
+        "djrank",
         "selftest",
         "auxboardtest",
     ]
