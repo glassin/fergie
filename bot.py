@@ -499,6 +499,166 @@ _load_movie_club_data()
 
 # ==============================================================
 
+# ================== Fergie Movie Club Data Access ==================
+
+def movie_club_get_work(work_id: str):
+    """Return one Movie Club work by stable work_id."""
+    work_id = str(work_id or "").strip()
+    if not work_id:
+        return None
+
+    works = movie_club_data.get("works", [])
+
+    if isinstance(works, dict):
+        work = works.get(work_id)
+        return work if isinstance(work, dict) else None
+
+    if isinstance(works, list):
+        for work in works:
+            if not isinstance(work, dict):
+                continue
+            if str(work.get("work_id") or "").strip() == work_id:
+                return work
+
+    return None
+
+
+def movie_club_get_journey(journey_id: str):
+    """Return one Movie Club journey by journey_id."""
+    journey_id = str(journey_id or "").strip()
+    if not journey_id:
+        return None
+
+    journeys = movie_club_data.get("journeys", {})
+
+    if isinstance(journeys, dict):
+        journey = journeys.get(journey_id)
+        return journey if isinstance(journey, dict) else None
+
+    return None
+
+
+def movie_club_get_franchise(franchise_id: str):
+    """Return one Movie Club franchise by franchise_id."""
+    franchise_id = str(franchise_id or "").strip()
+    if not franchise_id:
+        return None
+
+    franchises = movie_club_data.get("franchises", {})
+
+    if isinstance(franchises, dict):
+        franchise = franchises.get(franchise_id)
+        return franchise if isinstance(franchise, dict) else None
+
+    return None
+
+
+def movie_club_get_guidance(section: str | None = None):
+    """Return Movie Club guidance rules or one guidance subsection."""
+    guidance = movie_club_data.get("fergie_guidance", {})
+
+    if not isinstance(guidance, dict):
+        return {} if section else guidance
+
+    if section is None:
+        return guidance
+
+    value = guidance.get(str(section).strip())
+    return value if isinstance(value, dict) else {}
+
+
+def movie_club_get_journey_work_ids(journey_id: str):
+    """Return the explicit ordered work IDs for a Movie Club journey."""
+    journey = movie_club_get_journey(journey_id)
+
+    if not journey:
+        return []
+
+    work_selection = journey.get("work_selection", {})
+
+    if not isinstance(work_selection, dict):
+        return []
+
+    work_ids = work_selection.get("work_ids", [])
+
+    if not isinstance(work_ids, list):
+        return []
+
+    return [
+        str(work_id).strip()
+        for work_id in work_ids
+        if str(work_id).strip()
+    ]
+
+
+def movie_club_get_watch_progress(member_id: int | str, journey_id: str):
+    """
+    Return confirmed watch progress for one member and journey.
+
+    This foundation does not write progress. It only reads the
+    progress structure currently present in the Movie Club JSON.
+    """
+    member_key = str(member_id or "").strip()
+    journey_key = str(journey_id or "").strip()
+
+    if not member_key or not journey_key:
+        return {
+            "current_work_id": None,
+            "completed_work_ids": [],
+            "in_progress": {},
+            "updated_at": None,
+        }
+
+    watch_progress = movie_club_data.get("watch_progress", {})
+
+    if not isinstance(watch_progress, dict):
+        return {
+            "current_work_id": None,
+            "completed_work_ids": [],
+            "in_progress": {},
+            "updated_at": None,
+        }
+
+    members = watch_progress.get("members", {})
+
+    if not isinstance(members, dict):
+        members = {}
+
+    member_data = members.get(member_key, {})
+
+    if not isinstance(member_data, dict):
+        member_data = {}
+
+    journey_data = member_data.get(journey_key, {})
+
+    if not isinstance(journey_data, dict):
+        journey_data = {}
+
+    return {
+        "current_work_id": journey_data.get("current_work_id"),
+        "completed_work_ids": list(
+            journey_data.get("completed_work_ids", [])
+        )
+        if isinstance(journey_data.get("completed_work_ids", []), list)
+        else [],
+        "in_progress": dict(
+            journey_data.get("in_progress", {})
+        )
+        if isinstance(journey_data.get("in_progress", {}), dict)
+        else {},
+        "updated_at": journey_data.get("updated_at"),
+    }
+
+
+def movie_club_validation_status():
+    """Return the Movie Club dataset validation section."""
+    validation = movie_club_data.get("validation", {})
+
+    return validation if isinstance(validation, dict) else {}
+
+
+# ==============================================================
+
 # ---------- Postgres KV (JSON) helpers ----------
 db_pool: asyncpg.Pool | None = None
 
