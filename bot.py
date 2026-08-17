@@ -402,6 +402,263 @@ async def gemini_on_cooldown(message):
     gemini_cooldowns[user_id] = now
     return False
 
+# ================== Fergie Movie Club Foundation ==================
+
+MOVIE_CLUB_JSON_PATH = os.getenv(
+    "MOVIE_CLUB_JSON_PATH",
+    "fergie_movie_club_master_v4_guidance_engine.json",
+).strip()
+
+movie_club_data = {}
+movie_club_load_error = None
+
+
+def _load_movie_club_data():
+    """
+    Load the Movie Club master JSON once at startup.
+
+    Foundation only:
+    - Does not change any existing commands.
+    - Does not change DJ/VC behavior.
+    - Does not modify the source JSON.
+    """
+    global movie_club_data, movie_club_load_error
+
+    movie_club_data = {}
+    movie_club_load_error = None
+
+    try:
+        with open(
+            MOVIE_CLUB_JSON_PATH,
+            "r",
+            encoding="utf-8",
+        ) as f:
+            data = json.load(f)
+
+        if not isinstance(data, dict):
+            raise ValueError("Movie Club JSON root must be an object")
+
+        required_sections = {
+            "works",
+            "journeys",
+            "franchises",
+            "watch_progress",
+            "fergie_guidance",
+            "validation",
+        }
+
+        missing_sections = sorted(
+            section
+            for section in required_sections
+            if section not in data
+        )
+
+        if missing_sections:
+            raise ValueError(
+                "Movie Club JSON missing required sections: "
+                + ", ".join(missing_sections)
+            )
+
+        validation = data.get("validation", {})
+
+        expected_horror_count = int(
+            validation.get("existing_horror_work_count_expected", 0) or 0
+        )
+        actual_horror_count = int(
+            validation.get("existing_horror_work_count", 0) or 0
+        )
+
+        if expected_horror_count and actual_horror_count != expected_horror_count:
+            raise ValueError(
+                "Movie Club Horror Canon validation failed: "
+                f"expected {expected_horror_count}, "
+                f"found {actual_horror_count}"
+            )
+
+        movie_club_data = data
+
+        print(
+            "MOVIE CLUB JSON LOADED ✅ "
+            f"works={len(data.get('works', []))} "
+            f"journeys={len(data.get('journeys', {}))} "
+            f"franchises={len(data.get('franchises', {}))}"
+        )
+
+    except Exception as e:
+        movie_club_load_error = (
+            f"{type(e).__name__}: {e}"
+        )
+        print(
+            "MOVIE CLUB JSON LOAD ERROR ❌ "
+            f"{movie_club_load_error}"
+        )
+
+
+# Load Movie Club data during bot startup/import.
+_load_movie_club_data()
+
+# ==============================================================
+
+# ================== Fergie Movie Club Data Access ==================
+
+def movie_club_get_work(work_id: str):
+    """Return one Movie Club work by stable work_id."""
+    work_id = str(work_id or "").strip()
+    if not work_id:
+        return None
+
+    works = movie_club_data.get("works", [])
+
+    if isinstance(works, dict):
+        work = works.get(work_id)
+        return work if isinstance(work, dict) else None
+
+    if isinstance(works, list):
+        for work in works:
+            if not isinstance(work, dict):
+                continue
+            if str(work.get("work_id") or "").strip() == work_id:
+                return work
+
+    return None
+
+
+def movie_club_get_journey(journey_id: str):
+    """Return one Movie Club journey by journey_id."""
+    journey_id = str(journey_id or "").strip()
+    if not journey_id:
+        return None
+
+    journeys = movie_club_data.get("journeys", {})
+
+    if isinstance(journeys, dict):
+        journey = journeys.get(journey_id)
+        return journey if isinstance(journey, dict) else None
+
+    return None
+
+
+def movie_club_get_franchise(franchise_id: str):
+    """Return one Movie Club franchise by franchise_id."""
+    franchise_id = str(franchise_id or "").strip()
+    if not franchise_id:
+        return None
+
+    franchises = movie_club_data.get("franchises", {})
+
+    if isinstance(franchises, dict):
+        franchise = franchises.get(franchise_id)
+        return franchise if isinstance(franchise, dict) else None
+
+    return None
+
+
+def movie_club_get_guidance(section: str | None = None):
+    """Return Movie Club guidance rules or one guidance subsection."""
+    guidance = movie_club_data.get("fergie_guidance", {})
+
+    if not isinstance(guidance, dict):
+        return {} if section else guidance
+
+    if section is None:
+        return guidance
+
+    value = guidance.get(str(section).strip())
+    return value if isinstance(value, dict) else {}
+
+
+def movie_club_get_journey_work_ids(journey_id: str):
+    """Return the explicit ordered work IDs for a Movie Club journey."""
+    journey = movie_club_get_journey(journey_id)
+
+    if not journey:
+        return []
+
+    work_selection = journey.get("work_selection", {})
+
+    if not isinstance(work_selection, dict):
+        return []
+
+    work_ids = work_selection.get("work_ids", [])
+
+    if not isinstance(work_ids, list):
+        return []
+
+    return [
+        str(work_id).strip()
+        for work_id in work_ids
+        if str(work_id).strip()
+    ]
+
+
+def movie_club_get_watch_progress(member_id: int | str, journey_id: str):
+    """
+    Return confirmed watch progress for one member and journey.
+
+    This foundation does not write progress. It only reads the
+    progress structure currently present in the Movie Club JSON.
+    """
+    member_key = str(member_id or "").strip()
+    journey_key = str(journey_id or "").strip()
+
+    if not member_key or not journey_key:
+        return {
+            "current_work_id": None,
+            "completed_work_ids": [],
+            "in_progress": {},
+            "updated_at": None,
+        }
+
+    watch_progress = movie_club_data.get("watch_progress", {})
+
+    if not isinstance(watch_progress, dict):
+        return {
+            "current_work_id": None,
+            "completed_work_ids": [],
+            "in_progress": {},
+            "updated_at": None,
+        }
+
+    members = watch_progress.get("members", {})
+
+    if not isinstance(members, dict):
+        members = {}
+
+    member_data = members.get(member_key, {})
+
+    if not isinstance(member_data, dict):
+        member_data = {}
+
+    journey_data = member_data.get(journey_key, {})
+
+    if not isinstance(journey_data, dict):
+        journey_data = {}
+
+    return {
+        "current_work_id": journey_data.get("current_work_id"),
+        "completed_work_ids": list(
+            journey_data.get("completed_work_ids", [])
+        )
+        if isinstance(journey_data.get("completed_work_ids", []), list)
+        else [],
+        "in_progress": dict(
+            journey_data.get("in_progress", {})
+        )
+        if isinstance(journey_data.get("in_progress", {}), dict)
+        else {},
+        "updated_at": journey_data.get("updated_at"),
+    }
+
+
+def movie_club_validation_status():
+    """Return the Movie Club dataset validation section."""
+    validation = movie_club_data.get("validation", {})
+
+    return validation if isinstance(validation, dict) else {}
+
+
+# ==============================================================
+
 # ---------- Postgres KV (JSON) helpers ----------
 db_pool: asyncpg.Pool | None = None
 
@@ -512,7 +769,548 @@ async def _db_set(key: str, value: dict):
             VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
-        
+
+# ================== Fergie Movie Club Persistence ==================
+
+MOVIE_CLUB_PROGRESS_KEY_PREFIX = "movie_club_progress:"
+
+
+def _movie_club_progress_key(member_id: int | str, journey_id: str) -> str:
+    """Return the isolated Postgres KV key for one member/journey pair."""
+    member_key = str(member_id or "").strip()
+    journey_key = str(journey_id or "").strip()
+
+    return (
+        f"{MOVIE_CLUB_PROGRESS_KEY_PREFIX}"
+        f"{member_key}:{journey_key}"
+    )
+
+
+def _movie_club_default_progress() -> dict:
+    """Return a clean Movie Club progress document."""
+    return {
+        "current_work_id": None,
+        "completed_work_ids": [],
+        "in_progress": {},
+        "updated_at": None,
+    }
+
+
+async def movie_club_load_progress(
+    member_id: int | str,
+    journey_id: str,
+) -> dict:
+    """
+    Load persistent Movie Club progress for one member and journey.
+
+    Database storage is isolated to its own KV key and does not touch
+    existing Fergie data, DJ popularity, reminders, memories, etc.
+    """
+    member_key = str(member_id or "").strip()
+    journey_key = str(journey_id or "").strip()
+
+    if not member_key or not journey_key:
+        return _movie_club_default_progress()
+
+    key = _movie_club_progress_key(member_key, journey_key)
+
+    try:
+        data = await _db_get(key)
+    except Exception as e:
+        print(
+            "MOVIE CLUB PROGRESS LOAD ERROR ❌ "
+            f"member={member_key} journey={journey_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        data = None
+
+    if not isinstance(data, dict):
+        return _movie_club_default_progress()
+
+    completed = data.get("completed_work_ids", [])
+    if not isinstance(completed, list):
+        completed = []
+
+    in_progress = data.get("in_progress", {})
+    if not isinstance(in_progress, dict):
+        in_progress = {}
+
+    return {
+        "current_work_id": data.get("current_work_id"),
+        "completed_work_ids": [
+            str(work_id).strip()
+            for work_id in completed
+            if str(work_id).strip()
+        ],
+        "in_progress": in_progress,
+        "updated_at": data.get("updated_at"),
+    }
+
+
+async def movie_club_save_progress(
+    member_id: int | str,
+    journey_id: str,
+    progress: dict,
+) -> bool:
+    """
+    Persist Movie Club progress for one member and journey.
+
+    Only the Movie Club progress KV key is written.
+    """
+    member_key = str(member_id or "").strip()
+    journey_key = str(journey_id or "").strip()
+
+    if not member_key or not journey_key:
+        return False
+
+    if not isinstance(progress, dict):
+        return False
+
+    completed = progress.get("completed_work_ids", [])
+    if not isinstance(completed, list):
+        completed = []
+
+    # Preserve order while removing duplicate work IDs.
+    seen = set()
+    normalized_completed = []
+
+    for work_id in completed:
+        work_key = str(work_id or "").strip()
+
+        if not work_key or work_key in seen:
+            continue
+
+        seen.add(work_key)
+        normalized_completed.append(work_key)
+
+    in_progress = progress.get("in_progress", {})
+    if not isinstance(in_progress, dict):
+        in_progress = {}
+
+    payload = {
+        "current_work_id": (
+            str(progress.get("current_work_id")).strip()
+            if progress.get("current_work_id") is not None
+            and str(progress.get("current_work_id")).strip()
+            else None
+        ),
+        "completed_work_ids": normalized_completed,
+        "in_progress": in_progress,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        await _db_set(
+            _movie_club_progress_key(member_key, journey_key),
+            payload,
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            "MOVIE CLUB PROGRESS SAVE ERROR ❌ "
+            f"member={member_key} journey={journey_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        return False
+
+
+async def movie_club_set_current_work(
+    member_id: int | str,
+    journey_id: str,
+    work_id: str | None,
+    in_progress: dict | None = None,
+) -> bool:
+    """Set the member's currently active Movie Club work."""
+    progress = await movie_club_load_progress(
+        member_id,
+        journey_id,
+    )
+
+    progress["current_work_id"] = (
+        str(work_id).strip()
+        if work_id is not None and str(work_id).strip()
+        else None
+    )
+
+    if in_progress is not None:
+        progress["in_progress"] = (
+            dict(in_progress)
+            if isinstance(in_progress, dict)
+            else {}
+        )
+
+    return await movie_club_save_progress(
+        member_id,
+        journey_id,
+        progress,
+    )
+
+
+async def movie_club_mark_work_complete(
+    member_id: int | str,
+    journey_id: str,
+    work_id: str,
+) -> bool:
+    """
+    Mark one Movie Club work complete.
+
+    Completion is explicit and confirmed; nothing is inferred from
+    time, conversation, or a recommendation.
+    """
+    work_key = str(work_id or "").strip()
+
+    if not work_key:
+        return False
+
+    progress = await movie_club_load_progress(
+        member_id,
+        journey_id,
+    )
+
+    completed = progress.get("completed_work_ids", [])
+
+    if work_key not in completed:
+        completed.append(work_key)
+
+    progress["completed_work_ids"] = completed
+
+    if progress.get("current_work_id") == work_key:
+        progress["current_work_id"] = None
+
+    progress["in_progress"] = {}
+
+    return await movie_club_save_progress(
+        member_id,
+        journey_id,
+        progress,
+    )
+
+
+# ==============================================================
+
+# ================== Fergie Movie Club Guidance Engine ==================
+
+def movie_club_get_confirmed_completed_ids(progress: dict) -> list[str]:
+    """Return normalized confirmed completion IDs."""
+    if not isinstance(progress, dict):
+        return []
+
+    completed = progress.get("completed_work_ids", [])
+
+    if not isinstance(completed, list):
+        return []
+
+    return list(dict.fromkeys(
+        str(work_id).strip()
+        for work_id in completed
+        if str(work_id).strip()
+    ))
+
+
+def movie_club_get_ordered_path(journey_id: str) -> list[str]:
+    """
+    Return the safest explicit ordered path for a journey.
+
+    Star Wars has a dedicated post-ROTJ path in the source JSON.
+    Other journeys use their explicit work_selection.work_ids path.
+    """
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        return []
+
+    journey_key = str(journey_id or "").strip()
+
+    if journey_key == "star_wars":
+        post_rotj_path = journey.get("recommended_post_rotj_path", [])
+
+        if isinstance(post_rotj_path, list) and post_rotj_path:
+            return [
+                str(work_id).strip()
+                for work_id in post_rotj_path
+                if str(work_id).strip()
+            ]
+
+    return movie_club_get_journey_work_ids(journey_id)
+
+
+def movie_club_get_next_entry_from_progress(
+    journey_id: str,
+    progress: dict,
+) -> dict:
+    """
+    Determine the next confirmed-safe Movie Club entry.
+
+    This function NEVER assumes a work was watched.
+    It only advances past explicitly completed work IDs.
+    """
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        return {
+            "status": "unknown_journey",
+            "journey_id": journey_id,
+            "next_work_id": None,
+            "next_work": None,
+            "completed_work_ids": [],
+        }
+
+    completed = set(
+        movie_club_get_confirmed_completed_ids(progress)
+    )
+
+    path = movie_club_get_ordered_path(journey_id)
+
+    if not path:
+        return {
+            "status": "no_path",
+            "journey_id": journey_id,
+            "next_work_id": None,
+            "next_work": None,
+            "completed_work_ids": sorted(completed),
+        }
+
+    for work_id in path:
+        if work_id in completed:
+            continue
+
+        work = movie_club_get_work(work_id)
+
+        if not isinstance(work, dict):
+            continue
+
+        return {
+            "status": "ready",
+            "journey_id": journey_id,
+            "next_work_id": work_id,
+            "next_work": work,
+            "completed_work_ids": sorted(completed),
+        }
+
+    return {
+        "status": "complete",
+        "journey_id": journey_id,
+        "next_work_id": None,
+        "next_work": None,
+        "completed_work_ids": sorted(completed),
+    }
+
+
+async def movie_club_get_next_entry(
+    member_id: int | str,
+    journey_id: str,
+) -> dict:
+    """Load confirmed persistent progress and calculate the next entry."""
+    progress = await movie_club_load_progress(
+        member_id,
+        journey_id,
+    )
+
+    result = movie_club_get_next_entry_from_progress(
+        journey_id,
+        progress,
+    )
+
+    result["progress"] = progress
+
+    return result
+
+
+def movie_club_build_guidance_context(
+    journey_id: str,
+    progress: dict,
+    next_result: dict,
+) -> dict:
+    """
+    Build a spoiler-safe context package for future Gemini responses.
+
+    This function supplies facts; Gemini will not be allowed to invent
+    relationships or future plot details.
+    """
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        journey = {}
+
+    next_work = next_result.get("next_work")
+
+    if not isinstance(next_work, dict):
+        next_work = None
+
+    completed_ids = movie_club_get_confirmed_completed_ids(
+        progress
+    )
+
+    completed_works = []
+
+    for work_id in completed_ids:
+        work = movie_club_get_work(work_id)
+
+        if isinstance(work, dict):
+            completed_works.append({
+                "work_id": work_id,
+                "title": work.get("title"),
+                "year": work.get("year"),
+                "media_type": work.get("media_type"),
+            })
+
+    guidance = movie_club_get_guidance()
+
+    next_entry_guidance = guidance.get(
+        "next_entry",
+        {}
+    ) if isinstance(guidance, dict) else {}
+
+    spoiler_guidance = guidance.get(
+        "spoiler_safe_tidbit",
+        {}
+    ) if isinstance(guidance, dict) else {}
+
+    lore_guidance = guidance.get(
+        "lore_connection",
+        {}
+    ) if isinstance(guidance, dict) else {}
+
+    return {
+        "journey_id": journey_id,
+        "journey_name": journey.get(
+            "name",
+            journey_id,
+        ),
+        "journey_status": journey.get("status"),
+        "current_work_id": progress.get(
+            "current_work_id"
+        ),
+        "completed_work_ids": completed_ids,
+        "completed_works": completed_works,
+        "next_work": (
+            {
+                "work_id": next_result.get("next_work_id"),
+                "title": next_work.get("title"),
+                "year": next_work.get("year"),
+                "media_type": next_work.get("media_type"),
+                "subtype": next_work.get("subtype"),
+                "journey": next_work.get("journey"),
+                "arc": next_work.get("arc"),
+            }
+            if next_work
+            else None
+        ),
+        "next_status": next_result.get("status"),
+        "guidance": {
+            "next_entry": next_entry_guidance,
+            "spoiler_safe_tidbit": spoiler_guidance,
+            "lore_connection": lore_guidance,
+        },
+        "spoiler_policy": "none unless explicitly requested",
+    }
+
+
+def movie_club_spoiler_safe_reason(
+    journey_id: str,
+    next_work: dict | None,
+) -> str:
+    """
+    Return a short factual reason for continuing without revealing
+    future plot events.
+
+    This is intentionally conservative. Gemini can later turn this
+    into Fergie's voice using the guidance contract.
+    """
+    if not isinstance(next_work, dict):
+        return ""
+
+    title = str(
+        next_work.get("title") or "the next entry"
+    ).strip()
+
+    media_type = str(
+        next_work.get("media_type") or ""
+    ).strip().lower()
+
+    arc = str(
+        next_work.get("arc") or ""
+    ).strip()
+
+    if journey_id == "star_wars":
+        if arc:
+            return (
+                f"{title} is the next confirmed step in the "
+                f"{arc.replace('_', ' ')} portion of the journey."
+            )
+
+        if media_type == "series":
+            return (
+                f"{title} is the next confirmed entry in the "
+                "Star Wars journey."
+            )
+
+        return (
+            f"{title} is the next confirmed step in the "
+            "Star Wars journey."
+        )
+
+    if arc:
+        return (
+            f"{title} is the next confirmed entry in the "
+            f"{arc.replace('_', ' ')} portion of this journey."
+        )
+
+    return (
+        f"{title} is the next confirmed entry in this journey."
+    )
+
+
+def movie_club_guidance_status() -> dict:
+    """Return the active guidance-engine configuration."""
+    guidance = movie_club_get_guidance()
+
+    if not isinstance(guidance, dict):
+        return {
+            "next_entry_enabled": False,
+            "spoiler_safe_tidbit_enabled": False,
+            "lore_connection_enabled": False,
+            "engine_version": None,
+        }
+
+    next_entry = guidance.get(
+        "next_entry",
+        {}
+    )
+    spoiler_safe = guidance.get(
+        "spoiler_safe_tidbit",
+        {}
+    )
+    lore_connection = guidance.get(
+        "lore_connection",
+        {}
+    )
+
+    return {
+        "next_entry_enabled": bool(
+            isinstance(next_entry, dict)
+            and next_entry.get("enabled")
+        ),
+        "spoiler_safe_tidbit_enabled": bool(
+            isinstance(spoiler_safe, dict)
+            and spoiler_safe.get("enabled")
+        ),
+        "lore_connection_enabled": bool(
+            isinstance(lore_connection, dict)
+            and lore_connection.get("enabled")
+        ),
+        "engine_version": (
+            next_entry.get("engine_version")
+            if isinstance(next_entry, dict)
+            else None
+        ),
+    }
+
+
+# ==============================================================
+
 # ================== Fergie Birthday ==================
 
 async def maybe_post_fergie_birthday():
@@ -8151,6 +8949,487 @@ async def djcrate(ctx, page: int = 1):
         )
 
 
+# ================== Fergie Movie Club Commands ==================
+
+MOVIE_CLUB_DEFAULT_JOURNEY = "star_wars"
+
+
+def movie_club_get_available_journeys():
+    """Return journeys that are currently usable by the Movie Club."""
+    journeys = movie_club_data.get("journeys", {})
+
+    if not isinstance(journeys, dict):
+        return []
+
+    available = []
+
+    for journey_id, journey in journeys.items():
+        if not isinstance(journey, dict):
+            continue
+
+        journey_key = str(journey_id).strip()
+
+        if not journey_key:
+            continue
+
+        available.append({
+            "journey_id": journey_key,
+            "name": journey.get("name", journey_key),
+            "status": journey.get("status", "unknown"),
+            "work_count": journey.get("work_count"),
+        })
+
+    return available
+
+
+def movie_club_get_current_work(progress: dict):
+    """Return the explicitly tracked current work, if valid."""
+    if not isinstance(progress, dict):
+        return None
+
+    current_work_id = str(
+        progress.get("current_work_id") or ""
+    ).strip()
+
+    if not current_work_id:
+        return None
+
+    return movie_club_get_work(current_work_id)
+
+
+async def movie_club_generate_gemini_explanation(
+    journey_id: str,
+    progress: dict,
+    next_result: dict,
+) -> str:
+    """
+    Generate the short Movie Club explanation using the JSON guidance contract.
+
+    Gemini receives only source-backed Movie Club facts and is explicitly
+    prohibited from inventing lore or spoilers.
+    """
+    if not GEMINI_KEY:
+        return ""
+
+    context = movie_club_build_guidance_context(
+        journey_id,
+        progress,
+        next_result,
+    )
+
+    current_work = movie_club_get_current_work(progress)
+    next_work = next_result.get("next_work")
+
+    prompt = f"""
+You are Fergie, helping a member with Movie Club.
+
+Use ONLY the Movie Club source data supplied below.
+
+MOVIE CLUB CONTEXT:
+{json.dumps(context, ensure_ascii=False, indent=2)}
+
+CURRENT CONFIRMED WORK:
+{json.dumps(current_work, ensure_ascii=False, indent=2) if current_work else "None explicitly tracked"}
+
+NEXT CONFIRMED WORK:
+{json.dumps(next_work, ensure_ascii=False, indent=2) if next_work else "None"}
+
+SOURCE-BACKED SPOILER-SAFE REASON:
+{movie_club_spoiler_safe_reason(journey_id, next_work)}
+
+REQUIRED RESPONSE:
+- Recommend the next confirmed entry in ONE concise sentence.
+- Explain why it matters in 1-2 short spoiler-free sentences.
+- Natural Fergie voice: conversational, witty, not NPC-like.
+- Spoiler level MUST be NONE.
+- Do not reveal deaths, endings, major reveals, surprise appearances,
+  or unconfirmed future events.
+- Never invent a lore connection.
+- Never claim the member watched something unless it appears in
+  completed_work_ids.
+- If the source data does not define a connection, say so briefly.
+- Do not give a long recap.
+
+Return only the response text.
+""".strip()
+
+    try:
+        answer = await ask_gemini(prompt)
+
+        if not answer:
+            return ""
+
+        return answer.strip()[:1900]
+
+    except Exception as e:
+        print(
+            "MOVIE CLUB GEMINI ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return ""
+
+
+@bot.group(
+    name="movieclub",
+    invoke_without_command=True,
+    help=(
+        "Movie Club: show active journeys and available Movie Club commands."
+    ),
+)
+async def movieclub(ctx):
+    """Show Movie Club status and available commands."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    journeys = movie_club_get_available_journeys()
+
+    lines = []
+
+    for journey in journeys:
+        status = str(journey.get("status") or "unknown")
+
+        if status == "active":
+            marker = "🟢"
+        elif status == "candidate_for_user_approval":
+            marker = "🟡"
+        else:
+            marker = "⚪"
+
+        work_count = journey.get("work_count")
+
+        if work_count:
+            lines.append(
+                f"{marker} **{journey['name']}** "
+                f"`{journey['journey_id']}` • {status} • {work_count} works"
+            )
+        else:
+            lines.append(
+                f"{marker} **{journey['name']}** "
+                f"`{journey['journey_id']}` • {status}"
+            )
+
+    embed = discord.Embed(
+        title="🎬 Fergie's Movie Club",
+        description=(
+            "finally, something useful besides your Spotify links. 🙄\n\n"
+            + ("\n".join(lines) if lines else "No Movie Club journeys loaded.")
+        ),
+        colour=discord.Colour.blurple(),
+    )
+
+    embed.add_field(
+        name="Commands",
+        value=(
+            "`!movieclub next [journey]` — Get your next confirmed entry\n"
+            "`!movieclub progress [journey]` — Show confirmed watch progress\n"
+            "`!movieclub watched <work_id> [journey]` — Confirm that you watched something"
+        ),
+        inline=False,
+    )
+
+    embed.set_footer(
+        text="Progress is only recorded when you explicitly confirm it."
+    )
+
+    await ctx.reply(
+        embed=embed,
+        mention_author=False,
+    )
+
+
+@movieclub.command(
+    name="next",
+    help=(
+        "Show the next confirmed Movie Club entry and give a short "
+        "spoiler-safe Fergie explanation."
+    ),
+)
+async def movieclub_next(
+    ctx,
+    journey_id: str = MOVIE_CLUB_DEFAULT_JOURNEY,
+):
+    journey_id = str(journey_id or "").strip().lower()
+
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        await ctx.reply(
+            f"❌ I don't have a Movie Club journey called `{journey_id}`.",
+            mention_author=False,
+        )
+        return
+
+    if journey.get("status") != "active":
+        status = str(journey.get("status") or "unknown")
+
+        await ctx.reply(
+            f"🟡 `{journey_id}` isn't active yet. "
+            f"Current status: **{status}**.",
+            mention_author=False,
+        )
+        return
+
+    result = await movie_club_get_next_entry(
+        ctx.author.id,
+        journey_id,
+    )
+
+    status = result.get("status")
+
+    if status == "complete":
+        await ctx.reply(
+            f"🎬 you've completed the currently defined **{journey.get('name', journey_id)}** path. "
+            "i'm not inventing another movie just to keep myself busy. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if status != "ready":
+        await ctx.reply(
+            f"❌ I couldn't determine the next entry for `{journey_id}`.",
+            mention_author=False,
+        )
+        return
+
+    next_work = result.get("next_work") or {}
+
+    title = str(
+        next_work.get("title") or "Unknown title"
+    ).strip()
+
+    year = next_work.get("year")
+    media_type = str(
+        next_work.get("media_type") or ""
+    ).strip()
+
+    reason = movie_club_spoiler_safe_reason(
+        journey_id,
+        next_work,
+    )
+
+    gemini_text = await movie_club_generate_gemini_explanation(
+        journey_id,
+        result.get("progress", {}),
+        result,
+    )
+
+    embed = discord.Embed(
+        title="🍿 Your Next Movie Club Entry",
+        description=(
+            f"**{title}**"
+            + (f" ({year})" if year else "")
+        ),
+        colour=discord.Colour.blurple(),
+    )
+
+    if media_type:
+        embed.add_field(
+            name="Type",
+            value=media_type,
+            inline=True,
+        )
+
+    embed.add_field(
+        name="Why this one",
+        value=(
+            gemini_text
+            if gemini_text
+            else reason
+            or "It's the next confirmed step in your journey."
+        )[:1024],
+        inline=False,
+    )
+
+    embed.set_footer(
+        text="No spoilers unless you explicitly ask for them."
+    )
+
+    await ctx.reply(
+        embed=embed,
+        mention_author=False,
+    )
+
+
+@movieclub.command(
+    name="progress",
+    help="Show your confirmed Movie Club progress.",
+)
+async def movieclub_progress(
+    ctx,
+    journey_id: str = MOVIE_CLUB_DEFAULT_JOURNEY,
+):
+    journey_id = str(journey_id or "").strip().lower()
+
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        await ctx.reply(
+            f"❌ I don't have a Movie Club journey called `{journey_id}`.",
+            mention_author=False,
+        )
+        return
+
+    progress = await movie_club_load_progress(
+        ctx.author.id,
+        journey_id,
+    )
+
+    completed_ids = movie_club_get_confirmed_completed_ids(
+        progress
+    )
+
+    completed_titles = []
+
+    for work_id in completed_ids:
+        work = movie_club_get_work(work_id)
+
+        if isinstance(work, dict):
+            title = str(
+                work.get("title") or work_id
+            ).strip()
+            completed_titles.append(title)
+
+    next_result = movie_club_get_next_entry_from_progress(
+        journey_id,
+        progress,
+    )
+
+    next_work = next_result.get("next_work")
+
+    description = (
+        f"**Journey:** {journey.get('name', journey_id)}\n"
+        f"**Confirmed completed:** {len(completed_ids)}"
+    )
+
+    if completed_titles:
+        description += (
+            "\n\n"
+            + "\n".join(
+                f"✅ {title}"
+                for title in completed_titles[-20:]
+            )
+        )
+
+    if next_work:
+        description += (
+            "\n\n"
+            f"**Next:** {next_work.get('title', 'Unknown')}"
+        )
+
+    embed = discord.Embed(
+        title="📚 Your Movie Club Progress",
+        description=description[:4000],
+        colour=discord.Colour.blurple(),
+    )
+
+    embed.set_footer(
+        text="Only explicitly confirmed watches count."
+    )
+
+    await ctx.reply(
+        embed=embed,
+        mention_author=False,
+    )
+
+
+@movieclub.command(
+    name="watched",
+    help=(
+        "Confirm that you watched a Movie Club work. "
+        "Usage: !movieclub watched <work_id> [journey]"
+    ),
+)
+async def movieclub_watched(
+    ctx,
+    work_id: str = "",
+    journey_id: str = MOVIE_CLUB_DEFAULT_JOURNEY,
+):
+    work_id = str(work_id or "").strip()
+    journey_id = str(journey_id or "").strip().lower()
+
+    if not work_id:
+        await ctx.reply(
+            "usage: `!movieclub watched <work_id> [journey]`",
+            mention_author=False,
+        )
+        return
+
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        await ctx.reply(
+            f"❌ I don't have a Movie Club journey called `{journey_id}`.",
+            mention_author=False,
+        )
+        return
+
+    if journey.get("status") != "active":
+        await ctx.reply(
+            f"🟡 `{journey_id}` isn't active yet.",
+            mention_author=False,
+        )
+        return
+
+    work = movie_club_get_work(work_id)
+
+    if not isinstance(work, dict):
+        await ctx.reply(
+            f"❌ I don't recognize Movie Club work ID `{work_id}`.",
+            mention_author=False,
+        )
+        return
+
+    work_journey = str(
+        work.get("journey") or ""
+    ).strip()
+
+    if work_journey and work_journey != journey_id:
+        await ctx.reply(
+            f"❌ `{work_id}` belongs to `{work_journey}`, not `{journey_id}`.",
+            mention_author=False,
+        )
+        return
+
+    progress = await movie_club_load_progress(
+        ctx.author.id,
+        journey_id,
+    )
+
+    completed_ids = movie_club_get_confirmed_completed_ids(
+        progress
+    )
+
+    if work_id in completed_ids:
+        await ctx.reply(
+            f"you already confirmed **{work.get('title', work_id)}**. "
+            "i'm not counting it twice. 🙄",
+            mention_author=False,
+        )
+        return
+
+    saved = await movie_club_mark_work_complete(
+        ctx.author.id,
+        journey_id,
+        work_id,
+    )
+
+    if not saved:
+        await ctx.reply(
+            "❌ I couldn't save that Movie Club progress. "
+            "Your watch history was **not** confirmed.",
+            mention_author=False,
+        )
+        return
+
+    await ctx.reply(
+        f"✅ logged **{work.get('title', work_id)}** as watched.\n"
+        f"Run `!movieclub next {journey_id}` when you're ready for the next one.",
+        mention_author=False,
+    )
+
+
+# ==============================================================
+
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
 
@@ -8225,7 +9504,20 @@ async def halp(ctx, *, command: str | None = None):
         ),
         inline=False
     )
-
+    e.add_field(
+        name="🎬 Movie Club",
+        value=(
+            "`!movieclub` — Show active Movie Club journeys and commands\n"
+            "`!movieclub next [journey]` — Show your next confirmed entry\n"
+            "`!movieclub progress [journey]` — Show your confirmed watch progress\n"
+            "`!movieclub watched <work_id> [journey]` — Confirm a movie/show you watched\n"
+            "• Movie Club progress is saved per member and journey\n"
+            "• Recommendations use confirmed progress only and stay spoiler-safe\n"
+            "• Horror Canon remains unavailable until its approval/normalization step is complete"
+        ),
+        inline=False,
+    )
+    
     e.add_field(
         name="🎧 Fergie 5.0 DJ & Spotify",
         value=(
@@ -8748,7 +10040,24 @@ async def selftest(ctx, mode: str = "fast"):
         "_fergie_aux_week_summary",
         "_fergie_aux_leaderboard_message",
         "_fergie_post_weekly_aux_leaderboard",
-
+        
+        # Movie Club
+        "_load_movie_club_data",
+        "movie_club_get_work",
+        "movie_club_get_journey",
+        "movie_club_get_franchise",
+        "movie_club_get_guidance",
+        "movie_club_get_journey_work_ids",
+        "movie_club_get_confirmed_completed_ids",
+        "movie_club_get_ordered_path",
+        "movie_club_get_next_entry_from_progress",
+        "movie_club_build_guidance_context",
+        "movie_club_spoiler_safe_reason",
+        "movie_club_guidance_status",
+        "movie_club_get_available_journeys",
+        "movie_club_get_current_work",
+        "movie_club_generate_gemini_explanation",
+        
         # GIF helper
         "fetch_gif",
     ]
@@ -8758,11 +10067,111 @@ async def selftest(ctx, mode: str = "fast"):
         record("Functions", name, passed, detail)
 
     # ==========================================================
+    # MOVIE CLUB — READ-ONLY ENGINE CHECK
+    # ==========================================================
+    movie_club_ok = True
+    movie_club_detail = ""
+
+    try:
+        if movie_club_load_error:
+            movie_club_ok = False
+            movie_club_detail = f"JSON load error: {movie_club_load_error}"
+        elif not isinstance(movie_club_data, dict):
+            movie_club_ok = False
+            movie_club_detail = "Movie Club data is not a dict"
+        else:
+            required_sections = {
+                "works",
+                "journeys",
+                "franchises",
+                "watch_progress",
+                "fergie_guidance",
+                "validation",
+            }
+
+            missing_sections = sorted(
+                section
+                for section in required_sections
+                if section not in movie_club_data
+            )
+
+            if missing_sections:
+                movie_club_ok = False
+                movie_club_detail = (
+                    "missing JSON sections: "
+                    + ", ".join(missing_sections)
+                )
+            else:
+                journey_id = MOVIE_CLUB_DEFAULT_JOURNEY
+                journey = movie_club_get_journey(journey_id)
+
+                if not isinstance(journey, dict):
+                    movie_club_ok = False
+                    movie_club_detail = (
+                        f"default journey `{journey_id}` missing"
+                    )
+                elif journey.get("status") != "active":
+                    movie_club_ok = False
+                    movie_club_detail = (
+                        f"default journey `{journey_id}` is not active: "
+                        f"{journey.get('status')}"
+                    )
+                else:
+                    progress = _movie_club_default_progress()
+                    next_result = movie_club_get_next_entry_from_progress(
+                        journey_id,
+                        progress,
+                    )
+
+                    if next_result.get("status") != "ready":
+                        movie_club_ok = False
+                        movie_club_detail = (
+                            "next-entry engine did not return ready: "
+                            f"{next_result.get('status')}"
+                        )
+                    elif not next_result.get("next_work_id"):
+                        movie_club_ok = False
+                        movie_club_detail = (
+                            "next-entry engine returned no work ID"
+                        )
+                    elif not isinstance(next_result.get("next_work"), dict):
+                        movie_club_ok = False
+                        movie_club_detail = (
+                            "next-entry engine returned invalid work data"
+                        )
+                    else:
+                        guidance_status = movie_club_guidance_status()
+
+                        if not isinstance(guidance_status, dict):
+                            movie_club_ok = False
+                            movie_club_detail = (
+                                "guidance status returned invalid data"
+                            )
+                        else:
+                            movie_club_detail = (
+                                f"JSON loaded • works={len(movie_club_data.get('works', []))} "
+                                f"• journeys={len(movie_club_data.get('journeys', {}))} "
+                                f"• next={next_result.get('next_work_id')}"
+                            )
+
+    except Exception as e:
+        movie_club_ok = False
+        movie_club_detail = f"{type(e).__name__}: {e}"
+
+    record(
+        "Movie Club",
+        "Movie Club engine",
+        movie_club_ok,
+        movie_club_detail,
+    )
+
+    # ==========================================================
     # COMMAND REGISTRATION
     # ==========================================================
 
     command_checks = [
         "halp",
+        "movieclub",
         "version",
         "art",
         "resetart",
