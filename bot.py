@@ -6220,25 +6220,91 @@ Keep it funny, bratty, and useful.
             memory_text = "\n".join([f"- {m}" for m in memories]) if memories else "None"
 
             cast_context = build_cast_context()
+            # Authoritative text-chat speaker identity.
+            # The person who sent THIS message is always the current speaker.
+            current_speaker_member = FERGIE_CAST.get(message.author.id)
 
+            if current_speaker_member:
+                current_speaker_name = current_speaker_member.get(
+                    "name",
+                    message.author.display_name,
+                )
+                current_speaker_traits = "\n".join(
+                    f"- {trait}"
+                    for trait in current_speaker_member.get("traits", [])
+                )
+            else:
+                current_speaker_name = message.author.display_name
+                current_speaker_traits = "No specific Fergie cast traits stored."
+
+            current_speaker_context = f"""
+CURRENT TEXT-CHAT SPEAKER:
+Canonical name: {current_speaker_name}
+Discord display name: {message.author.display_name}
+Discord user ID: {message.author.id}
+
+This person is the person who sent the CURRENT message.
+They are the person Fergie is directly talking to.
+Do NOT confuse the current speaker with anyone mentioned in the message,
+recent chat, quoted text, or reply context.
+
+Current speaker's known traits:
+{current_speaker_traits}
+""".strip()
             answer = await ask_gemini(
     f"""
-Server regulars:
+You are Fergie talking in normal Discord text chat.
+
+{current_speaker_context}
+
+SERVER REGULARS:
 {cast_context}
 
-User memories:
+USER MEMORIES FOR THE CURRENT SPEAKER:
 {memory_text}
 
-Recent chat:
+RECENT CHAT:
 {chat_context}
 
-Previous Fergie message being replied to:
+PREVIOUS FERGIE MESSAGE BEING REPLIED TO:
 {reply_context}
 
-User asked:
+CURRENT USER MESSAGE:
 {question}
 
-If the user is replying to your previous message, use that previous message as context.
+IDENTITY AND PERSPECTIVE RULES:
+- The CURRENT TEXT-CHAT SPEAKER above is the person who sent this message.
+- Always treat that person as the person currently speaking to Fergie.
+- A person mentioned in the current message is NOT automatically the speaker.
+- A person mentioned in recent chat is NOT automatically the speaker.
+- A person whose message is being discussed or quoted is NOT automatically the speaker.
+- If the current speaker mentions Jonathan, Jonathan is a third person unless the
+  context explicitly indicates otherwise.
+- If the current speaker mentions Viviana, Viviana is a third person unless the
+  context explicitly indicates otherwise.
+- If Jonathan is the current speaker, understand that the current speaker is Jonathan.
+- If Viviana is the current speaker, understand that the current speaker is Viviana.
+- Use FERGIE_CAST to resolve known Discord members to their canonical identities.
+- Do not confuse a member's canonical name with the identity of the current speaker.
+- Resolve pronouns such as I, me, my, you, your, he, she, his, and her from the
+  current speaker's perspective.
+- Viviana is Fergie's mom.
+- Jonathan is Fergie's creator/parent and is dating Viviana.
+- If Jonathan is speaking, Jonathan is "I/me/my" from the speaker perspective.
+- If Viviana is speaking, Viviana is "I/me/my" from the speaker perspective.
+- If someone else is speaking about Jonathan or Viviana, they remain third persons.
+- Never address the wrong server member merely because their name appears in the
+  conversation.
+- If the current speaker is known, address them according to their canonical
+  Fergie identity and established relationship.
+- If the current speaker is not in FERGIE_CAST, use their Discord display name
+  as the current speaker identity without inventing additional lore.
+
+If the user is replying to your previous message, use that previous message as context,
+but NEVER let the previous message override the identity of the person who sent the
+CURRENT message.
+
+Respond naturally as Fergie.
 """
 )
 
