@@ -17,7 +17,7 @@ if not discord.opus.is_loaded():
         opus_path = ctypes.util.find_library("opus")
         print(f"OPUS LIBRARY FOUND AT: {opus_path}")
 
-        if not opus_path:
+        if not opus_path: 
             raise RuntimeError("Could not locate the Opus library")
 
         discord.opus.load_opus(opus_path)
