@@ -9504,7 +9504,20 @@ async def halp(ctx, *, command: str | None = None):
         ),
         inline=False
     )
-
+    e.add_field(
+        name="🎬 Movie Club",
+        value=(
+            "`!movieclub` — Show active Movie Club journeys and commands\n"
+            "`!movieclub next [journey]` — Show your next confirmed entry\n"
+            "`!movieclub progress [journey]` — Show your confirmed watch progress\n"
+            "`!movieclub watched <work_id> [journey]` — Confirm a movie/show you watched\n"
+            "• Movie Club progress is saved per member and journey\n"
+            "• Recommendations use confirmed progress only and stay spoiler-safe\n"
+            "• Horror Canon remains unavailable until its approval/normalization step is complete"
+        ),
+        inline=False,
+    )
+    
     e.add_field(
         name="🎧 Fergie 5.0 DJ & Spotify",
         value=(
@@ -10027,7 +10040,24 @@ async def selftest(ctx, mode: str = "fast"):
         "_fergie_aux_week_summary",
         "_fergie_aux_leaderboard_message",
         "_fergie_post_weekly_aux_leaderboard",
-
+        
+        # Movie Club
+        "_load_movie_club_data",
+        "movie_club_get_work",
+        "movie_club_get_journey",
+        "movie_club_get_franchise",
+        "movie_club_get_guidance",
+        "movie_club_get_journey_work_ids",
+        "movie_club_get_confirmed_completed_ids",
+        "movie_club_get_ordered_path",
+        "movie_club_get_next_entry_from_progress",
+        "movie_club_build_guidance_context",
+        "movie_club_spoiler_safe_reason",
+        "movie_club_guidance_status",
+        "movie_club_get_available_journeys",
+        "movie_club_get_current_work",
+        "movie_club_generate_gemini_explanation",
+        
         # GIF helper
         "fetch_gif",
     ]
@@ -10042,6 +10072,7 @@ async def selftest(ctx, mode: str = "fast"):
 
     command_checks = [
         "halp",
+        "movieclub",
         "version",
         "art",
         "resetart",
