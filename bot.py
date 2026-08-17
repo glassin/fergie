@@ -2235,11 +2235,19 @@ async def generate_fergie_image(prompt: str):
         names = ", ".join(name for name, _ in refs)
         parts.append({"text": (
             f"Create this requested image: {prompt.strip()}\n\n"
-            f"The attached reference image(s) show the established visual designs for: {names}. "
-            "Preserve each referenced character's recognizable face, hair, skin tone, body/build, glasses, "
-            "piercings, tattoos, and other defining visual features. Adapt clothing, pose, expression, lighting, "
-            "and setting only as the user's request requires. Do not merge character identities. "
-            "If more than one reference is attached, keep them as distinct people."
+f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for: {names}. "
+"Character identity is immutable. Each referenced character MUST remain the same character "
+"throughout the entire image and across EVERY PANEL of a multi-panel comic. "
+"Preserve that character's exact recognizable face, hair, skin tone, body/build, glasses, "
+"piercings, tattoos, and other defining sprite features. "
+"Do NOT swap, replace, merge, blend, duplicate, or transform one established character into another. "
+"If multiple established characters appear, keep each one as a separate, visually distinct person "
+"and match each person ONLY to their own attached reference. "
+"Aliases such as Papo/Miguel/Sancho, Chadwin/Edwin, Lobo/Pinche Lobo, "
+"Kurtie/Khurty, and Viv/Viviana refer to the SAME established character, not different characters. "
+"For multi-panel comics, character identity and defining sprite appearance MUST remain consistent "
+"from the first panel through the final panel. Clothing, pose, expression, action, lighting, "
+"and setting may change only when requested; identity-defining features must not."
         )})
         for name, path in refs:
             data = _fergie_load_visual_ref(path)
