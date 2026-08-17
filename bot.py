@@ -990,6 +990,327 @@ async def movie_club_mark_work_complete(
 
 # ==============================================================
 
+# ================== Fergie Movie Club Guidance Engine ==================
+
+def movie_club_get_confirmed_completed_ids(progress: dict) -> list[str]:
+    """Return normalized confirmed completion IDs."""
+    if not isinstance(progress, dict):
+        return []
+
+    completed = progress.get("completed_work_ids", [])
+
+    if not isinstance(completed, list):
+        return []
+
+    return list(dict.fromkeys(
+        str(work_id).strip()
+        for work_id in completed
+        if str(work_id).strip()
+    ))
+
+
+def movie_club_get_ordered_path(journey_id: str) -> list[str]:
+    """
+    Return the safest explicit ordered path for a journey.
+
+    Star Wars has a dedicated post-ROTJ path in the source JSON.
+    Other journeys use their explicit work_selection.work_ids path.
+    """
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        return []
+
+    journey_key = str(journey_id or "").strip()
+
+    if journey_key == "star_wars":
+        post_rotj_path = journey.get("recommended_post_rotj_path", [])
+
+        if isinstance(post_rotj_path, list) and post_rotj_path:
+            return [
+                str(work_id).strip()
+                for work_id in post_rotj_path
+                if str(work_id).strip()
+            ]
+
+    return movie_club_get_journey_work_ids(journey_id)
+
+
+def movie_club_get_next_entry_from_progress(
+    journey_id: str,
+    progress: dict,
+) -> dict:
+    """
+    Determine the next confirmed-safe Movie Club entry.
+
+    This function NEVER assumes a work was watched.
+    It only advances past explicitly completed work IDs.
+    """
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        return {
+            "status": "unknown_journey",
+            "journey_id": journey_id,
+            "next_work_id": None,
+            "next_work": None,
+            "completed_work_ids": [],
+        }
+
+    completed = set(
+        movie_club_get_confirmed_completed_ids(progress)
+    )
+
+    path = movie_club_get_ordered_path(journey_id)
+
+    if not path:
+        return {
+            "status": "no_path",
+            "journey_id": journey_id,
+            "next_work_id": None,
+            "next_work": None,
+            "completed_work_ids": sorted(completed),
+        }
+
+    for work_id in path:
+        if work_id in completed:
+            continue
+
+        work = movie_club_get_work(work_id)
+
+        if not isinstance(work, dict):
+            continue
+
+        return {
+            "status": "ready",
+            "journey_id": journey_id,
+            "next_work_id": work_id,
+            "next_work": work,
+            "completed_work_ids": sorted(completed),
+        }
+
+    return {
+        "status": "complete",
+        "journey_id": journey_id,
+        "next_work_id": None,
+        "next_work": None,
+        "completed_work_ids": sorted(completed),
+    }
+
+
+async def movie_club_get_next_entry(
+    member_id: int | str,
+    journey_id: str,
+) -> dict:
+    """Load confirmed persistent progress and calculate the next entry."""
+    progress = await movie_club_load_progress(
+        member_id,
+        journey_id,
+    )
+
+    result = movie_club_get_next_entry_from_progress(
+        journey_id,
+        progress,
+    )
+
+    result["progress"] = progress
+
+    return result
+
+
+def movie_club_build_guidance_context(
+    journey_id: str,
+    progress: dict,
+    next_result: dict,
+) -> dict:
+    """
+    Build a spoiler-safe context package for future Gemini responses.
+
+    This function supplies facts; Gemini will not be allowed to invent
+    relationships or future plot details.
+    """
+    journey = movie_club_get_journey(journey_id)
+
+    if not isinstance(journey, dict):
+        journey = {}
+
+    next_work = next_result.get("next_work")
+
+    if not isinstance(next_work, dict):
+        next_work = None
+
+    completed_ids = movie_club_get_confirmed_completed_ids(
+        progress
+    )
+
+    completed_works = []
+
+    for work_id in completed_ids:
+        work = movie_club_get_work(work_id)
+
+        if isinstance(work, dict):
+            completed_works.append({
+                "work_id": work_id,
+                "title": work.get("title"),
+                "year": work.get("year"),
+                "media_type": work.get("media_type"),
+            })
+
+    guidance = movie_club_get_guidance()
+
+    next_entry_guidance = guidance.get(
+        "next_entry",
+        {}
+    ) if isinstance(guidance, dict) else {}
+
+    spoiler_guidance = guidance.get(
+        "spoiler_safe_tidbit",
+        {}
+    ) if isinstance(guidance, dict) else {}
+
+    lore_guidance = guidance.get(
+        "lore_connection",
+        {}
+    ) if isinstance(guidance, dict) else {}
+
+    return {
+        "journey_id": journey_id,
+        "journey_name": journey.get(
+            "name",
+            journey_id,
+        ),
+        "journey_status": journey.get("status"),
+        "current_work_id": progress.get(
+            "current_work_id"
+        ),
+        "completed_work_ids": completed_ids,
+        "completed_works": completed_works,
+        "next_work": (
+            {
+                "work_id": next_result.get("next_work_id"),
+                "title": next_work.get("title"),
+                "year": next_work.get("year"),
+                "media_type": next_work.get("media_type"),
+                "subtype": next_work.get("subtype"),
+                "journey": next_work.get("journey"),
+                "arc": next_work.get("arc"),
+            }
+            if next_work
+            else None
+        ),
+        "next_status": next_result.get("status"),
+        "guidance": {
+            "next_entry": next_entry_guidance,
+            "spoiler_safe_tidbit": spoiler_guidance,
+            "lore_connection": lore_guidance,
+        },
+        "spoiler_policy": "none unless explicitly requested",
+    }
+
+
+def movie_club_spoiler_safe_reason(
+    journey_id: str,
+    next_work: dict | None,
+) -> str:
+    """
+    Return a short factual reason for continuing without revealing
+    future plot events.
+
+    This is intentionally conservative. Gemini can later turn this
+    into Fergie's voice using the guidance contract.
+    """
+    if not isinstance(next_work, dict):
+        return ""
+
+    title = str(
+        next_work.get("title") or "the next entry"
+    ).strip()
+
+    media_type = str(
+        next_work.get("media_type") or ""
+    ).strip().lower()
+
+    arc = str(
+        next_work.get("arc") or ""
+    ).strip()
+
+    if journey_id == "star_wars":
+        if arc:
+            return (
+                f"{title} is the next confirmed step in the "
+                f"{arc.replace('_', ' ')} portion of the journey."
+            )
+
+        if media_type == "series":
+            return (
+                f"{title} is the next confirmed entry in the "
+                "Star Wars journey."
+            )
+
+        return (
+            f"{title} is the next confirmed step in the "
+            "Star Wars journey."
+        )
+
+    if arc:
+        return (
+            f"{title} is the next confirmed entry in the "
+            f"{arc.replace('_', ' ')} portion of this journey."
+        )
+
+    return (
+        f"{title} is the next confirmed entry in this journey."
+    )
+
+
+def movie_club_guidance_status() -> dict:
+    """Return the active guidance-engine configuration."""
+    guidance = movie_club_get_guidance()
+
+    if not isinstance(guidance, dict):
+        return {
+            "next_entry_enabled": False,
+            "spoiler_safe_tidbit_enabled": False,
+            "lore_connection_enabled": False,
+            "engine_version": None,
+        }
+
+    next_entry = guidance.get(
+        "next_entry",
+        {}
+    )
+    spoiler_safe = guidance.get(
+        "spoiler_safe_tidbit",
+        {}
+    )
+    lore_connection = guidance.get(
+        "lore_connection",
+        {}
+    )
+
+    return {
+        "next_entry_enabled": bool(
+            isinstance(next_entry, dict)
+            and next_entry.get("enabled")
+        ),
+        "spoiler_safe_tidbit_enabled": bool(
+            isinstance(spoiler_safe, dict)
+            and spoiler_safe.get("enabled")
+        ),
+        "lore_connection_enabled": bool(
+            isinstance(lore_connection, dict)
+            and lore_connection.get("enabled")
+        ),
+        "engine_version": (
+            next_entry.get("engine_version")
+            if isinstance(next_entry, dict)
+            else None
+        ),
+    }
+
+
+# ==============================================================
+
 # ================== Fergie Birthday ==================
 
 async def maybe_post_fergie_birthday():
