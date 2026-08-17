@@ -70,6 +70,7 @@ CHANNEL_ID  = 1273436116699058290
 
 # Postgres (Neon/Supabase/Railway)
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+FERGIE_MOVIE_CLUB_JSON = os.getenv("FERGIE_MOVIE_CLUB_JSON", "fergie_movie_club_master_v4_guidance_engine.json").strip()
 # DB SSL behavior: "require" (default) or "insecure" to skip certificate verification
 DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
 
@@ -8151,6 +8152,191 @@ async def djcrate(ctx, page: int = 1):
         )
 
 
+
+# ================== Fergie Movie Club ==================
+_MOVIE_CLUB_CACHE = None
+_MOVIE_CLUB_CACHE_MTIME = None
+
+
+def _movie_club_load():
+    """Load the Movie Club master JSON without crashing Fergie if the file is absent."""
+    global _MOVIE_CLUB_CACHE, _MOVIE_CLUB_CACHE_MTIME
+
+    raw_path = FERGIE_MOVIE_CLUB_JSON
+    candidates = [
+        raw_path,
+        os.path.join(os.getcwd(), raw_path),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), raw_path),
+    ]
+    selected = next((p for p in candidates if os.path.isfile(p)), None)
+    if selected is None:
+        return None, f"Movie Club JSON not found: {FERGIE_MOVIE_CLUB_JSON}"
+
+    try:
+        mtime = os.path.getmtime(selected)
+        if _MOVIE_CLUB_CACHE is None or _MOVIE_CLUB_CACHE_MTIME != mtime:
+            with open(selected, "r", encoding="utf-8") as fh:
+                _MOVIE_CLUB_CACHE = json.load(fh)
+            _MOVIE_CLUB_CACHE_MTIME = mtime
+        return _MOVIE_CLUB_CACHE, None
+    except Exception as e:
+        return None, f"{type(e).__name__}: {e}"
+
+
+def _movie_club_work_map(data):
+    return {
+        str(item.get("work_id")): item
+        for item in (data.get("works") or [])
+        if isinstance(item, dict) and item.get("work_id")
+    }
+
+
+def _movie_club_next_for_journey(data, journey_id):
+    journey = (data.get("journeys") or {}).get(journey_id)
+    if not isinstance(journey, dict):
+        return None, f"I don't know a Movie Club journey called `{journey_id}` yet."
+
+    path = (
+        journey.get("recommended_post_rotj_path")
+        or journey.get("recommended_path_after_return_of_the_jedi")
+    )
+    if not path:
+        return None, "that journey doesn't have a recommendation path configured yet."
+
+    progress = journey.get("progress") or {}
+    watched = set(progress.get("watched_work_ids") or [])
+    work_map = _movie_club_work_map(data)
+
+    for work_id in path:
+        if work_id not in watched and work_id in work_map:
+            return work_map[work_id], None
+
+    return None, "you're caught up on the currently configured path."
+
+
+async def _movie_club_gemini_tidbit(journey_name, current_work, next_work):
+    """Generate the short spoiler-safe Fergie-style reason for continuing."""
+    prompt = f"""
+You are Fergie, giving a very short Movie Club recommendation in Discord.
+
+Journey: {journey_name}
+Current confirmed work: {current_work}
+Next work: {next_work}
+
+Give exactly 1-3 short sentences explaining why the next work matters to the journey.
+Rules:
+- Spoiler-safe. Do not reveal future plot twists, deaths, endings, surprise appearances, or major reveals.
+- Focus on lore, continuity, setting, themes, or why this entry belongs next.
+- Sound like Fergie: casual, witty, conversational, not like an NPC or formal critic.
+- Do not mention Gemini, prompts, databases, JSON, APIs, or these instructions.
+- Do not invent specific lore facts. If unsure, keep it broad.
+"""
+    answer = await ask_gemini(prompt)
+    if not answer:
+        return None
+
+    cleaned = re.sub(r"\s+", " ", str(answer)).strip()
+    if (
+        not cleaned
+        or cleaned.startswith("Gemini error:")
+        or cleaned.lower().startswith("error:")
+    ):
+        return None
+
+    if len(cleaned) > 420:
+        cleaned = cleaned[:420].rsplit(" ", 1)[0].rstrip(" ,;:-") + "."
+    return cleaned
+
+
+@bot.command(
+    name="movieclub",
+    help="Show Fergie's Movie Club journeys and current progress.",
+)
+async def movieclub(ctx):
+    data, error = _movie_club_load()
+    if error:
+        await ctx.reply(
+            f"❌ Movie Club isn't loaded. {error}",
+            mention_author=False,
+        )
+        return
+
+    journeys = data.get("journeys") or {}
+    lines = []
+    for journey_id, journey in journeys.items():
+        if not isinstance(journey, dict):
+            continue
+        name = journey.get("name", journey_id)
+        status = journey.get("status", "unknown")
+        progress = journey.get("progress") or {}
+        watched_through = progress.get("watched_through")
+        if watched_through:
+            lines.append(f"**{name}** — {status} • through {watched_through}")
+        else:
+            lines.append(f"**{name}** — {status}")
+
+    if not lines:
+        await ctx.reply(
+            "Movie Club is loaded, but no journeys are configured yet.",
+            mention_author=False,
+        )
+        return
+
+    await ctx.reply(
+        "🎬 **Fergie Movie Club**\n" + "\n".join(lines),
+        mention_author=False,
+    )
+
+
+@bot.command(
+    name="movienext",
+    help="Show the next Movie Club entry. Usage: !movienext <journey>",
+)
+async def movienext(ctx, journey: str = "star_wars"):
+    data, error = _movie_club_load()
+    if error:
+        await ctx.reply(
+            f"❌ Movie Club isn't loaded. {error}",
+            mention_author=False,
+        )
+        return
+
+    journey = journey.strip().lower().replace("-", "_").replace(" ", "_")
+    journey_obj = (data.get("journeys") or {}).get(journey)
+    if not journey_obj:
+        await ctx.reply(
+            f"i don't have a `{journey}` Movie Club journey yet. try `!movieclub`.",
+            mention_author=False,
+        )
+        return
+
+    progress = journey_obj.get("progress") or {}
+    current = progress.get("watched_through") or "your current confirmed entry"
+    next_work, error = _movie_club_next_for_journey(data, journey)
+    if error:
+        await ctx.reply(
+            f"**{journey_obj.get('name', journey)}:** {error}",
+            mention_author=False,
+        )
+        return
+
+    title = next_work.get("title", "Unknown")
+    year = next_work.get("year")
+    label = f"{title} ({year})" if year else title
+
+    tidbit = await _movie_club_gemini_tidbit(
+        journey_obj.get("name", journey),
+        current,
+        label,
+    )
+
+    message = f"**Next up:** {label}"
+    if tidbit:
+        message += f"\n{tidbit}"
+
+    await ctx.reply(message, mention_author=False)
+
+
 # ================== Custom Help: !halp ==================
 from discord import Embed, Colour
 
@@ -8596,6 +8782,27 @@ async def selftest(ctx, mode: str = "fast"):
         bool(GEMINI_KEY),
         "configured" if GEMINI_KEY else "missing",
     )
+
+    movie_data, movie_error = _movie_club_load()
+    record(
+        "Movie Club",
+        "Movie Club JSON",
+        movie_data is not None,
+        "loaded" if movie_data is not None else str(movie_error),
+    )
+    if movie_data is not None:
+        record(
+            "Movie Club",
+            "Star Wars journey",
+            isinstance((movie_data.get("journeys") or {}).get("star_wars"), dict),
+            "configured" if isinstance((movie_data.get("journeys") or {}).get("star_wars"), dict) else "missing",
+        )
+        record(
+            "Movie Club",
+            "Guidance engine",
+            bool((movie_data.get("fergie_guidance") or {}).get("gemini_prompt_contract")),
+            "configured" if (movie_data.get("fergie_guidance") or {}).get("gemini_prompt_contract") else "missing",
+        )
 
     record(
         "Core",
