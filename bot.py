@@ -10067,6 +10067,105 @@ async def selftest(ctx, mode: str = "fast"):
         record("Functions", name, passed, detail)
 
     # ==========================================================
+    # MOVIE CLUB — READ-ONLY ENGINE CHECK
+    # ==========================================================
+    movie_club_ok = True
+    movie_club_detail = ""
+
+    try:
+        if movie_club_load_error:
+            movie_club_ok = False
+            movie_club_detail = f"JSON load error: {movie_club_load_error}"
+        elif not isinstance(movie_club_data, dict):
+            movie_club_ok = False
+            movie_club_detail = "Movie Club data is not a dict"
+        else:
+            required_sections = {
+                "works",
+                "journeys",
+                "franchises",
+                "watch_progress",
+                "fergie_guidance",
+                "validation",
+            }
+
+            missing_sections = sorted(
+                section
+                for section in required_sections
+                if section not in movie_club_data
+            )
+
+            if missing_sections:
+                movie_club_ok = False
+                movie_club_detail = (
+                    "missing JSON sections: "
+                    + ", ".join(missing_sections)
+                )
+            else:
+                journey_id = MOVIE_CLUB_DEFAULT_JOURNEY
+                journey = movie_club_get_journey(journey_id)
+
+                if not isinstance(journey, dict):
+                    movie_club_ok = False
+                    movie_club_detail = (
+                        f"default journey `{journey_id}` missing"
+                    )
+                elif journey.get("status") != "active":
+                    movie_club_ok = False
+                    movie_club_detail = (
+                        f"default journey `{journey_id}` is not active: "
+                        f"{journey.get('status')}"
+                    )
+                else:
+                    progress = _movie_club_default_progress()
+                    next_result = movie_club_get_next_entry_from_progress(
+                        journey_id,
+                        progress,
+                    )
+
+                    if next_result.get("status") != "ready":
+                        movie_club_ok = False
+                        movie_club_detail = (
+                            "next-entry engine did not return ready: "
+                            f"{next_result.get('status')}"
+                        )
+                    elif not next_result.get("next_work_id"):
+                        movie_club_ok = False
+                        movie_club_detail = (
+                            "next-entry engine returned no work ID"
+                        )
+                    elif not isinstance(next_result.get("next_work"), dict):
+                        movie_club_ok = False
+                        movie_club_detail = (
+                            "next-entry engine returned invalid work data"
+                        )
+                    else:
+                        guidance_status = movie_club_guidance_status()
+
+                        if not isinstance(guidance_status, dict):
+                            movie_club_ok = False
+                            movie_club_detail = (
+                                "guidance status returned invalid data"
+                            )
+                        else:
+                            movie_club_detail = (
+                                f"JSON loaded • works={len(movie_club_data.get('works', []))} "
+                                f"• journeys={len(movie_club_data.get('journeys', {}))} "
+                                f"• next={next_result.get('next_work_id')}"
+                            )
+
+    except Exception as e:
+        movie_club_ok = False
+        movie_club_detail = f"{type(e).__name__}: {e}"
+
+    record(
+        "Movie Club",
+        "Movie Club engine",
+        movie_club_ok,
+        movie_club_detail,
+    )
+
+    # ==========================================================
     # COMMAND REGISTRATION
     # ==========================================================
 
