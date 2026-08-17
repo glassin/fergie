@@ -9241,7 +9241,17 @@ async def selftest(ctx, mode: str = "fast"):
     else:
         overall = f"🔴 {failed_count} CHECK(S) FAILED"
 
-    embed = discord.Embed(
+    # Discord has a 6000-character total embed limit. The diagnostics can
+    # legitimately exceed that because Fergie checks many subsystems, so
+    # paginate the report instead of letting Discord reject the whole result.
+    sections = []
+
+    for row in results:
+        if row["section"] not in sections:
+            sections.append(row["section"])
+
+    page_embeds = []
+    current = discord.Embed(
         title="🧠 Fergie 5.0 Diagnostics",
         description=(
             f"**{overall}**\n"
@@ -9254,76 +9264,85 @@ async def selftest(ctx, mode: str = "fast"):
             else discord.Colour.red()
         ),
     )
+    current_chars = len(current.title or "") + len(current.description or "")
 
-    sections = []
-
-    for row in results:
-        if row["section"] not in sections:
-            sections.append(row["section"])
+    def finish_page():
+        nonlocal current, current_chars
+        current.set_footer(
+            text=(
+                "FAST = inspection/read-only • FULL = safe live checks; "
+                "no playback/import/post triggers"
+            )
+        )
+        page_embeds.append(current)
+        current = discord.Embed(
+            title="🧠 Fergie 5.0 Diagnostics — continued",
+            colour=(
+                discord.Colour.green()
+                if failed_count == 0
+                else discord.Colour.red()
+            ),
+        )
+        current_chars = len(current.title or "")
 
     for section in sections:
-        rows = [
-            row
-            for row in results
-            if row["section"] == section
-        ]
-
+        rows = [row for row in results if row["section"] == section]
         lines = []
 
         for row in rows:
             icon = "✅" if row["passed"] else "❌"
+            detail = f" — {row['detail']}" if row["detail"] else ""
+            lines.append(f"{icon} **{row['name']}**{detail}")
 
-            detail = (
-                f" — {row['detail']}"
-                if row["detail"]
-                else ""
-            )
-
-            lines.append(
-                f"{icon} **{row['name']}**{detail}"
-            )
-
-        # Discord embed field limits are 1024 chars.
         text_block = "\n".join(lines)
 
         while text_block:
             chunk = text_block[:1000]
 
-            # Try to cut cleanly on a newline.
             if len(text_block) > 1000:
                 split_at = chunk.rfind("\n")
-
                 if split_at > 0:
                     chunk = chunk[:split_at]
 
-            embed.add_field(
+            field_cost = len(section) + len(chunk)
+
+            # Keep a safety margin below Discord's 6000-character limit.
+            if (
+                current.fields
+                and (
+                    current_chars + field_cost > 5500
+                    or len(current.fields) >= 20
+                )
+            ):
+                finish_page()
+
+            current.add_field(
                 name=section,
                 value=chunk,
                 inline=False,
             )
-
+            current_chars += field_cost
             text_block = text_block[len(chunk):].lstrip("\n")
 
-            # Avoid Discord's max field-count limit.
-            if len(embed.fields) >= 24:
-                break
-
-        if len(embed.fields) >= 24:
-            break
-
-    embed.set_footer(
-        text=(
-            "FAST = inspection/read-only • FULL = safe live checks; no playback/import/post triggers"
+    if current.fields or len(page_embeds) == 0:
+        current.set_footer(
+            text=(
+                "FAST = inspection/read-only • FULL = safe live checks; "
+                "no playback/import/post triggers"
+            )
         )
-    )
+        page_embeds.append(current)
 
     try:
         await wait.edit(
             content=None,
-            embed=embed,
+            embed=page_embeds[0],
         )
+        for extra_embed in page_embeds[1:]:
+            await ctx.send(embed=extra_embed)
     except Exception:
-        await ctx.send(embed=embed)
+        for extra_embed in page_embeds:
+            await ctx.send(embed=extra_embed)
         
 # ================== Start ==================
 if __name__ == "__main__":
