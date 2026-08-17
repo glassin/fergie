@@ -769,7 +769,227 @@ async def _db_set(key: str, value: dict):
             VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
-        
+
+# ================== Fergie Movie Club Persistence ==================
+
+MOVIE_CLUB_PROGRESS_KEY_PREFIX = "movie_club_progress:"
+
+
+def _movie_club_progress_key(member_id: int | str, journey_id: str) -> str:
+    """Return the isolated Postgres KV key for one member/journey pair."""
+    member_key = str(member_id or "").strip()
+    journey_key = str(journey_id or "").strip()
+
+    return (
+        f"{MOVIE_CLUB_PROGRESS_KEY_PREFIX}"
+        f"{member_key}:{journey_key}"
+    )
+
+
+def _movie_club_default_progress() -> dict:
+    """Return a clean Movie Club progress document."""
+    return {
+        "current_work_id": None,
+        "completed_work_ids": [],
+        "in_progress": {},
+        "updated_at": None,
+    }
+
+
+async def movie_club_load_progress(
+    member_id: int | str,
+    journey_id: str,
+) -> dict:
+    """
+    Load persistent Movie Club progress for one member and journey.
+
+    Database storage is isolated to its own KV key and does not touch
+    existing Fergie data, DJ popularity, reminders, memories, etc.
+    """
+    member_key = str(member_id or "").strip()
+    journey_key = str(journey_id or "").strip()
+
+    if not member_key or not journey_key:
+        return _movie_club_default_progress()
+
+    key = _movie_club_progress_key(member_key, journey_key)
+
+    try:
+        data = await _db_get(key)
+    except Exception as e:
+        print(
+            "MOVIE CLUB PROGRESS LOAD ERROR ❌ "
+            f"member={member_key} journey={journey_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        data = None
+
+    if not isinstance(data, dict):
+        return _movie_club_default_progress()
+
+    completed = data.get("completed_work_ids", [])
+    if not isinstance(completed, list):
+        completed = []
+
+    in_progress = data.get("in_progress", {})
+    if not isinstance(in_progress, dict):
+        in_progress = {}
+
+    return {
+        "current_work_id": data.get("current_work_id"),
+        "completed_work_ids": [
+            str(work_id).strip()
+            for work_id in completed
+            if str(work_id).strip()
+        ],
+        "in_progress": in_progress,
+        "updated_at": data.get("updated_at"),
+    }
+
+
+async def movie_club_save_progress(
+    member_id: int | str,
+    journey_id: str,
+    progress: dict,
+) -> bool:
+    """
+    Persist Movie Club progress for one member and journey.
+
+    Only the Movie Club progress KV key is written.
+    """
+    member_key = str(member_id or "").strip()
+    journey_key = str(journey_id or "").strip()
+
+    if not member_key or not journey_key:
+        return False
+
+    if not isinstance(progress, dict):
+        return False
+
+    completed = progress.get("completed_work_ids", [])
+    if not isinstance(completed, list):
+        completed = []
+
+    # Preserve order while removing duplicate work IDs.
+    seen = set()
+    normalized_completed = []
+
+    for work_id in completed:
+        work_key = str(work_id or "").strip()
+
+        if not work_key or work_key in seen:
+            continue
+
+        seen.add(work_key)
+        normalized_completed.append(work_key)
+
+    in_progress = progress.get("in_progress", {})
+    if not isinstance(in_progress, dict):
+        in_progress = {}
+
+    payload = {
+        "current_work_id": (
+            str(progress.get("current_work_id")).strip()
+            if progress.get("current_work_id") is not None
+            and str(progress.get("current_work_id")).strip()
+            else None
+        ),
+        "completed_work_ids": normalized_completed,
+        "in_progress": in_progress,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        await _db_set(
+            _movie_club_progress_key(member_key, journey_key),
+            payload,
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            "MOVIE CLUB PROGRESS SAVE ERROR ❌ "
+            f"member={member_key} journey={journey_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        return False
+
+
+async def movie_club_set_current_work(
+    member_id: int | str,
+    journey_id: str,
+    work_id: str | None,
+    in_progress: dict | None = None,
+) -> bool:
+    """Set the member's currently active Movie Club work."""
+    progress = await movie_club_load_progress(
+        member_id,
+        journey_id,
+    )
+
+    progress["current_work_id"] = (
+        str(work_id).strip()
+        if work_id is not None and str(work_id).strip()
+        else None
+    )
+
+    if in_progress is not None:
+        progress["in_progress"] = (
+            dict(in_progress)
+            if isinstance(in_progress, dict)
+            else {}
+        )
+
+    return await movie_club_save_progress(
+        member_id,
+        journey_id,
+        progress,
+    )
+
+
+async def movie_club_mark_work_complete(
+    member_id: int | str,
+    journey_id: str,
+    work_id: str,
+) -> bool:
+    """
+    Mark one Movie Club work complete.
+
+    Completion is explicit and confirmed; nothing is inferred from
+    time, conversation, or a recommendation.
+    """
+    work_key = str(work_id or "").strip()
+
+    if not work_key:
+        return False
+
+    progress = await movie_club_load_progress(
+        member_id,
+        journey_id,
+    )
+
+    completed = progress.get("completed_work_ids", [])
+
+    if work_key not in completed:
+        completed.append(work_key)
+
+    progress["completed_work_ids"] = completed
+
+    if progress.get("current_work_id") == work_key:
+        progress["current_work_id"] = None
+
+    progress["in_progress"] = {}
+
+    return await movie_club_save_progress(
+        member_id,
+        journey_id,
+        progress,
+    )
+
+
+# ==============================================================
+
 # ================== Fergie Birthday ==================
 
 async def maybe_post_fergie_birthday():
