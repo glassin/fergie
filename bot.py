@@ -9857,7 +9857,7 @@ async def movieclub_watch(
     query: str = "",
 ):
     query = str(query or "").strip()
-           force_watchlist_add = False
+    force_watchlist_add = False
 
     if query.casefold().startswith("add "):
         force_watchlist_add = True
