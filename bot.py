@@ -1357,19 +1357,43 @@ async def _wait_for_birthday_watcher():
     
 # ================== Fergie Reminder Helpers ==================
 
+_reminders_cache = None
+
+
 async def load_reminders():
+    """
+    Load reminders from Neon once per bot process, then serve from RAM.
+    """
+    global _reminders_cache
+
+    if isinstance(_reminders_cache, dict):
+        return _reminders_cache
+
     data = await _db_get("reminders")
 
     if not isinstance(data, dict):
-        return {"items": []}
+        data = {"items": []}
 
-    if "items" not in data:
+    if not isinstance(data.get("items"), list):
         data["items"] = []
 
-    return data
+    _reminders_cache = data
+    return _reminders_cache
 
 
 async def save_reminders(data: dict):
+    """
+    Update RAM cache and persist intentional reminder changes.
+    """
+    global _reminders_cache
+
+    if not isinstance(data, dict):
+        data = {"items": []}
+
+    if not isinstance(data.get("items"), list):
+        data["items"] = []
+
+    _reminders_cache = data
     await _db_set("reminders", data)
 
 
@@ -6216,8 +6240,10 @@ async def fergie_reminders():
         else:
             remaining.append(item)
 
-    data["items"] = remaining
-    await save_reminders(data)
+    # Only persist if a reminder actually fired.
+    if len(remaining) != len(items):
+        data["items"] = remaining
+        await save_reminders(data)
 
 
 @fergie_reminders.before_loop
