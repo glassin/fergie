@@ -11426,6 +11426,91 @@ async def selftest(ctx, mode: str = "fast"):
         movie_club_ok,
         movie_club_detail,
     )
+    # ==========================================================
+    # MOVIE CLUB V2 — WATCHED-HISTORY MATCHER CHECK
+    # ==========================================================
+    movie_club_matcher_ok = True
+    movie_club_matcher_detail = ""
+
+    try:
+        test_work = {
+            "work_id": "selftest_movie_001",
+            "title": "Fergie Selftest Movie",
+            "year": 2026,
+        }
+
+        exact_id_history = {
+            "items": [
+                {
+                    "work_id": "selftest_movie_001",
+                    "title": "Different Saved Title",
+                    "year": 1999,
+                }
+            ]
+        }
+
+        title_year_history = {
+            "items": [
+                {
+                    "work_id": None,
+                    "title": "fergie selftest movie",
+                    "year": 2026,
+                }
+            ]
+        }
+
+        unrelated_history = {
+            "items": [
+                {
+                    "work_id": "something_else",
+                    "title": "Completely Different Movie",
+                    "year": 2026,
+                }
+            ]
+        }
+
+        exact_id_match = movie_club_work_is_in_watched_history(
+            test_work,
+            exact_id_history,
+        )
+
+        title_year_match = movie_club_work_is_in_watched_history(
+            test_work,
+            title_year_history,
+        )
+
+        unrelated_match = movie_club_work_is_in_watched_history(
+            test_work,
+            unrelated_history,
+        )
+
+        movie_club_matcher_ok = (
+            exact_id_match is True
+            and title_year_match is True
+            and unrelated_match is False
+        )
+
+        movie_club_matcher_detail = (
+            "work_id match ✅ • title/year fallback ✅ • false-positive guard ✅"
+            if movie_club_matcher_ok
+            else (
+                f"unexpected matcher results: "
+                f"id={exact_id_match} "
+                f"title_year={title_year_match} "
+                f"unrelated={unrelated_match}"
+            )
+        )
+
+    except Exception as e:
+        movie_club_matcher_ok = False
+        movie_club_matcher_detail = f"{type(e).__name__}: {e}"
+
+    record(
+        "Movie Club",
+        "Watched-history matcher",
+        movie_club_matcher_ok,
+        movie_club_matcher_detail,
+    )
 
     # ==========================================================
     # COMMAND REGISTRATION
