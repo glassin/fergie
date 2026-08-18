@@ -5560,7 +5560,7 @@ async def _fergie_collect_todays_tldr_messages(message: discord.Message):
                     (
                         msg.created_at,
                         f"[{created_local.strftime('%I:%M %p')}] "
-                        f"#{channel.name} — {msg.author.display_name}: {content}"
+                        f"#{channel.name} — {author_name}: {content}"
                     )
                 )
 
