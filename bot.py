@@ -708,7 +708,8 @@ FERGIE_CAST = {
         "traits": [
             "Coffee addict",
             "fergie's mom",
-            "Matcha lover",
+            "loves taking care of herself",
+            "obsessed with jonathan's love making",
             "Gym girl",
             "Hipster",
             "Indie music",
@@ -731,6 +732,7 @@ FERGIE_CAST = {
             "Confident",
             "Wealthy",
             "Dating Viv",
+            "loves viv's ass",
             "Fergie's creator"
         ]
     },
@@ -744,6 +746,13 @@ FERGIE_CAST = {
             "His other name is Miguel",
             "say's nigga too much",
             "He's always horny",
+            "survives off sugary foods",
+            "ask's for advice but never takes it",
+            "nostalgic all the time",
+            "if virgo had a description his face would be there",
+            "undiagnosed narcolepsy",
+            "washes his clothes at 3am",
+            "takes unquestionable amounts of showers",
             "spams spotify links",
             "Lego master",
             "lives in Florida by trumps airport and mar-a-lago",
@@ -783,11 +792,11 @@ FERGIE_CAST = {
             "Modern goth",
             "fergie's tia",
             "Piercings",
-            "Bosch connoisseur",
+            "always down for a good time",
             "obsessed with her dog Reggie",
             "loves horror films",
             "coffee junkie",
-            "Glasses",
+            "wears Glasses",
             "loves vampire lestat",
             "Red and black hair"
         ]
@@ -799,6 +808,10 @@ FERGIE_CAST = {
             "jumps out of moving cars like a stuntman just to pee on the side of the road",
             "crashed his favorite car",
             "former pro gamer",
+            "goes to bailes every weekend",
+            "diet consists of chik fil a and pan (mexican sweet bread)",
+            "guilty pleasure is a pink drink once in a while",
+            "world traveler",
             "swole mexican",
             "loves denim"
         ]
@@ -848,12 +861,69 @@ FERGIE_CAST = {
         ]
     },
 
+        "reggie_lore": {
+        "name": "Reggie",
+        "aliases": ["reggie"],
+        "traits": [
+            "male Belgian Malinois",
+            "Raquel's dog",
+            "Raquel is his person and the only person he truly loves",
+            "extremely loyal and attached specifically to Raquel",
+            "travieso and mischievous",
+            "derpy",
+            "maximum energy",
+            "grandparents love him",
+            "fast, athletic, and agile",
+            "lives for adventure",
+            "scared of a rooster named Pete",
+            "professional shoe thief",
+            "always getting into something",
+            "loves causing chaos",
+            "everyone except Raquel is basically part of his mischievous game",
+            "does not act equally affectionate toward everyone",
+            "tan and brown coat with a black mask and muzzle",
+            "large upright dark ears",
+            "athletic Belgian Malinois build",
+            "wears a zap and/or shock collar that Raquel triggers when he's being bad"
+        ]
+    },
+
+        "chai_lore": {
+        "name": "Chai",
+        "aliases": ["chai"],
+        "traits": [
+            "female domestic mediumhair cat",
+            "Viv's cat and shadow",
+            "Viv is her person and her everything",
+            "completely obsessed with Viv and lives for her attention and affection",
+            "very similar to Viv in personality",
+            "elegant, stuck-up, and dramatic",
+            "has strong princess energy and expects to be treated like royalty",
+            "hates being bothered and prefers attention on her own terms",
+            "cuddles only when she chooses to",
+            "has a soft side especially for Viv",
+            "loves chicken more than almost anything",
+            "loves sunbeams, soft blankets, fancy treats, and quiet",
+            "expert at hiding and disappearing",
+            "frequently hides from Papo",
+            "frightened by big black men, especially Papo and/or Sancho",
+            "when Papo or Sancho are around she may hide, watch from a safe distance, or disappear until she feels safe again",
+            "quietly judges everyone and everything around her",
+            "fluffy long-haired brown and taupe coat with a prominent white chest and bib",
+            "green eyes, pinkish-brown nose, and long white whiskers",
+            "wears a collar with a round CHAI name tag"
+        ]
+    },
+
+
     919405253470871562: {
         "name": "Pinche Lobo",
         "aliases": ["lobo", "clark", "carlos"],
         "traits": [
             "Fergie constantly asks him for money",
             "loves pupusa",
+            "ex whatnot streamer",
+            "used to be famous",
             "almost died of fatty liver disease",
             "married but has a history of being a simp on snap and dashing tortas starbucks",
             "makes gofundme's for fun and profit",
@@ -2556,6 +2626,9 @@ FERGIE_VISUAL_REFS = {
     "chadwin": {"path": "visual_refs/chadwin.png", "aliases": ["chadwin", "edwin"]},
     "chalan": {"path": "visual_refs/chalan.png", "aliases": ["chalan"]},
     "raquel": {"path": "visual_refs/raquel.png", "aliases": ["raquel"]},
+    "reggie": {"path": "visual_refs/reggie.png", "aliases": ["reggie"]},
+    "chai": {"path": "visual_refs/chai.png", "aliases": ["chai"]},
+    "jose": {"path": "visual_refs/jose.png", "aliases": ["jose"]},
     "jonathan": {"path": "visual_refs/jonathan.png", "aliases": ["jonathan"]},
     "lobo": {
         "path": "visual_refs/lobo.png",
