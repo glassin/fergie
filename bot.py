@@ -774,6 +774,7 @@ async def _db_set(key: str, value: dict):
 
 MOVIE_CLUB_PROGRESS_KEY_PREFIX = "movie_club_progress:"
 MOVIE_CLUB_WATCHED_KEY_PREFIX = "movie_club_watched:"
+MOVIE_CLUB_WATCHLIST_KEY_PREFIX = "movie_club_watchlist:"
 
 
 def _movie_club_watched_key(member_id: int | str) -> str:
@@ -977,7 +978,208 @@ async def movie_club_add_watched_history(
         member_id,
         history,
     )
+def _movie_club_watchlist_key(member_id: int | str) -> str:
+    """Return the personal Movie Club watchlist key for one Discord member."""
+    member_key = str(member_id or "").strip()
 
+    return (
+        f"{MOVIE_CLUB_WATCHLIST_KEY_PREFIX}"
+        f"{member_key}"
+    )
+
+
+def _movie_club_default_watchlist() -> dict:
+    """Return a clean personal Movie Club watchlist."""
+    return {
+        "items": [],
+        "updated_at": None,
+    }
+
+
+async def movie_club_load_watchlist(
+    member_id: int | str,
+) -> dict:
+    """Load one member's personal Movie Club watchlist."""
+    member_key = str(member_id or "").strip()
+
+    if not member_key:
+        return _movie_club_default_watchlist()
+
+    try:
+        data = await _db_get(
+            _movie_club_watchlist_key(member_key)
+        )
+    except Exception as e:
+        print(
+            "MOVIE CLUB WATCHLIST LOAD ERROR ❌ "
+            f"member={member_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        data = None
+
+    if not isinstance(data, dict):
+        return _movie_club_default_watchlist()
+
+    items = data.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    clean_items = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        title = str(
+            item.get("title") or ""
+        ).strip()
+
+        if not title:
+            continue
+
+        clean_items.append({
+            "title": title,
+            "year": item.get("year"),
+            "work_id": (
+                str(item.get("work_id")).strip()
+                if item.get("work_id")
+                else None
+            ),
+            "source": str(
+                item.get("source") or "manual"
+            ).strip(),
+            "added_at": item.get("added_at"),
+        })
+
+    return {
+        "items": clean_items,
+        "updated_at": data.get("updated_at"),
+    }
+
+
+async def movie_club_save_watchlist(
+    member_id: int | str,
+    watchlist: dict,
+) -> bool:
+    """Persist one member's personal Movie Club watchlist."""
+    member_key = str(member_id or "").strip()
+
+    if not member_key:
+        return False
+
+    if not isinstance(watchlist, dict):
+        return False
+
+    items = watchlist.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    payload = {
+        "items": [
+            item
+            for item in items
+            if isinstance(item, dict)
+        ],
+        "updated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+    try:
+        await _db_set(
+            _movie_club_watchlist_key(member_key),
+            payload,
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            "MOVIE CLUB WATCHLIST SAVE ERROR ❌ "
+            f"member={member_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        return False
+
+
+async def movie_club_add_watchlist(
+    member_id: int | str,
+    *,
+    title: str,
+    year=None,
+    work_id: str | None = None,
+    source: str = "manual",
+) -> str:
+    """
+    Add something to a member's personal watchlist.
+
+    Returns:
+        "added"     - newly added
+        "duplicate" - already on watchlist
+        "error"     - could not save
+    """
+    title = str(title or "").strip()
+
+    if not title:
+        return "error"
+
+    watchlist = await movie_club_load_watchlist(
+        member_id
+    )
+
+    items = watchlist.get("items", [])
+
+    normalized_title = title.casefold()
+    normalized_year = (
+        str(year).strip()
+        if year is not None
+        else ""
+    )
+
+    for item in items:
+        existing_title = str(
+            item.get("title") or ""
+        ).strip().casefold()
+
+        existing_year = (
+            str(item.get("year")).strip()
+            if item.get("year") is not None
+            else ""
+        )
+
+        if (
+            existing_title == normalized_title
+            and existing_year == normalized_year
+        ):
+            return "duplicate"
+
+    items.append({
+        "title": title,
+        "year": year,
+        "work_id": (
+            str(work_id).strip()
+            if work_id
+            else None
+        ),
+        "source": str(
+            source or "manual"
+        ).strip(),
+        "added_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    })
+
+    watchlist["items"] = items
+
+    saved = await movie_club_save_watchlist(
+        member_id,
+        watchlist,
+    )
+
+    return "added" if saved else "error"
+    
 def _movie_club_progress_key(member_id: int | str, journey_id: str) -> str:
     """Return the isolated Postgres KV key for one member/journey pair."""
     member_key = str(member_id or "").strip()
