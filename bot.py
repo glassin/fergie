@@ -5614,7 +5614,9 @@ IMPORTANT:
 - Summarize the main conversations, funny moments, decisions, plans, arguments, links/topics,
   and anything someone returning to the server would actually want to know.
 - Ignore repetitive chatter and low-value noise.
-- Mention people by their Discord display names when useful.
+- The names attached to messages are authoritative canonical names for known server members.
+- Always use those canonical names in the recap.
+- Do not replace a canonical cast name with a Discord nickname or display name.
 - Do not expose or mention channels that are not present in the supplied context.
 - Do not quote huge chunks of messages.
 - Keep it concise enough for one Discord message: aim for roughly 5-10 short bullet points
