@@ -10282,8 +10282,10 @@ async def selftest(ctx, mode: str = "fast"):
     # ==========================================================
 
     try:
-        candidate_data = await _fergie_load_dj_candidates()
-
+candidate_data = await asyncio.wait_for(
+    _fergie_load_dj_candidates(),
+    timeout=SELFTEST_CHECK_TIMEOUT_SECONDS,
+)
         if isinstance(candidate_data, dict):
             candidate_items = candidate_data.get("items", [])
         elif isinstance(candidate_data, list):
@@ -10309,7 +10311,10 @@ async def selftest(ctx, mode: str = "fast"):
 
     try:
         week_key = _fergie_aux_week_key()
-        aux_data = await _fergie_load_aux_week(week_key)
+aux_data = await asyncio.wait_for(
+    _fergie_load_aux_week(week_key),
+    timeout=SELFTEST_CHECK_TIMEOUT_SECONDS,
+)
         record(
             "DJ 5.0",
             "Aux League ledger",
@@ -10371,8 +10376,10 @@ async def selftest(ctx, mode: str = "fast"):
     # ==========================================================
 
     try:
-        left = await _fergie_art_slots_left()
-
+left = await asyncio.wait_for(
+    _fergie_art_slots_left(),
+    timeout=SELFTEST_CHECK_TIMEOUT_SECONDS,
+)
         record(
             "Art",
             "Daily counter",
