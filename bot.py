@@ -5548,6 +5548,14 @@ async def _fergie_collect_todays_tldr_messages(message: discord.Message):
                     content = content[:1000] + "…"
 
                 created_local = msg.created_at.astimezone(pacific)
+
+                cast_member = FERGIE_CAST.get(msg.author.id)
+                author_name = (
+                    cast_member.get("name", msg.author.display_name)
+                    if cast_member
+                    else msg.author.display_name
+                )
+                
                 channel_rows.append(
                     (
                         msg.created_at,
