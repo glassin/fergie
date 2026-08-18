@@ -10503,18 +10503,16 @@ async def selftest(ctx, mode: str = "fast"):
     else:
         overall = f"🔴 {failed_count} CHECK(S) FAILED"
 
-    embed = discord.Embed(
-        title="🧠 Fergie 5.0 Diagnostics",
-        description=(
-            f"**{overall}**\n"
-            f"Mode: **{'FULL' if full_mode else 'FAST'}**\n"
-            f"✅ {passed_count} passed • ❌ {failed_count} failed"
-        ),
-        colour=(
-            discord.Colour.green()
-            if failed_count == 0
-            else discord.Colour.red()
-        ),
+    diagnostic_colour = (
+        discord.Colour.green()
+        if failed_count == 0
+        else discord.Colour.red()
+    )
+
+    summary_description = (
+        f"**{overall}**\n"
+        f"Mode: **{'FULL' if full_mode else 'FAST'}**\n"
+        f"✅ {passed_count} passed • ❌ {failed_count} failed"
     )
 
     sections = []
@@ -10522,6 +10520,10 @@ async def selftest(ctx, mode: str = "fast"):
     for row in results:
         if row["section"] not in sections:
             sections.append(row["section"])
+
+    # Build fields first, keeping every individual field safely below
+    # Discord's 1024-character field-value limit.
+    report_fields = []
 
     for section in sections:
         rows = [
@@ -10545,49 +10547,97 @@ async def selftest(ctx, mode: str = "fast"):
                 f"{icon} **{row['name']}**{detail}"
             )
 
-        # Discord embed field limits are 1024 chars.
         text_block = "\n".join(lines)
+        part_number = 1
 
         while text_block:
             chunk = text_block[:1000]
 
-            # Try to cut cleanly on a newline.
             if len(text_block) > 1000:
                 split_at = chunk.rfind("\n")
 
                 if split_at > 0:
                     chunk = chunk[:split_at]
 
-            embed.add_field(
-                name=section,
-                value=chunk,
-                inline=False,
+            field_name = (
+                section
+                if part_number == 1
+                else f"{section} (continued)"
+            )
+
+            report_fields.append(
+                (field_name, chunk)
             )
 
             text_block = text_block[len(chunk):].lstrip("\n")
+            part_number += 1
 
-            # Avoid Discord's max field-count limit.
-            if len(embed.fields) >= 24:
-                break
+    # Discord allows 6000 total embed characters.
+    # Keep each page comfortably below that ceiling.
+    embeds = []
+    current_embed = discord.Embed(
+        title="🧠 Fergie 5.0 Diagnostics",
+        description=summary_description,
+        colour=diagnostic_colour,
+    )
 
-        if len(embed.fields) >= 24:
-            break
+    current_chars = (
+        len(current_embed.title or "")
+        + len(current_embed.description or "")
+    )
 
-    embed.set_footer(
+    for field_name, field_value in report_fields:
+        added_chars = len(field_name) + len(field_value)
+
+        if (
+            len(current_embed.fields) >= 20
+            or current_chars + added_chars > 5200
+        ):
+            embeds.append(current_embed)
+
+            current_embed = discord.Embed(
+                title="🧠 Fergie 5.0 Diagnostics — continued",
+                description=(
+                    f"Mode: **{'FULL' if full_mode else 'FAST'}**"
+                ),
+                colour=diagnostic_colour,
+            )
+
+            current_chars = (
+                len(current_embed.title or "")
+                + len(current_embed.description or "")
+            )
+
+        current_embed.add_field(
+            name=field_name,
+            value=field_value,
+            inline=False,
+        )
+
+        current_chars += added_chars
+
+    current_embed.set_footer(
         text=(
-            "FAST = inspection/read-only • FULL = safe live checks; no playback/import/post triggers"
+            "FAST = inspection/read-only • FULL = safe live checks; "
+            "no playback/import/post triggers"
         )
     )
+
+    embeds.append(current_embed)
 
     try:
         await wait.edit(
             content=None,
-            embed=embed,
+            embed=embeds[0],
         )
-    except Exception:
-        await ctx.send(embed=embed)
+
+        for extra_embed in embeds[1:]:
+            await ctx.send(
+                embed=extra_embed
+            )
+
     finally:
-        selftest_running = False        
+        selftest_running = False
         
 # ================== Start ==================
 if __name__ == "__main__":
