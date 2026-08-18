@@ -10227,6 +10227,8 @@ async def movieclub_next(
         ctx.author.id,
         journey_id,
     )
+        reconciled_watched_titles = []
+        
     # V2-6C: reconcile the next journey entry with the member's
     # permanent confirmed watched history.
     #
@@ -10261,12 +10263,32 @@ async def movieclub_next(
 
         if not saved:
             break
+            
+        candidate_title = str(
+            candidate_work.get("title") or candidate_work_id
+        ).strip()
 
+        if candidate_title:
+            reconciled_watched_titles.append(candidate_title)
+            
         result = await movie_club_get_next_entry(
             ctx.author.id,
             journey_id,
         )
 
+    if reconciled_watched_titles:
+        caught_up_text = ", ".join(
+            f"**{title}**"
+            for title in reconciled_watched_titles
+        )
+
+        await ctx.reply(
+            "🧠 wait — I already had "
+            f"{caught_up_text} in your confirmed watched history, "
+            "so I caught your Movie Club progress up automatically.",
+            mention_author=False,
+        )
+        
     status = result.get("status")
 
     if status == "complete":
