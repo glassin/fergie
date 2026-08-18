@@ -9567,7 +9567,191 @@ async def movieclub(ctx):
         mention_author=False,
     )
 
+@movieclub.command(
+    name="watch",
+    help=(
+        "Check or add something to your personal Movie Club watchlist. "
+        "Usage: !movieclub watch <title> [year]"
+    ),
+)
+async def movieclub_watch(
+    ctx,
+    *,
+    query: str = "",
+):
+    query = str(query or "").strip()
 
+    # No title = show personal watchlist.
+    if not query:
+        watchlist = await movie_club_load_watchlist(
+            ctx.author.id
+        )
+
+        items = watchlist.get("items", [])
+
+        if not items:
+            await ctx.reply(
+                "your watchlist is empty girly. 😭 "
+                "give me something to obsess over.",
+                mention_author=False,
+            )
+            return
+
+        recent_items = items[-25:]
+        lines = []
+
+        for item in recent_items:
+            title = str(
+                item.get("title") or "Unknown"
+            ).strip()
+
+            year = item.get("year")
+
+            if year:
+                lines.append(
+                    f"🍿 **{title}** ({year})"
+                )
+            else:
+                lines.append(
+                    f"🍿 **{title}**"
+                )
+
+        description = (
+            f"**On your watchlist:** {len(items)}\n\n"
+            + "\n".join(lines)
+        )
+
+        embed = discord.Embed(
+            title="🍿 Your Movie Club Watchlist",
+            description=description[:4000],
+            colour=discord.Colour.blurple(),
+        )
+
+        embed.set_footer(
+            text=(
+                "showing your most recent 25. "
+                "now actually watch them pls. 🙄"
+            )
+        )
+
+        await ctx.reply(
+            embed=embed,
+            mention_author=False,
+        )
+        return
+
+    # Allow natural input such as:
+    # !movieclub watch Dollhouse 2026
+    year = None
+    title = query
+
+    year_match = re.search(
+        r"\s+((?:18|19|20|21)\d{2})\s*$",
+        query,
+    )
+
+    if year_match:
+        year = int(year_match.group(1))
+        title = query[:year_match.start()].strip()
+
+    if not title:
+        await ctx.reply(
+            "bestie you forgot the movie title. 😭 "
+            "try `!movieclub watch Dollhouse 2026`",
+            mention_author=False,
+        )
+        return
+
+    # First check permanent watched history.
+    watched_history = await movie_club_load_watched_history(
+        ctx.author.id
+    )
+
+    watched_items = watched_history.get("items", [])
+
+    normalized_title = title.casefold()
+    normalized_year = (
+        str(year)
+        if year is not None
+        else ""
+    )
+
+    for item in watched_items:
+        existing_title = str(
+            item.get("title") or ""
+        ).strip().casefold()
+
+        existing_year = (
+            str(item.get("year")).strip()
+            if item.get("year") is not None
+            else ""
+        )
+
+        title_matches = (
+            existing_title == normalized_title
+        )
+
+        year_matches = (
+            not normalized_year
+            or not existing_year
+            or existing_year == normalized_year
+        )
+
+        if title_matches and year_matches:
+            display_title = str(
+                item.get("title") or title
+            ).strip()
+
+            display_year = item.get("year")
+
+            label = (
+                f"**{display_title}** ({display_year})"
+                if display_year
+                else f"**{display_title}**"
+            )
+
+            await ctx.reply(
+                f"girl. 😭 we already watched {label}. "
+                "i'm not developing digital amnesia "
+                "just because you did. 🙄",
+                mention_author=False,
+            )
+            return
+
+    result = await movie_club_add_watchlist(
+        ctx.author.id,
+        title=title,
+        year=year,
+        source="manual",
+    )
+
+    label = (
+        f"**{title}** ({year})"
+        if year
+        else f"**{title}**"
+    )
+
+    if result == "duplicate":
+        await ctx.reply(
+            f"{label} is already on your watchlist girly. 🙄 "
+            "at some point we do have to actually watch it.",
+            mention_author=False,
+        )
+        return
+
+    if result != "added":
+        await ctx.reply(
+            "ugh. i couldn't save that to the watchlist. 😭 "
+            "my little database purse fell over.",
+            mention_author=False,
+        )
+        return
+
+    await ctx.reply(
+        f"🍿 added {label} to your watchlist. "
+        "okayyyy cinema plans. 💅",
+        mention_author=False,
+    )
 @movieclub.command(
     name="next",
     help=(
