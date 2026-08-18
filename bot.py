@@ -9828,7 +9828,21 @@ def _fergie_selftest_asset(path):
 
     return False, "file missing"
 
+# ================== Self-Test Runtime Protection ==================
 
+SELFTEST_CHECK_TIMEOUT_SECONDS = 12
+selftest_running = False
+
+
+async def _fergie_selftest_timed(label, coro, timeout=SELFTEST_CHECK_TIMEOUT_SECONDS):
+    """Run one diagnostic with a hard timeout so one slow service cannot stall selftest."""
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        return False, f"timed out after {timeout}s"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+        
 @bot.command(
     name="selftest",
     help="ADMIN: Run Fergie 5.0 diagnostics. Use !selftest full for safe live integration tests.",
@@ -9849,6 +9863,17 @@ async def selftest(ctx, mode: str = "fast"):
             mention_author=False,
         )
         return
+        
+    global selftest_running
+
+    if selftest_running:
+        await ctx.reply(
+            "⚠️ self-test is already running. let that one finish first, fak. 🙄",
+            mention_author=False,
+        )
+        return
+
+    selftest_running = True        
 
     full_mode = mode.lower().strip() == "full"
 
@@ -10407,30 +10432,58 @@ async def selftest(ctx, mode: str = "fast"):
 
     if full_mode:
 
-        db_ok, db_detail = await _fergie_selftest_db_roundtrip()
-        record("Live", "Neon round-trip", db_ok, db_detail)
+        live_checks = [
+            (
+                "Neon round-trip",
+                _fergie_selftest_db_roundtrip(),
+            ),
+            (
+                "VC bridge runtime",
+                _fergie_selftest_vc_health(),
+            ),
+            (
+                "DJ taste signal",
+                _fergie_selftest_dj_taste_endpoint(),
+            ),
+            (
+                "DJ wanted queue",
+                _fergie_selftest_dj_wanted_queue(),
+            ),
+            (
+                "Soulseek bridge",
+                _fergie_selftest_soulseek_bridge(),
+            ),
+            (
+                "Aux League read-only",
+                _fergie_selftest_aux_league_readonly(),
+            ),
+            (
+                "Gemini text",
+                _fergie_selftest_gemini(),
+            ),
+            (
+                "Spotify token",
+                _fergie_selftest_spotify(),
+            ),
+        ]
 
-        vc_ok, vc_detail = await _fergie_selftest_vc_health()
-        record("Live", "VC bridge runtime", vc_ok, vc_detail)
+        live_results = await asyncio.gather(
+            *(
+                _fergie_selftest_timed(label, check)
+                for label, check in live_checks
+            )
+        )
 
-        taste_ok, taste_detail = await _fergie_selftest_dj_taste_endpoint()
-        record("Live", "DJ taste signal", taste_ok, taste_detail)
-
-        wanted_ok, wanted_detail = await _fergie_selftest_dj_wanted_queue()
-        record("Live", "DJ wanted queue", wanted_ok, wanted_detail)
-
-        soulseek_ok, soulseek_detail = await _fergie_selftest_soulseek_bridge()
-        record("Live", "Soulseek bridge", soulseek_ok, soulseek_detail)
-
-        aux_ok, aux_detail = await _fergie_selftest_aux_league_readonly()
-        record("Live", "Aux League read-only", aux_ok, aux_detail)
-
-        gemini_ok, gemini_detail = await _fergie_selftest_gemini()
-        record("Live", "Gemini text", gemini_ok, gemini_detail)
-
-        spotify_ok, spotify_detail = await _fergie_selftest_spotify()
-        record("Live", "Spotify token", spotify_ok, spotify_detail)
-
+        for (label, _), (passed, detail) in zip(
+            live_checks,
+            live_results,
+        ):
+            record(
+                "Live",
+                label,
+                passed,
+                detail,
+            )
     # ==========================================================
     # REPORT
     # ==========================================================
@@ -10526,6 +10579,8 @@ async def selftest(ctx, mode: str = "fast"):
         )
     except Exception:
         await ctx.send(embed=embed)
+    finally:
+        selftest_running = False        
         
 # ================== Start ==================
 if __name__ == "__main__":
