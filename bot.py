@@ -8135,6 +8135,11 @@ async def _fergie_soulseek_search_preview(query: str):
     returns eligible search results and does not start a download.
     """
     query = str(query or "").strip()
+        force_watchlist_add = False
+
+    if query.casefold().startswith("add "):
+        force_watchlist_add = True
+        query = query[4:].strip()
 
     if not query:
         raise ValueError("empty Soulseek search query")
@@ -9996,10 +10001,16 @@ async def movieclub_watch(
             return
             
     # Then check Discord history for signs we may have already watched it.
-    discord_evidence = await movie_club_find_discord_watch_evidence(
-        ctx,
-        title,
-    )
+    # "add" explicitly overrides Discord-history uncertainty only.
+    if force_watchlist_add:
+        discord_evidence = {
+            "confidence": None,
+        }
+    else:
+        discord_evidence = await movie_club_find_discord_watch_evidence(
+            ctx,
+            title,
+        )
 
     evidence_confidence = discord_evidence.get("confidence")
 
@@ -10031,8 +10042,9 @@ async def movieclub_watch(
             f"hold awn. 😭 i found old Discord evidence that "
             f"we already watched **{title}**."
             f"{evidence_note}\n"
-            "i'm not adding it to the watchlist until you tell me "
-            "my receipts are lying. 🙄",
+            "if my receipts are lying, use "
+            f"`!movieclub watch add {title}"
+            f"{f' {year}' if year else ''}`. 🙄",
             mention_author=False,
         )
         return
@@ -10065,8 +10077,10 @@ async def movieclub_watch(
             f"hmmm. i found old Discord chatter about **{title}** "
             "that makes me think we *might* have watched it already."
             f"{evidence_note}\n"
-            "i'm leaving it off the watchlist for now because "
-            "apparently i have to investigate your cinematic past. 🙄",
+            "if i'm reaching, use "
+            f"`!movieclub watch add {title}"
+            f"{f' {year}' if year else ''}` "
+            "and i'll add it anyway. 🙄",
             mention_author=False,
         )
         return
