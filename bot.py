@@ -601,6 +601,7 @@ def parse_simple_reminder(text: str):
 FERGIE_CAST = {
     661077262468382761: {
         "name": "Viviana",
+        "aliases": ["viv", "vivvy"],
         "traits": [
             "Coffee addict",
             "fergie's mom",
@@ -633,6 +634,7 @@ FERGIE_CAST = {
 
     1028310674318839878: {
         "name": "Papo",
+        "aliases": ["papo", "miguel", "sancho"],
         "traits": [
             "Always needs hydration",
             "Gets bonked constantly",
@@ -654,6 +656,7 @@ FERGIE_CAST = {
 
     534227493360762891: {
         "name": "Khurty",
+        "aliases": ["Kurtie", "Khurty", "Khurtie", "Kurty", "Kurt", "Ko"],
         "traits": [
             "Friends constantly accuse him of secretly loving Marshmello.",
             "Beyond Wonderland mega fan",
@@ -700,6 +703,7 @@ FERGIE_CAST = {
 
     176064030623006721: {
         "name": "Chadwin",
+        "aliases": ["edwin"],
         "traits":[
             "pop culture connoisseur",
             "most rational member in the server",
@@ -743,6 +747,7 @@ FERGIE_CAST = {
 
     919405253470871562: {
         "name": "Pinche Lobo",
+        "aliases": ["lobo", "clark", "carlos"],
         "traits": [
             "Fergie constantly asks him for money",
             "loves pupusa",
@@ -797,6 +802,11 @@ def build_cast_context():
 
     for member in FERGIE_CAST.values():
         lines.append(f"\n{member['name']}:")
+
+        aliases = member.get("aliases", [])
+        if aliases:
+            lines.append("- Also known as: " + ", ".join(aliases))
+        
         for trait in member["traits"]:
             lines.append(f"- {trait}")
 
@@ -2437,8 +2447,8 @@ def _fergie_art_error_kind(error_text: str | None) -> str:
 
 
 FERGIE_VISUAL_REFS = {
-    "viviana": {"path": "visual_refs/viviana.png", "aliases": ["viviana", "viv"]},
-    "khurty": {"path": "visual_refs/khurty.png", "aliases": ["khurty", "kurtie"]},
+    "viviana": {"path": "visual_refs/viviana.png", "aliases": ["viviana", "vivvy", "viv"]},
+    "khurty": {"path": "visual_refs/khurty.png", "aliases": ["khurty", "kurty", "ko", "kurt", "kurtis", "kurtie"]},
     "papo": {"path": "visual_refs/papo.png", "aliases": ["papo", "sancho", "miguel"]},
     "chadwin": {"path": "visual_refs/chadwin.png", "aliases": ["chadwin", "edwin"]},
     "chalan": {"path": "visual_refs/chalan.png", "aliases": ["chalan"]},
