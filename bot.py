@@ -408,6 +408,27 @@ MOVIE_CLUB_JSON_PATH = os.getenv(
     "MOVIE_CLUB_JSON_PATH",
     "fergie_movie_club_master_v4_guidance_engine.json",
 ).strip()
+# Discord-history lookup for Movie Club.
+# Optional env var:
+# MOVIE_CLUB_HISTORY_CHANNEL_IDS=123456789,987654321
+#
+# If no IDs are configured, Fergie will safely check the channel
+# where the Movie Club command was used.
+MOVIE_CLUB_HISTORY_CHANNEL_IDS = {
+    int(part.strip())
+    for part in os.getenv(
+        "MOVIE_CLUB_HISTORY_CHANNEL_IDS",
+        "",
+    ).split(",")
+    if part.strip().isdigit()
+}
+
+MOVIE_CLUB_HISTORY_SCAN_LIMIT = int(
+    os.getenv(
+        "MOVIE_CLUB_HISTORY_SCAN_LIMIT",
+        "500",
+    )
+)
 
 movie_club_data = {}
 movie_club_load_error = None
@@ -773,8 +794,413 @@ async def _db_set(key: str, value: dict):
 # ================== Fergie Movie Club Persistence ==================
 
 MOVIE_CLUB_PROGRESS_KEY_PREFIX = "movie_club_progress:"
+MOVIE_CLUB_WATCHED_KEY_PREFIX = "movie_club_watched:"
+MOVIE_CLUB_WATCHLIST_KEY_PREFIX = "movie_club_watchlist:"
 
 
+def _movie_club_watched_key(member_id: int | str) -> str:
+    """Return the permanent watched-history key for one Discord member."""
+    member_key = str(member_id or "").strip()
+
+    return (
+        f"{MOVIE_CLUB_WATCHED_KEY_PREFIX}"
+        f"{member_key}"
+    )
+
+
+def _movie_club_default_watched_history() -> dict:
+    """Return a clean permanent watched-history document."""
+    return {
+        "items": [],
+        "updated_at": None,
+    }
+
+
+async def movie_club_load_watched_history(
+    member_id: int | str,
+) -> dict:
+    """
+    Load one member's permanent watched history.
+
+    This is separate from journey progress so Fergie can remember
+    movies/shows watched outside Star Wars, Horror Canon, etc.
+    """
+    member_key = str(member_id or "").strip()
+
+    if not member_key:
+        return _movie_club_default_watched_history()
+
+    try:
+        data = await _db_get(
+            _movie_club_watched_key(member_key)
+        )
+    except Exception as e:
+        print(
+            "MOVIE CLUB WATCHED LOAD ERROR ❌ "
+            f"member={member_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        data = None
+
+    if not isinstance(data, dict):
+        return _movie_club_default_watched_history()
+
+    items = data.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    clean_items = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        title = str(
+            item.get("title") or ""
+        ).strip()
+
+        if not title:
+            continue
+
+        clean_items.append({
+            "title": title,
+            "year": item.get("year"),
+            "work_id": (
+                str(item.get("work_id")).strip()
+                if item.get("work_id")
+                else None
+            ),
+            "source": str(
+                item.get("source") or "confirmed"
+            ).strip(),
+            "watched_at": item.get("watched_at"),
+        })
+
+    return {
+        "items": clean_items,
+        "updated_at": data.get("updated_at"),
+    }
+
+
+async def movie_club_save_watched_history(
+    member_id: int | str,
+    history: dict,
+) -> bool:
+    """Persist one member's permanent watched history."""
+    member_key = str(member_id or "").strip()
+
+    if not member_key:
+        return False
+
+    if not isinstance(history, dict):
+        return False
+
+    items = history.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    payload = {
+        "items": [
+            item
+            for item in items
+            if isinstance(item, dict)
+        ],
+        "updated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+    try:
+        await _db_set(
+            _movie_club_watched_key(member_key),
+            payload,
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            "MOVIE CLUB WATCHED SAVE ERROR ❌ "
+            f"member={member_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        return False
+
+
+async def movie_club_add_watched_history(
+    member_id: int | str,
+    *,
+    title: str,
+    year=None,
+    work_id: str | None = None,
+    source: str = "confirmed",
+) -> bool:
+    """
+    Add one item to a member's permanent watched history.
+
+    Duplicate title/year pairs are not added twice.
+    """
+    title = str(title or "").strip()
+
+    if not title:
+        return False
+
+    history = await movie_club_load_watched_history(
+        member_id
+    )
+
+    items = history.get("items", [])
+
+    normalized_title = title.casefold()
+    normalized_year = (
+        str(year).strip()
+        if year is not None
+        else ""
+    )
+
+    for item in items:
+        existing_title = str(
+            item.get("title") or ""
+        ).strip().casefold()
+
+        existing_year = (
+            str(item.get("year")).strip()
+            if item.get("year") is not None
+            else ""
+        )
+
+        if (
+            existing_title == normalized_title
+            and existing_year == normalized_year
+        ):
+            return True
+
+    items.append({
+        "title": title,
+        "year": year,
+        "work_id": (
+            str(work_id).strip()
+            if work_id
+            else None
+        ),
+        "source": str(
+            source or "confirmed"
+        ).strip(),
+        "watched_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    })
+
+    history["items"] = items
+
+    return await movie_club_save_watched_history(
+        member_id,
+        history,
+    )
+def _movie_club_watchlist_key(member_id: int | str) -> str:
+    """Return the personal Movie Club watchlist key for one Discord member."""
+    member_key = str(member_id or "").strip()
+
+    return (
+        f"{MOVIE_CLUB_WATCHLIST_KEY_PREFIX}"
+        f"{member_key}"
+    )
+
+
+def _movie_club_default_watchlist() -> dict:
+    """Return a clean personal Movie Club watchlist."""
+    return {
+        "items": [],
+        "updated_at": None,
+    }
+
+
+async def movie_club_load_watchlist(
+    member_id: int | str,
+) -> dict:
+    """Load one member's personal Movie Club watchlist."""
+    member_key = str(member_id or "").strip()
+
+    if not member_key:
+        return _movie_club_default_watchlist()
+
+    try:
+        data = await _db_get(
+            _movie_club_watchlist_key(member_key)
+        )
+    except Exception as e:
+        print(
+            "MOVIE CLUB WATCHLIST LOAD ERROR ❌ "
+            f"member={member_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        data = None
+
+    if not isinstance(data, dict):
+        return _movie_club_default_watchlist()
+
+    items = data.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    clean_items = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        title = str(
+            item.get("title") or ""
+        ).strip()
+
+        if not title:
+            continue
+
+        clean_items.append({
+            "title": title,
+            "year": item.get("year"),
+            "work_id": (
+                str(item.get("work_id")).strip()
+                if item.get("work_id")
+                else None
+            ),
+            "source": str(
+                item.get("source") or "manual"
+            ).strip(),
+            "added_at": item.get("added_at"),
+        })
+
+    return {
+        "items": clean_items,
+        "updated_at": data.get("updated_at"),
+    }
+
+
+async def movie_club_save_watchlist(
+    member_id: int | str,
+    watchlist: dict,
+) -> bool:
+    """Persist one member's personal Movie Club watchlist."""
+    member_key = str(member_id or "").strip()
+
+    if not member_key:
+        return False
+
+    if not isinstance(watchlist, dict):
+        return False
+
+    items = watchlist.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    payload = {
+        "items": [
+            item
+            for item in items
+            if isinstance(item, dict)
+        ],
+        "updated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+    try:
+        await _db_set(
+            _movie_club_watchlist_key(member_key),
+            payload,
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            "MOVIE CLUB WATCHLIST SAVE ERROR ❌ "
+            f"member={member_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        return False
+
+
+async def movie_club_add_watchlist(
+    member_id: int | str,
+    *,
+    title: str,
+    year=None,
+    work_id: str | None = None,
+    source: str = "manual",
+) -> str:
+    """
+    Add something to a member's personal watchlist.
+
+    Returns:
+        "added"     - newly added
+        "duplicate" - already on watchlist
+        "error"     - could not save
+    """
+    title = str(title or "").strip()
+
+    if not title:
+        return "error"
+
+    watchlist = await movie_club_load_watchlist(
+        member_id
+    )
+
+    items = watchlist.get("items", [])
+
+    normalized_title = title.casefold()
+    normalized_year = (
+        str(year).strip()
+        if year is not None
+        else ""
+    )
+
+    for item in items:
+        existing_title = str(
+            item.get("title") or ""
+        ).strip().casefold()
+
+        existing_year = (
+            str(item.get("year")).strip()
+            if item.get("year") is not None
+            else ""
+        )
+
+        if (
+            existing_title == normalized_title
+            and existing_year == normalized_year
+        ):
+            return "duplicate"
+
+    items.append({
+        "title": title,
+        "year": year,
+        "work_id": (
+            str(work_id).strip()
+            if work_id
+            else None
+        ),
+        "source": str(
+            source or "manual"
+        ).strip(),
+        "added_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    })
+
+    watchlist["items"] = items
+
+    saved = await movie_club_save_watchlist(
+        member_id,
+        watchlist,
+    )
+
+    return "added" if saved else "error"
+    
 def _movie_club_progress_key(member_id: int | str, journey_id: str) -> str:
     """Return the isolated Postgres KV key for one member/journey pair."""
     member_key = str(member_id or "").strip()
@@ -8974,7 +9400,335 @@ async def djcrate(ctx, page: int = 1):
             mention_author=False,
         )
 
+# ================== Movie Club Discord History ==================
 
+def _movie_club_normalize_history_text(text: str) -> str:
+    """Normalize Discord text for conservative movie-history matching."""
+    text = str(text or "").casefold()
+    text = re.sub(r"[^\w\s']", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _movie_club_history_evidence_level(
+    content: str,
+    title: str,
+) -> str | None:
+    """
+    Classify one Discord message mentioning a title.
+
+    Returns:
+        "strong"    - clear watched-language
+        "possible"  - title discussed in a way that may imply watching
+        None        - mention does not count as watched evidence
+    """
+    raw_content = str(content or "").strip()
+    raw_title = str(title or "").strip()
+
+    if not raw_content or not raw_title:
+        return None
+
+    content_norm = _movie_club_normalize_history_text(
+        raw_content
+    )
+
+    title_norm = _movie_club_normalize_history_text(
+        raw_title
+    )
+
+    if not title_norm or title_norm not in content_norm:
+        return None
+
+    # Phrases that explicitly mean "want/planning to watch",
+    # which must NEVER be treated as already watched.
+    future_patterns = [
+        r"\bwant to watch\b",
+        r"\bwanna watch\b",
+        r"\bwant to see\b",
+        r"\bwanna see\b",
+        r"\bshould we watch\b",
+        r"\bshould i watch\b",
+        r"\bgoing to watch\b",
+        r"\bgonna watch\b",
+        r"\bplan to watch\b",
+        r"\bplanning to watch\b",
+        r"\bneed to watch\b",
+        r"\bneed to see\b",
+        r"\badd .* to .*watchlist\b",
+    ]
+
+    if any(
+        re.search(pattern, content_norm)
+        for pattern in future_patterns
+    ):
+        return None
+
+    # Strong direct evidence that someone says it was watched.
+    strong_patterns = [
+        r"\bi watched\b",
+        r"\bwe watched\b",
+        r"\bwatched it\b",
+        r"\bwatched this\b",
+        r"\bwe saw\b",
+        r"\bi saw\b",
+        r"\bwe just watched\b",
+        r"\bi just watched\b",
+        r"\bfinished watching\b",
+        r"\bwe finished\b",
+        r"\bi finished\b",
+        r"\bafter watching\b",
+        r"\bwhen we watched\b",
+        r"\bwhen i watched\b",
+        r"\blast night\b",
+        r"\byesterday\b",
+    ]
+
+    if any(
+        re.search(pattern, content_norm)
+        for pattern in strong_patterns
+    ):
+        return "strong"
+
+    # Opinions often happen after viewing, but aren't safe enough
+    # to automatically declare something watched.
+    possible_patterns = [
+        r"\bwas good\b",
+        r"\bwas great\b",
+        r"\bwas amazing\b",
+        r"\bwas terrible\b",
+        r"\bwas awful\b",
+        r"\bwas scary\b",
+        r"\bwas funny\b",
+        r"\bloved\b",
+        r"\bhated\b",
+        r"\bending\b",
+        r"\bfinale\b",
+        r"\bthat movie\b",
+        r"\bthat film\b",
+    ]
+
+    if any(
+        re.search(pattern, content_norm)
+        for pattern in possible_patterns
+    ):
+        return "possible"
+
+    return None
+
+
+async def movie_club_find_discord_watch_evidence(
+    ctx,
+    title: str,
+) -> dict:
+    """
+    Search configured Discord channels for evidence that a movie/show
+    was previously watched.
+
+    This function is read-only. It never changes watched history,
+    journey progress, or the watchlist.
+    """
+    title = str(title or "").strip()
+
+    result = {
+        "status": "none",
+        "confidence": None,
+        "message_id": None,
+        "channel_id": None,
+        "author_id": None,
+        "created_at": None,
+        "content": None,
+    }
+
+    if not title or not ctx.guild:
+        return result
+
+    guild = ctx.guild
+    requester = ctx.author
+    me = guild.me
+
+    channels = []
+
+    # Explicitly configured movie/history channels are preferred.
+    for channel_id in MOVIE_CLUB_HISTORY_CHANNEL_IDS:
+        channel = guild.get_channel(channel_id)
+
+        if isinstance(
+            channel,
+            (discord.TextChannel, discord.Thread),
+        ):
+            channels.append(channel)
+
+    # Always include the channel where the command was used.
+    if isinstance(
+        ctx.channel,
+        (discord.TextChannel, discord.Thread),
+    ):
+        if ctx.channel not in channels:
+            channels.append(ctx.channel)
+
+    strong_match = None
+    possible_match = None
+
+    for channel in channels:
+        try:
+            requester_perms = channel.permissions_for(
+                requester
+            )
+
+            if (
+                not requester_perms.view_channel
+                or not requester_perms.read_message_history
+            ):
+                continue
+
+            if me is not None:
+                bot_perms = channel.permissions_for(me)
+
+                if (
+                    not bot_perms.view_channel
+                    or not bot_perms.read_message_history
+                ):
+                    continue
+
+            async for msg in channel.history(
+                limit=MOVIE_CLUB_HISTORY_SCAN_LIMIT,
+                oldest_first=False,
+            ):
+                if msg.author.bot:
+                    continue
+
+                content = (
+                    msg.clean_content
+                    or msg.content
+                    or ""
+                ).strip()
+
+                evidence = _movie_club_history_evidence_level(
+                    content,
+                    title,
+                )
+
+                if not evidence:
+                    continue
+
+                payload = {
+                    "status": "found",
+                    "confidence": evidence,
+                    "message_id": msg.id,
+                    "channel_id": channel.id,
+                    "author_id": msg.author.id,
+                    "created_at": (
+                        msg.created_at.isoformat()
+                        if msg.created_at
+                        else None
+                    ),
+                    "content": content[:500],
+                }
+
+                if evidence == "strong":
+                    strong_match = payload
+                    break
+
+                if possible_match is None:
+                    possible_match = payload
+
+            if strong_match is not None:
+                break
+
+        except (
+            discord.Forbidden,
+            discord.HTTPException,
+        ):
+            continue
+
+        except Exception as e:
+            print(
+                "MOVIE CLUB HISTORY SEARCH ERROR ❌ "
+                f"channel={getattr(channel, 'id', None)} "
+                f"{type(e).__name__}: {e}"
+            )
+            continue
+
+    if strong_match is not None:
+        return strong_match
+
+    if possible_match is not None:
+        return possible_match
+
+    return result
+def movie_club_work_is_in_watched_history(
+    work: dict,
+    watched_history: dict,
+) -> bool:
+    """
+    Return True only when a Movie Club work is already present in the
+    member's confirmed permanent watched history.
+
+    Matching preference:
+    1. Exact stable work_id
+    2. Exact normalized title + year fallback
+
+    This helper is read-only and never changes progress/history.
+    """
+    if not isinstance(work, dict):
+        return False
+
+    if not isinstance(watched_history, dict):
+        return False
+
+    items = watched_history.get("items", [])
+
+    if not isinstance(items, list):
+        return False
+
+    work_id = str(
+        work.get("work_id") or ""
+    ).strip()
+
+    work_title = str(
+        work.get("title") or ""
+    ).strip().casefold()
+
+    work_year = (
+        str(work.get("year")).strip()
+        if work.get("year") is not None
+        else ""
+    )
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        item_work_id = str(
+            item.get("work_id") or ""
+        ).strip()
+
+        # Stable work_id is the strongest possible match.
+        if work_id and item_work_id == work_id:
+            return True
+
+        item_title = str(
+            item.get("title") or ""
+        ).strip().casefold()
+
+        item_year = (
+            str(item.get("year")).strip()
+            if item.get("year") is not None
+            else ""
+        )
+
+        # Fallback for older watched-history entries that may not
+        # have been saved with a Movie Club work_id.
+        if (
+            work_title
+            and item_title == work_title
+            and item_year == work_year
+        ):
+            return True
+
+    return False
+
+    
 # ================== Fergie Movie Club Commands ==================
 
 MOVIE_CLUB_DEFAULT_JOURNEY = "star_wars"
@@ -9162,7 +9916,281 @@ async def movieclub(ctx):
         mention_author=False,
     )
 
+@movieclub.command(
+    name="watch",
+    help=(
+        "Check or add something to your personal Movie Club watchlist. "
+        "Usage: !movieclub watch <title> [year]"
+    ),
+)
+async def movieclub_watch(
+    ctx,
+    *,
+    query: str = "",
+):
+    query = str(query or "").strip()
+    force_watchlist_add = False
+    
+    if query.casefold().startswith("add "):
+        force_watchlist_add = True
+        query = query[4:].strip()
 
+    # No title = show personal watchlist.
+    if not query:
+        watchlist = await movie_club_load_watchlist(
+            ctx.author.id
+        )
+
+        items = watchlist.get("items", [])
+
+        if not items:
+            await ctx.reply(
+                "your watchlist is empty girly. 😭 "
+                "give me something to obsess over.",
+                mention_author=False,
+            )
+            return
+
+        recent_items = items[-25:]
+        lines = []
+
+        for item in recent_items:
+            title = str(
+                item.get("title") or "Unknown"
+            ).strip()
+
+            year = item.get("year")
+
+            if year:
+                lines.append(
+                    f"🍿 **{title}** ({year})"
+                )
+            else:
+                lines.append(
+                    f"🍿 **{title}**"
+                )
+
+        description = (
+            f"**On your watchlist:** {len(items)}\n\n"
+            + "\n".join(lines)
+        )
+
+        embed = discord.Embed(
+            title="🍿 Your Movie Club Watchlist",
+            description=description[:4000],
+            colour=discord.Colour.blurple(),
+        )
+
+        embed.set_footer(
+            text=(
+                "showing your most recent 25. "
+                "now actually watch them pls. 🙄"
+            )
+        )
+
+        await ctx.reply(
+            embed=embed,
+            mention_author=False,
+        )
+        return
+
+    # Allow natural input such as:
+    # !movieclub watch Dollhouse 2026
+    year = None
+    title = query
+
+    year_match = re.search(
+        r"\s+((?:18|19|20|21)\d{2})\s*$",
+        query,
+    )
+
+    if year_match:
+        year = int(year_match.group(1))
+        title = query[:year_match.start()].strip()
+
+    if not title:
+        await ctx.reply(
+            "bestie you forgot the movie title. 😭 "
+            "try `!movieclub watch Dollhouse 2026`",
+            mention_author=False,
+        )
+        return
+
+    # First check permanent watched history.
+    watched_history = await movie_club_load_watched_history(
+        ctx.author.id
+    )
+
+    watched_items = watched_history.get("items", [])
+
+    normalized_title = title.casefold()
+    normalized_year = (
+        str(year)
+        if year is not None
+        else ""
+    )
+
+    for item in watched_items:
+        existing_title = str(
+            item.get("title") or ""
+        ).strip().casefold()
+
+        existing_year = (
+            str(item.get("year")).strip()
+            if item.get("year") is not None
+            else ""
+        )
+
+        title_matches = (
+            existing_title == normalized_title
+        )
+
+        year_matches = (
+            not normalized_year
+            or not existing_year
+            or existing_year == normalized_year
+        )
+
+        if title_matches and year_matches:
+            display_title = str(
+                item.get("title") or title
+            ).strip()
+
+            display_year = item.get("year")
+
+            label = (
+                f"**{display_title}** ({display_year})"
+                if display_year
+                else f"**{display_title}**"
+            )
+
+            await ctx.reply(
+                f"girl. 😭 we already watched {label}. "
+                "i'm not developing digital amnesia "
+                "just because you did. 🙄",
+                mention_author=False,
+            )
+            return
+            
+    # Then check Discord history for signs we may have already watched it.
+    # "add" explicitly overrides Discord-history uncertainty only.
+    if force_watchlist_add:
+        discord_evidence = {
+            "confidence": None,
+        }
+    else:
+        discord_evidence = await movie_club_find_discord_watch_evidence(
+            ctx,
+            title,
+        )
+
+    evidence_confidence = discord_evidence.get("confidence")
+
+    if evidence_confidence == "strong":
+        channel_id = discord_evidence.get("channel_id")
+        message_id = discord_evidence.get("message_id")
+
+        jump_link = ""
+
+        if (
+            ctx.guild
+            and channel_id
+            and message_id
+        ):
+            jump_link = (
+                f"https://discord.com/channels/"
+                f"{ctx.guild.id}/"
+                f"{channel_id}/"
+                f"{message_id}"
+            )
+
+        evidence_note = (
+            f"\n👀 i found the receipts: {jump_link}"
+            if jump_link
+            else ""
+        )
+
+        await ctx.reply(
+            f"hold awn. 😭 i found old Discord evidence that "
+            f"we already watched **{title}**."
+            f"{evidence_note}\n"
+            "if my receipts are lying, use "
+            f"`!movieclub watch add {title}"
+            f"{f' {year}' if year else ''}`. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if evidence_confidence == "possible":
+        channel_id = discord_evidence.get("channel_id")
+        message_id = discord_evidence.get("message_id")
+
+        jump_link = ""
+
+        if (
+            ctx.guild
+            and channel_id
+            and message_id
+        ):
+            jump_link = (
+                f"https://discord.com/channels/"
+                f"{ctx.guild.id}/"
+                f"{channel_id}/"
+                f"{message_id}"
+            )
+
+        evidence_note = (
+            f"\n👀 suspicious evidence: {jump_link}"
+            if jump_link
+            else ""
+        )
+
+        await ctx.reply(
+            f"hmmm. i found old Discord chatter about **{title}** "
+            "that makes me think we *might* have watched it already."
+            f"{evidence_note}\n"
+            "if i'm reaching, use "
+            f"`!movieclub watch add {title}"
+            f"{f' {year}' if year else ''}` "
+            "and i'll add it anyway. 🙄",
+            mention_author=False,
+        )
+        return
+        
+    result = await movie_club_add_watchlist(
+        ctx.author.id,
+        title=title,
+        year=year,
+        source="manual",
+    )
+
+    label = (
+        f"**{title}** ({year})"
+        if year
+        else f"**{title}**"
+    )
+
+    if result == "duplicate":
+        await ctx.reply(
+            f"{label} is already on your watchlist girly. 🙄 "
+            "at some point we do have to actually watch it.",
+            mention_author=False,
+        )
+        return
+
+    if result != "added":
+        await ctx.reply(
+            "ugh. i couldn't save that to the watchlist. 😭 "
+            "my little database purse fell over.",
+            mention_author=False,
+        )
+        return
+
+    await ctx.reply(
+        f"🍿 added {label} to your watchlist. "
+        "okayyyy cinema plans. 💅",
+        mention_author=False,
+    )
 @movieclub.command(
     name="next",
     help=(
@@ -9199,7 +10227,68 @@ async def movieclub_next(
         ctx.author.id,
         journey_id,
     )
+    reconciled_watched_titles = []
+        
+    # V2-6C: reconcile the next journey entry with the member's
+    # permanent confirmed watched history.
+    #
+    # This does not infer anything from Discord chatter and does not
+    # mark anything watched automatically. It only recognizes entries
+    # already present in Fergie's confirmed watched-history database.
+    while result.get("status") == "ready":
+        candidate_work = result.get("next_work") or {}
 
+        watched_history = await movie_club_load_watched_history(
+            ctx.author.id
+        )
+
+        if not movie_club_work_is_in_watched_history(
+            candidate_work,
+            watched_history,
+        ):
+            break
+
+        candidate_work_id = str(
+            result.get("next_work_id") or ""
+        ).strip()
+
+        if not candidate_work_id:
+            break
+
+        saved = await movie_club_mark_work_complete(
+            ctx.author.id,
+            journey_id,
+            candidate_work_id,
+        )
+
+        if not saved:
+            break
+            
+        candidate_title = str(
+            candidate_work.get("title") or candidate_work_id
+        ).strip()
+
+        if candidate_title:
+            reconciled_watched_titles.append(candidate_title)
+            
+        result = await movie_club_get_next_entry(
+            ctx.author.id,
+            journey_id,
+        )
+
+    if reconciled_watched_titles:
+        caught_up_text = ", ".join(
+            f"**{title}**"
+            for title in reconciled_watched_titles
+        )
+
+        await ctx.reply(
+            "🧠 wait — I already had "
+            f"{caught_up_text} in your confirmed watched history, "
+            "so I caught your Movie Club progress up automatically.",
+            mention_author=False,
+        )
+        
     status = result.get("status")
 
     if status == "complete":
@@ -9322,9 +10411,44 @@ async def movieclub_progress(
 
     next_work = next_result.get("next_work")
 
+    journey_path = movie_club_get_ordered_path(journey_id)
+    total_entries = len(journey_path)
+    completed_in_path = len(
+        [
+            work_id
+            for work_id in completed_ids
+            if work_id in journey_path
+        ]
+    )
+
+    if total_entries > 0:
+        progress_percent = min(
+            100.0,
+            (completed_in_path / total_entries) * 100.0,
+        )
+    else:
+        progress_percent = 0.0
+
+    progress_slots = 20
+
+    filled_slots = min(
+        progress_slots,
+        int(round(
+            (progress_percent / 100.0) * progress_slots
+        )),
+    )
+
+    progress_bar = (
+        "█" * filled_slots
+        + "░" * (progress_slots - filled_slots)
+    )
+
     description = (
-        f"**Journey:** {journey.get('name', journey_id)}\n"
-        f"**Confirmed completed:** {len(completed_ids)}"
+        f"**Journey:** {journey.get('name', journey_id)}\n\n"
+        f"`{progress_bar}`\n"
+        f"**{completed_in_path} / {total_entries}** "
+        f"— **{progress_percent:.1f}% complete**\n\n"
+        f"✅ **Confirmed watched:** {len(completed_ids)}"
     )
 
     if completed_titles:
@@ -9374,8 +10498,60 @@ async def movieclub_watched(
     journey_id = str(journey_id or "").strip().lower()
 
     if not work_id:
+        history = await movie_club_load_watched_history(
+            ctx.author.id
+        )
+
+        items = history.get("items", [])
+
+        if not items:
+            await ctx.reply(
+                "girl your watched list is empty. 😭 "
+                "go consume some cinema and report back.",
+                mention_author=False,
+            )
+            return
+
+        recent_items = items[-25:]
+
+        lines = []
+
+        for item in recent_items:
+            title = str(
+                item.get("title") or "Unknown"
+            ).strip()
+
+            year = item.get("year")
+
+            if year:
+                lines.append(
+                    f"✅ **{title}** ({year})"
+                )
+            else:
+                lines.append(
+                    f"✅ **{title}**"
+                )
+
+        description = (
+            f"**Total watched:** {len(items)}\n\n"
+            + "\n".join(lines)
+        )
+
+        embed = discord.Embed(
+            title="🎬 Your Watched List",
+            description=description[:4000],
+            colour=discord.Colour.blurple(),
+        )
+
+        embed.set_footer(
+            text=(
+                "showing your most recent 25. "
+                "yes, i remember your cinematic crimes. 🙄"
+            )
+        )
+
         await ctx.reply(
-            "usage: `!movieclub watched <work_id> [journey]`",
+            embed=embed,
             mention_author=False,
         )
         return
@@ -9446,7 +10622,23 @@ async def movieclub_watched(
             mention_author=False,
         )
         return
+    watched_saved = await movie_club_add_watched_history(
+        ctx.author.id,
+        title=str(
+            work.get("title") or work_id
+        ).strip(),
+        year=work.get("year"),
+        work_id=work_id,
+        source="movie_club_confirmed",
+    )
 
+    if not watched_saved:
+        await ctx.reply(
+            "⚠️ I saved your Movie Club progress, "
+            "but my permanent watched list had a little breakdown. 🙄",
+            mention_author=False,
+        )
+        return
     await ctx.reply(
         f"✅ logged **{work.get('title', work_id)}** as watched.\n"
         f"Run `!movieclub next {journey_id}` when you're ready for the next one.",
@@ -9533,13 +10725,19 @@ async def halp(ctx, *, command: str | None = None):
     e.add_field(
         name="🎬 Movie Club",
         value=(
-            "`!movieclub` — Show active Movie Club journeys and commands\n"
-            "`!movieclub next [journey]` — Show your next confirmed entry\n"
-            "`!movieclub progress [journey]` — Show your confirmed watch progress\n"
-            "`!movieclub watched <work_id> [journey]` — Confirm a movie/show you watched\n"
-            "• Movie Club progress is saved per member and journey\n"
-            "• Recommendations use confirmed progress only and stay spoiler-safe\n"
-            "• Horror Canon remains unavailable until its approval/normalization step is complete"
+            "`!movieclub` — Show Movie Club journeys and available commands\n"
+            "`!movieclub next [journey]` — Show your next spoiler-safe journey entry\n"
+            "`!movieclub progress [journey]` — Show your confirmed progress + progress bar\n"
+            "`!movieclub watched` — Show your permanent confirmed watched history\n"
+            "`!movieclub watched <work_id> [journey]` — Confirm a Movie Club entry as watched\n"
+            "`!movieclub watch` — Show your personal watchlist\n"
+            "`!movieclub watch <title> [year]` — Check/add something to your watchlist\n"
+            "`!movieclub watch add <title> [year]` — Force-add when Discord history looks suspicious\n"
+            "• Permanent watched history and journey progress survive restarts\n"
+            "• Fergie checks confirmed watched history before recommending the next journey entry\n"
+            "• Confirmed watched entries can automatically catch journey progress up\n"
+            "• Old Discord chatter is evidence only — it never silently confirms a watch\n"
+            "• Recommendations remain spoiler-safe unless you explicitly ask for spoilers"
         ),
         inline=False,
     )
@@ -10102,15 +11300,28 @@ async def selftest(ctx, mode: str = "fast"):
         "movie_club_get_confirmed_completed_ids",
         "movie_club_get_ordered_path",
         "movie_club_get_next_entry_from_progress",
+        "movie_club_get_next_entry",
         "movie_club_build_guidance_context",
         "movie_club_spoiler_safe_reason",
         "movie_club_guidance_status",
         "movie_club_get_available_journeys",
         "movie_club_get_current_work",
         "movie_club_generate_gemini_explanation",
+
+        # Movie Club V2 persistence / history
+        "movie_club_load_progress",
+        "movie_club_save_progress",
+        "movie_club_mark_work_complete",
+        "movie_club_load_watched_history",
+        "movie_club_save_watched_history",
+        "movie_club_add_watched_history",
+        "movie_club_load_watchlist",
+        "movie_club_save_watchlist",
+        "movie_club_add_watchlist",
+        "movie_club_find_discord_watch_evidence",
+        "movie_club_work_is_in_watched_history",
         
         # GIF helper
-        "fetch_gif",
     ]
 
     for name in function_checks:
@@ -10215,6 +11426,91 @@ async def selftest(ctx, mode: str = "fast"):
         movie_club_ok,
         movie_club_detail,
     )
+    # ==========================================================
+    # MOVIE CLUB V2 — WATCHED-HISTORY MATCHER CHECK
+    # ==========================================================
+    movie_club_matcher_ok = True
+    movie_club_matcher_detail = ""
+
+    try:
+        test_work = {
+            "work_id": "selftest_movie_001",
+            "title": "Fergie Selftest Movie",
+            "year": 2026,
+        }
+
+        exact_id_history = {
+            "items": [
+                {
+                    "work_id": "selftest_movie_001",
+                    "title": "Different Saved Title",
+                    "year": 1999,
+                }
+            ]
+        }
+
+        title_year_history = {
+            "items": [
+                {
+                    "work_id": None,
+                    "title": "fergie selftest movie",
+                    "year": 2026,
+                }
+            ]
+        }
+
+        unrelated_history = {
+            "items": [
+                {
+                    "work_id": "something_else",
+                    "title": "Completely Different Movie",
+                    "year": 2026,
+                }
+            ]
+        }
+
+        exact_id_match = movie_club_work_is_in_watched_history(
+            test_work,
+            exact_id_history,
+        )
+
+        title_year_match = movie_club_work_is_in_watched_history(
+            test_work,
+            title_year_history,
+        )
+
+        unrelated_match = movie_club_work_is_in_watched_history(
+            test_work,
+            unrelated_history,
+        )
+
+        movie_club_matcher_ok = (
+            exact_id_match is True
+            and title_year_match is True
+            and unrelated_match is False
+        )
+
+        movie_club_matcher_detail = (
+            "work_id match ✅ • title/year fallback ✅ • false-positive guard ✅"
+            if movie_club_matcher_ok
+            else (
+                f"unexpected matcher results: "
+                f"id={exact_id_match} "
+                f"title_year={title_year_match} "
+                f"unrelated={unrelated_match}"
+            )
+        )
+
+    except Exception as e:
+        movie_club_matcher_ok = False
+        movie_club_matcher_detail = f"{type(e).__name__}: {e}"
+
+    record(
+        "Movie Club",
+        "Watched-history matcher",
+        movie_club_matcher_ok,
+        movie_club_matcher_detail,
+    )
 
     # ==========================================================
     # COMMAND REGISTRATION
@@ -10223,6 +11519,10 @@ async def selftest(ctx, mode: str = "fast"):
     command_checks = [
         "halp",
         "movieclub",
+        "movieclub next",
+        "movieclub progress",
+        "movieclub watched",
+        "movieclub watch",
         "version",
         "art",
         "resetart",
