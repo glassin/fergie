@@ -7010,7 +7010,7 @@ async def kewchie_debug(ctx):
     await ctx.send(f"```{msg}```")
 
 # ---- FIT command & auto daily ----
-@bot.command(name="fit", help="fergie's fits")
+@bot.command(name="hongree", help="fergie's feasts")
 async def fit(ctx):
     if ctx.channel.id != FIT_CHANNEL_ID:
         await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>")
