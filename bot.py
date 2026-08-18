@@ -9828,7 +9828,21 @@ def _fergie_selftest_asset(path):
 
     return False, "file missing"
 
+# ================== Self-Test Runtime Protection ==================
 
+SELFTEST_CHECK_TIMEOUT_SECONDS = 12
+selftest_running = False
+
+
+async def _fergie_selftest_timed(label, coro, timeout=SELFTEST_CHECK_TIMEOUT_SECONDS):
+    """Run one diagnostic with a hard timeout so one slow service cannot stall selftest."""
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout)
+    except asyncio.TimeoutError:
+        return False, f"timed out after {timeout}s"
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+        
 @bot.command(
     name="selftest",
     help="ADMIN: Run Fergie 5.0 diagnostics. Use !selftest full for safe live integration tests.",
@@ -9849,6 +9863,17 @@ async def selftest(ctx, mode: str = "fast"):
             mention_author=False,
         )
         return
+        
+    global selftest_running
+
+    if selftest_running:
+        await ctx.reply(
+            "⚠️ self-test is already running. let that one finish first, fak. 🙄",
+            mention_author=False,
+        )
+        return
+
+    selftest_running = True        
 
     full_mode = mode.lower().strip() == "full"
 
@@ -10257,8 +10282,10 @@ async def selftest(ctx, mode: str = "fast"):
     # ==========================================================
 
     try:
-        candidate_data = await _fergie_load_dj_candidates()
-
+        candidate_data = await asyncio.wait_for(
+            _fergie_load_dj_candidates(),
+            timeout=SELFTEST_CHECK_TIMEOUT_SECONDS,
+        )
         if isinstance(candidate_data, dict):
             candidate_items = candidate_data.get("items", [])
         elif isinstance(candidate_data, list):
@@ -10284,7 +10311,10 @@ async def selftest(ctx, mode: str = "fast"):
 
     try:
         week_key = _fergie_aux_week_key()
-        aux_data = await _fergie_load_aux_week(week_key)
+        aux_data = await asyncio.wait_for(
+            _fergie_load_aux_week(week_key),
+            timeout=SELFTEST_CHECK_TIMEOUT_SECONDS,
+        )
         record(
             "DJ 5.0",
             "Aux League ledger",
@@ -10346,8 +10376,10 @@ async def selftest(ctx, mode: str = "fast"):
     # ==========================================================
 
     try:
-        left = await _fergie_art_slots_left()
-
+        left = await asyncio.wait_for(
+            _fergie_art_slots_left(),
+            timeout=SELFTEST_CHECK_TIMEOUT_SECONDS,
+        )
         record(
             "Art",
             "Daily counter",
@@ -10407,30 +10439,58 @@ async def selftest(ctx, mode: str = "fast"):
 
     if full_mode:
 
-        db_ok, db_detail = await _fergie_selftest_db_roundtrip()
-        record("Live", "Neon round-trip", db_ok, db_detail)
+        live_checks = [
+            (
+                "Neon round-trip",
+                _fergie_selftest_db_roundtrip(),
+            ),
+            (
+                "VC bridge runtime",
+                _fergie_selftest_vc_health(),
+            ),
+            (
+                "DJ taste signal",
+                _fergie_selftest_dj_taste_endpoint(),
+            ),
+            (
+                "DJ wanted queue",
+                _fergie_selftest_dj_wanted_queue(),
+            ),
+            (
+                "Soulseek bridge",
+                _fergie_selftest_soulseek_bridge(),
+            ),
+            (
+                "Aux League read-only",
+                _fergie_selftest_aux_league_readonly(),
+            ),
+            (
+                "Gemini text",
+                _fergie_selftest_gemini(),
+            ),
+            (
+                "Spotify token",
+                _fergie_selftest_spotify(),
+            ),
+        ]
 
-        vc_ok, vc_detail = await _fergie_selftest_vc_health()
-        record("Live", "VC bridge runtime", vc_ok, vc_detail)
+        live_results = await asyncio.gather(
+            *(
+                _fergie_selftest_timed(label, check)
+                for label, check in live_checks
+            )
+        )
 
-        taste_ok, taste_detail = await _fergie_selftest_dj_taste_endpoint()
-        record("Live", "DJ taste signal", taste_ok, taste_detail)
-
-        wanted_ok, wanted_detail = await _fergie_selftest_dj_wanted_queue()
-        record("Live", "DJ wanted queue", wanted_ok, wanted_detail)
-
-        soulseek_ok, soulseek_detail = await _fergie_selftest_soulseek_bridge()
-        record("Live", "Soulseek bridge", soulseek_ok, soulseek_detail)
-
-        aux_ok, aux_detail = await _fergie_selftest_aux_league_readonly()
-        record("Live", "Aux League read-only", aux_ok, aux_detail)
-
-        gemini_ok, gemini_detail = await _fergie_selftest_gemini()
-        record("Live", "Gemini text", gemini_ok, gemini_detail)
-
-        spotify_ok, spotify_detail = await _fergie_selftest_spotify()
-        record("Live", "Spotify token", spotify_ok, spotify_detail)
-
+        for (label, _), (passed, detail) in zip(
+            live_checks,
+            live_results,
+        ):
+            record(
+                "Live",
+                label,
+                passed,
+                detail,
+            )
     # ==========================================================
     # REPORT
     # ==========================================================
@@ -10443,18 +10503,16 @@ async def selftest(ctx, mode: str = "fast"):
     else:
         overall = f"🔴 {failed_count} CHECK(S) FAILED"
 
-    embed = discord.Embed(
-        title="🧠 Fergie 5.0 Diagnostics",
-        description=(
-            f"**{overall}**\n"
-            f"Mode: **{'FULL' if full_mode else 'FAST'}**\n"
-            f"✅ {passed_count} passed • ❌ {failed_count} failed"
-        ),
-        colour=(
-            discord.Colour.green()
-            if failed_count == 0
-            else discord.Colour.red()
-        ),
+    diagnostic_colour = (
+        discord.Colour.green()
+        if failed_count == 0
+        else discord.Colour.red()
+    )
+
+    summary_description = (
+        f"**{overall}**\n"
+        f"Mode: **{'FULL' if full_mode else 'FAST'}**\n"
+        f"✅ {passed_count} passed • ❌ {failed_count} failed"
     )
 
     sections = []
@@ -10462,6 +10520,10 @@ async def selftest(ctx, mode: str = "fast"):
     for row in results:
         if row["section"] not in sections:
             sections.append(row["section"])
+
+    # Build fields first, keeping every individual field safely below
+    # Discord's 1024-character field-value limit.
+    report_fields = []
 
     for section in sections:
         rows = [
@@ -10485,47 +10547,120 @@ async def selftest(ctx, mode: str = "fast"):
                 f"{icon} **{row['name']}**{detail}"
             )
 
-        # Discord embed field limits are 1024 chars.
         text_block = "\n".join(lines)
+        part_number = 1
 
         while text_block:
             chunk = text_block[:1000]
 
-            # Try to cut cleanly on a newline.
             if len(text_block) > 1000:
                 split_at = chunk.rfind("\n")
 
                 if split_at > 0:
                     chunk = chunk[:split_at]
 
-            embed.add_field(
-                name=section,
-                value=chunk,
-                inline=False,
+            field_name = (
+                section
+                if part_number == 1
+                else f"{section} (continued)"
+            )
+
+            report_fields.append(
+                (field_name, chunk)
             )
 
             text_block = text_block[len(chunk):].lstrip("\n")
+            part_number += 1
 
-            # Avoid Discord's max field-count limit.
-            if len(embed.fields) >= 24:
-                break
+    # Discord allows 6000 total embed characters.
+    # Keep each page comfortably below that ceiling.
+    embeds = []
+    current_embed = discord.Embed(
+        title="🧠 Fergie 5.0 Diagnostics",
+        description=summary_description,
+        colour=diagnostic_colour,
+    )
 
-        if len(embed.fields) >= 24:
-            break
+    current_chars = (
+        len(current_embed.title or "")
+        + len(current_embed.description or "")
+    )
 
-    embed.set_footer(
+    for field_name, field_value in report_fields:
+        added_chars = len(field_name) + len(field_value)
+
+        if (
+            len(current_embed.fields) >= 20
+            or current_chars + added_chars > 5200
+        ):
+            embeds.append(current_embed)
+
+            current_embed = discord.Embed(
+                title="🧠 Fergie 5.0 Diagnostics — continued",
+                description=(
+                    f"Mode: **{'FULL' if full_mode else 'FAST'}**"
+                ),
+                colour=diagnostic_colour,
+            )
+
+            current_chars = (
+                len(current_embed.title or "")
+                + len(current_embed.description or "")
+            )
+
+        current_embed.add_field(
+            name=field_name,
+            value=field_value,
+            inline=False,
+        )
+
+        current_chars += added_chars
+
+    current_embed.set_footer(
         text=(
-            "FAST = inspection/read-only • FULL = safe live checks; no playback/import/post triggers"
+            "FAST = inspection/read-only • FULL = safe live checks; "
+            "no playback/import/post triggers"
         )
     )
+
+    embeds.append(current_embed)
 
     try:
         await wait.edit(
             content=None,
-            embed=embed,
+            embed=embeds[0],
+        )
+
+        for extra_embed in embeds[1:]:
+            await ctx.send(
+                embed=extra_embed
+            )
+
+    finally:
+        selftest_running = False
+
+@selftest.error
+async def selftest_error(ctx, error):
+    global selftest_running
+
+    # Always release the runtime lock if selftest crashes unexpectedly.
+    selftest_running = False
+
+    original = getattr(error, "original", error)
+
+    print(
+        "FERGIE SELFTEST ERROR ❌ "
+        f"{type(original).__name__}: {original}"
+    )
+
+    try:
+        await ctx.reply(
+            "❌ self-test crashed before it could finish. "
+            f"`{type(original).__name__}: {original}`",
+            mention_author=False,
         )
     except Exception:
-        await ctx.send(embed=embed)
+        pass
         
 # ================== Start ==================
 if __name__ == "__main__":
