@@ -9612,8 +9612,60 @@ async def movieclub_watched(
     journey_id = str(journey_id or "").strip().lower()
 
     if not work_id:
+        history = await movie_club_load_watched_history(
+            ctx.author.id
+        )
+
+        items = history.get("items", [])
+
+        if not items:
+            await ctx.reply(
+                "girl your watched list is empty. 😭 "
+                "go consume some cinema and report back.",
+                mention_author=False,
+            )
+            return
+
+        recent_items = items[-25:]
+
+        lines = []
+
+        for item in recent_items:
+            title = str(
+                item.get("title") or "Unknown"
+            ).strip()
+
+            year = item.get("year")
+
+            if year:
+                lines.append(
+                    f"✅ **{title}** ({year})"
+                )
+            else:
+                lines.append(
+                    f"✅ **{title}**"
+                )
+
+        description = (
+            f"**Total watched:** {len(items)}\n\n"
+            + "\n".join(lines)
+        )
+
+        embed = discord.Embed(
+            title="🎬 Your Watched List",
+            description=description[:4000],
+            colour=discord.Colour.blurple(),
+        )
+
+        embed.set_footer(
+            text=(
+                "showing your most recent 25. "
+                "yes, i remember your cinematic crimes. 🙄"
+            )
+        )
+
         await ctx.reply(
-            "usage: `!movieclub watched <work_id> [journey]`",
+            embed=embed,
             mention_author=False,
         )
         return
