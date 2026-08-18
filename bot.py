@@ -9684,7 +9684,23 @@ async def movieclub_watched(
             mention_author=False,
         )
         return
+    watched_saved = await movie_club_add_watched_history(
+        ctx.author.id,
+        title=str(
+            work.get("title") or work_id
+        ).strip(),
+        year=work.get("year"),
+        work_id=work_id,
+        source="movie_club_confirmed",
+    )
 
+    if not watched_saved:
+        await ctx.reply(
+            "⚠️ I saved your Movie Club progress, "
+            "but my permanent watched list had a little breakdown. 🙄",
+            mention_author=False,
+        )
+        return
     await ctx.reply(
         f"✅ logged **{work.get('title', work_id)}** as watched.\n"
         f"Run `!movieclub next {journey_id}` when you're ready for the next one.",
