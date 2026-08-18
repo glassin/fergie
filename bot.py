@@ -10638,6 +10638,29 @@ async def selftest(ctx, mode: str = "fast"):
 
     finally:
         selftest_running = False
+
+@selftest.error
+async def selftest_error(ctx, error):
+    global selftest_running
+
+    # Always release the runtime lock if selftest crashes unexpectedly.
+    selftest_running = False
+
+    original = getattr(error, "original", error)
+
+    print(
+        "FERGIE SELFTEST ERROR ❌ "
+        f"{type(original).__name__}: {original}"
+    )
+
+    try:
+        await ctx.reply(
+            "❌ self-test crashed before it could finish. "
+            f"`{type(original).__name__}: {original}`",
+            mention_author=False,
+        )
+    except Exception:
+        pass
         
 # ================== Start ==================
 if __name__ == "__main__":
