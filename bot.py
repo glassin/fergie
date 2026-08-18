@@ -9656,6 +9656,78 @@ async def movie_club_find_discord_watch_evidence(
         return possible_match
 
     return result
+def movie_club_work_is_in_watched_history(
+    work: dict,
+    watched_history: dict,
+) -> bool:
+    """
+    Return True only when a Movie Club work is already present in the
+    member's confirmed permanent watched history.
+
+    Matching preference:
+    1. Exact stable work_id
+    2. Exact normalized title + year fallback
+
+    This helper is read-only and never changes progress/history.
+    """
+    if not isinstance(work, dict):
+        return False
+
+    if not isinstance(watched_history, dict):
+        return False
+
+    items = watched_history.get("items", [])
+
+    if not isinstance(items, list):
+        return False
+
+    work_id = str(
+        work.get("work_id") or ""
+    ).strip()
+
+    work_title = str(
+        work.get("title") or ""
+    ).strip().casefold()
+
+    work_year = (
+        str(work.get("year")).strip()
+        if work.get("year") is not None
+        else ""
+    )
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        item_work_id = str(
+            item.get("work_id") or ""
+        ).strip()
+
+        # Stable work_id is the strongest possible match.
+        if work_id and item_work_id == work_id:
+            return True
+
+        item_title = str(
+            item.get("title") or ""
+        ).strip().casefold()
+
+        item_year = (
+            str(item.get("year")).strip()
+            if item.get("year") is not None
+            else ""
+        )
+
+        # Fallback for older watched-history entries that may not
+        # have been saved with a Movie Club work_id.
+        if (
+            work_title
+            and item_title == work_title
+            and item_year == work_year
+        ):
+            return True
+
+    return False
+
     
 # ================== Fergie Movie Club Commands ==================
 
