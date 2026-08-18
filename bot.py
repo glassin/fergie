@@ -10227,7 +10227,7 @@ async def movieclub_next(
         ctx.author.id,
         journey_id,
     )
-        reconciled_watched_titles = []
+    reconciled_watched_titles = []
         
     # V2-6C: reconcile the next journey entry with the member's
     # permanent confirmed watched history.
