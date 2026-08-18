@@ -5635,12 +5635,36 @@ TODAY'S ACCESSIBLE DISCORD MESSAGES:
     ):
         return "fak. google is being dramatic again. i can't make the TL;DR rn. 🙄"
 
-    if len(cleaned) > 1800:
+    return cleaned
         cleaned = cleaned[:1797].rstrip() + "..."
 
     return cleaned
 
+def _fergie_split_discord_message(text: str, limit: int = 1900):
+    text = (text or "").strip()
 
+    if not text:
+        return []
+
+    chunks = []
+
+    while len(text) > limit:
+        split_at = text.rfind("\n", 0, limit)
+
+        if split_at < 500:
+            split_at = text.rfind(" ", 0, limit)
+
+        if split_at < 500:
+            split_at = limit
+
+        chunks.append(text[:split_at].strip())
+        text = text[split_at:].strip()
+
+    if text:
+        chunks.append(text)
+
+    return chunks
+    
 @bot.command(name="resetart")
 async def resetart(ctx):
     """Reset Fergie's daily Art count. Restricted to Fergie's admin."""
@@ -6225,7 +6249,18 @@ async def on_message(message: discord.Message):
                 print(f"FERGIE TLDR ERROR: {type(e).__name__}: {e}")
                 answer = "fak. the recap machine had a moment. try me again in a minute. 🙄"
 
-            await wait.edit(content=answer)
+            pages = _fergie_split_discord_message(answer)
+            if not pages:
+                await wait.edit(content="fak. my recap came back empty. 🙄")
+                return
+
+            await wait.edit(content=pages[0])
+
+            for page_number, page in enumerate(pages[1:], start=2):
+                await message.channel.send(
+                    f"**TL;DR continued — {page_number}/{len(pages)}**\n\n{page}"
+                )
+                
             return
 
         if message.reference and message.reference.resolved:
