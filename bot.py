@@ -8398,7 +8398,7 @@ async def halp(ctx, *, command: str | None = None):
             "`!scam` — BTC/ETH prices, unfortunately\n"
             "`!bbl` — see fergie's culo\n"
             "`!hawaii` — see vivvy's vacation pix\n"
-            f"`!fit` — fergie's fits (only in {_mention_channel(FIT_CHANNEL_ID)})\n"
+            f"`!hongree` — fergie's feast's (only in {_mention_channel(FIT_CHANNEL_ID)})\n"
             f"`!kewchie` — random Kali Uchis track (only in {_mention_channel(KEWCHIE_CHANNEL_ID)})"
         ),
         inline=False
