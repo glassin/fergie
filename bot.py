@@ -773,7 +773,210 @@ async def _db_set(key: str, value: dict):
 # ================== Fergie Movie Club Persistence ==================
 
 MOVIE_CLUB_PROGRESS_KEY_PREFIX = "movie_club_progress:"
+MOVIE_CLUB_WATCHED_KEY_PREFIX = "movie_club_watched:"
 
+
+def _movie_club_watched_key(member_id: int | str) -> str:
+    """Return the permanent watched-history key for one Discord member."""
+    member_key = str(member_id or "").strip()
+
+    return (
+        f"{MOVIE_CLUB_WATCHED_KEY_PREFIX}"
+        f"{member_key}"
+    )
+
+
+def _movie_club_default_watched_history() -> dict:
+    """Return a clean permanent watched-history document."""
+    return {
+        "items": [],
+        "updated_at": None,
+    }
+
+
+async def movie_club_load_watched_history(
+    member_id: int | str,
+) -> dict:
+    """
+    Load one member's permanent watched history.
+
+    This is separate from journey progress so Fergie can remember
+    movies/shows watched outside Star Wars, Horror Canon, etc.
+    """
+    member_key = str(member_id or "").strip()
+
+    if not member_key:
+        return _movie_club_default_watched_history()
+
+    try:
+        data = await _db_get(
+            _movie_club_watched_key(member_key)
+        )
+    except Exception as e:
+        print(
+            "MOVIE CLUB WATCHED LOAD ERROR ❌ "
+            f"member={member_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        data = None
+
+    if not isinstance(data, dict):
+        return _movie_club_default_watched_history()
+
+    items = data.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    clean_items = []
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+
+        title = str(
+            item.get("title") or ""
+        ).strip()
+
+        if not title:
+            continue
+
+        clean_items.append({
+            "title": title,
+            "year": item.get("year"),
+            "work_id": (
+                str(item.get("work_id")).strip()
+                if item.get("work_id")
+                else None
+            ),
+            "source": str(
+                item.get("source") or "confirmed"
+            ).strip(),
+            "watched_at": item.get("watched_at"),
+        })
+
+    return {
+        "items": clean_items,
+        "updated_at": data.get("updated_at"),
+    }
+
+
+async def movie_club_save_watched_history(
+    member_id: int | str,
+    history: dict,
+) -> bool:
+    """Persist one member's permanent watched history."""
+    member_key = str(member_id or "").strip()
+
+    if not member_key:
+        return False
+
+    if not isinstance(history, dict):
+        return False
+
+    items = history.get("items", [])
+
+    if not isinstance(items, list):
+        items = []
+
+    payload = {
+        "items": [
+            item
+            for item in items
+            if isinstance(item, dict)
+        ],
+        "updated_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    }
+
+    try:
+        await _db_set(
+            _movie_club_watched_key(member_key),
+            payload,
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            "MOVIE CLUB WATCHED SAVE ERROR ❌ "
+            f"member={member_key} "
+            f"{type(e).__name__}: {e}"
+        )
+        return False
+
+
+async def movie_club_add_watched_history(
+    member_id: int | str,
+    *,
+    title: str,
+    year=None,
+    work_id: str | None = None,
+    source: str = "confirmed",
+) -> bool:
+    """
+    Add one item to a member's permanent watched history.
+
+    Duplicate title/year pairs are not added twice.
+    """
+    title = str(title or "").strip()
+
+    if not title:
+        return False
+
+    history = await movie_club_load_watched_history(
+        member_id
+    )
+
+    items = history.get("items", [])
+
+    normalized_title = title.casefold()
+    normalized_year = (
+        str(year).strip()
+        if year is not None
+        else ""
+    )
+
+    for item in items:
+        existing_title = str(
+            item.get("title") or ""
+        ).strip().casefold()
+
+        existing_year = (
+            str(item.get("year")).strip()
+            if item.get("year") is not None
+            else ""
+        )
+
+        if (
+            existing_title == normalized_title
+            and existing_year == normalized_year
+        ):
+            return True
+
+    items.append({
+        "title": title,
+        "year": year,
+        "work_id": (
+            str(work_id).strip()
+            if work_id
+            else None
+        ),
+        "source": str(
+            source or "confirmed"
+        ).strip(),
+        "watched_at": datetime.now(
+            timezone.utc
+        ).isoformat(),
+    })
+
+    history["items"] = items
+
+    return await movie_club_save_watched_history(
+        member_id,
+        history,
+    )
 
 def _movie_club_progress_key(member_id: int | str, journey_id: str) -> str:
     """Return the isolated Postgres KV key for one member/journey pair."""
