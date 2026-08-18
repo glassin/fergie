@@ -91,6 +91,10 @@ JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=
 JUMPSCARE_COOLDOWN_SECONDS = 90  # per-user cooldown
 JUMPSCARE_EMOTE_TEXT = "<:monkagiga:1131711987794063511>"
 
+# ---------- Pinterest ----------
+PINTEREST_ACCESS_TOKEN = os.getenv("PINTEREST_ACCESS_TOKEN", "").strip()
+PINTEREST_BOARD_NAME = os.getenv("PINTEREST_BOARD_NAME", "Fits").strip()
+
 HYDRATION_VIDEO = "hydration_waifu.mp4"
 
 HYDRATION_TRIGGERS = [
@@ -159,6 +163,100 @@ FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
 # FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
 FIT_FOLLOWUP_EMOTE = "<a:slap_peach:1227392416617730078>"
 FIT_FOLLOWUP_TEXT  = "you know you'd look good in this girlie! you go girl! ✂️"
+
+async def _fergie_random_pinterest_fit():
+    if not PINTEREST_ACCESS_TOKEN:
+        print("PINTEREST ERROR ❌ access token missing")
+        return None
+
+    headers = {
+        "Authorization": f"Bearer {PINTEREST_ACCESS_TOKEN}",
+    }
+
+    timeout = aiohttp.ClientTimeout(total=20)
+
+    try:
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+
+            # Get boards from the Pinterest account tied to the token.
+            async with session.get(
+                "https://api.pinterest.com/v5/boards",
+                headers=headers,
+                params={"page_size": 100},
+            ) as response:
+
+                if response.status != 200:
+                    body = await response.text()
+                    print(
+                        f"PINTEREST BOARDS ERROR ❌ "
+                        f"{response.status}: {body[:300]}"
+                    )
+                    return None
+
+                board_data = await response.json()
+
+            boards = board_data.get("items", [])
+
+            board = next(
+                (
+                    item
+                    for item in boards
+                    if str(item.get("name", "")).strip().lower()
+                    == PINTEREST_BOARD_NAME.lower()
+                ),
+                None,
+            )
+
+            if not board:
+                print(
+                    f"PINTEREST BOARD NOT FOUND ❌ "
+                    f"name={PINTEREST_BOARD_NAME!r}"
+                )
+                return None
+
+            board_id = board.get("id")
+
+            if not board_id:
+                print("PINTEREST ERROR ❌ board has no id")
+                return None
+
+            # Get Pins from that board.
+            async with session.get(
+                f"https://api.pinterest.com/v5/boards/{board_id}/pins",
+                headers=headers,
+                params={"page_size": 100},
+            ) as response:
+
+                if response.status != 200:
+                    body = await response.text()
+                    print(
+                        f"PINTEREST PINS ERROR ❌ "
+                        f"{response.status}: {body[:300]}"
+                    )
+                    return None
+
+                pin_data = await response.json()
+
+            pins = pin_data.get("items", [])
+
+            if not pins:
+                print("PINTEREST ERROR ❌ board returned no pins")
+                return None
+
+            pin = random.choice(pins)
+            pin_id = pin.get("id")
+
+            if not pin_id:
+                return None
+
+            return f"https://www.pinterest.com/pin/{pin_id}/"
+
+    except Exception as e:
+        print(
+            f"PINTEREST FIT ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return None
 
 # ---------- Bonk Papo schedule (3 times/day random) ----------
 BONK_PAPO_USER_ID = 1028310674318839878
@@ -6910,18 +7008,41 @@ async def kewchie_debug(ctx):
 @bot.command(name="fit", help="fergie's fits")
 async def fit(ctx):
     if ctx.channel.id != FIT_CHANNEL_ID:
-        await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>"); return
-    url = random.choice(FIT_IMAGE_URLS)
-    msg = await ctx.send(f"OMFG look at this one girlie!!! we neeeeeeeeed! 💗\n{url}")
+        await ctx.send(f"Use this in <#{FIT_CHANNEL_ID}>")
+        return
+
+    url = await _fergie_random_pinterest_fit()
+
+    if not url:
+        await ctx.send("ugh Pinterest is being dramatic rn. 🙄")
+        return
+
+    msg = await ctx.send(
+        f"OMFG look at this one girlie!!! we neeeeeeeeed! 💗\n{url}"
+    )
+
     bot._fit_waiting[msg.id] = _now() + 20
+
 
 @tasks.loop(hours=24)
 async def fit_auto_daily():
     ch = bot.get_channel(FIT_CHANNEL_ID)
-    if not ch: return
-    url = random.choice(FIT_IMAGE_URLS)
-    msg = await ch.send(f"OMFG look at this one girlie!!! we neeeeeeeeed! 💗\n{url}")
+
+    if not ch:
+        return
+
+    url = await _fergie_random_pinterest_fit()
+
+    if not url:
+        print("PINTEREST DAILY FIT SKIPPED ❌")
+        return
+
+    msg = await ch.send(
+        f"OMFG look at this one girlie!!! we neeeeeeeeed! 💗\n{url}"
+    )
+
     bot._fit_waiting[msg.id] = _now() + 20
+
 
 @fit_auto_daily.before_loop
 async def _fit_wait_ready():
