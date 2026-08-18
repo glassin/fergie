@@ -10227,6 +10227,45 @@ async def movieclub_next(
         ctx.author.id,
         journey_id,
     )
+    # V2-6C: reconcile the next journey entry with the member's
+    # permanent confirmed watched history.
+    #
+    # This does not infer anything from Discord chatter and does not
+    # mark anything watched automatically. It only recognizes entries
+    # already present in Fergie's confirmed watched-history database.
+    while result.get("status") == "ready":
+        candidate_work = result.get("next_work") or {}
+
+        watched_history = await movie_club_load_watched_history(
+            ctx.author.id
+        )
+
+        if not movie_club_work_is_in_watched_history(
+            candidate_work,
+            watched_history,
+        ):
+            break
+
+        candidate_work_id = str(
+            result.get("next_work_id") or ""
+        ).strip()
+
+        if not candidate_work_id:
+            break
+
+        saved = await movie_club_mark_work_complete(
+            ctx.author.id,
+            journey_id,
+            candidate_work_id,
+        )
+
+        if not saved:
+            break
+
+        result = await movie_club_get_next_entry(
+            ctx.author.id,
+            journey_id,
+        )
 
     status = result.get("status")
 
