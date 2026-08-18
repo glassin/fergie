@@ -5404,7 +5404,7 @@ async def fergie_bored():
 async def _wait_fergie_bored():
     await bot.wait_until_ready()
 
-@tasks.loop(minutes=10)
+@tasks.loop(hours=12)
 async def fergie_reminders():
     data = await load_reminders()
     items = data.get("items", [])
