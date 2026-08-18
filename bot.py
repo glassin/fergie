@@ -408,6 +408,27 @@ MOVIE_CLUB_JSON_PATH = os.getenv(
     "MOVIE_CLUB_JSON_PATH",
     "fergie_movie_club_master_v4_guidance_engine.json",
 ).strip()
+# Discord-history lookup for Movie Club.
+# Optional env var:
+# MOVIE_CLUB_HISTORY_CHANNEL_IDS=123456789,987654321
+#
+# If no IDs are configured, Fergie will safely check the channel
+# where the Movie Club command was used.
+MOVIE_CLUB_HISTORY_CHANNEL_IDS = {
+    int(part.strip())
+    for part in os.getenv(
+        "MOVIE_CLUB_HISTORY_CHANNEL_IDS",
+        "",
+    ).split(",")
+    if part.strip().isdigit()
+}
+
+MOVIE_CLUB_HISTORY_SCAN_LIMIT = int(
+    os.getenv(
+        "MOVIE_CLUB_HISTORY_SCAN_LIMIT",
+        "500",
+    )
+)
 
 movie_club_data = {}
 movie_club_load_error = None
@@ -9379,7 +9400,263 @@ async def djcrate(ctx, page: int = 1):
             mention_author=False,
         )
 
+# ================== Movie Club Discord History ==================
 
+def _movie_club_normalize_history_text(text: str) -> str:
+    """Normalize Discord text for conservative movie-history matching."""
+    text = str(text or "").casefold()
+    text = re.sub(r"[^\w\s']", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def _movie_club_history_evidence_level(
+    content: str,
+    title: str,
+) -> str | None:
+    """
+    Classify one Discord message mentioning a title.
+
+    Returns:
+        "strong"    - clear watched-language
+        "possible"  - title discussed in a way that may imply watching
+        None        - mention does not count as watched evidence
+    """
+    raw_content = str(content or "").strip()
+    raw_title = str(title or "").strip()
+
+    if not raw_content or not raw_title:
+        return None
+
+    content_norm = _movie_club_normalize_history_text(
+        raw_content
+    )
+
+    title_norm = _movie_club_normalize_history_text(
+        raw_title
+    )
+
+    if not title_norm or title_norm not in content_norm:
+        return None
+
+    # Phrases that explicitly mean "want/planning to watch",
+    # which must NEVER be treated as already watched.
+    future_patterns = [
+        r"\bwant to watch\b",
+        r"\bwanna watch\b",
+        r"\bwant to see\b",
+        r"\bwanna see\b",
+        r"\bshould we watch\b",
+        r"\bshould i watch\b",
+        r"\bgoing to watch\b",
+        r"\bgonna watch\b",
+        r"\bplan to watch\b",
+        r"\bplanning to watch\b",
+        r"\bneed to watch\b",
+        r"\bneed to see\b",
+        r"\badd .* to .*watchlist\b",
+    ]
+
+    if any(
+        re.search(pattern, content_norm)
+        for pattern in future_patterns
+    ):
+        return None
+
+    # Strong direct evidence that someone says it was watched.
+    strong_patterns = [
+        r"\bi watched\b",
+        r"\bwe watched\b",
+        r"\bwatched it\b",
+        r"\bwatched this\b",
+        r"\bwe saw\b",
+        r"\bi saw\b",
+        r"\bwe just watched\b",
+        r"\bi just watched\b",
+        r"\bfinished watching\b",
+        r"\bwe finished\b",
+        r"\bi finished\b",
+        r"\bafter watching\b",
+        r"\bwhen we watched\b",
+        r"\bwhen i watched\b",
+        r"\blast night\b",
+        r"\byesterday\b",
+    ]
+
+    if any(
+        re.search(pattern, content_norm)
+        for pattern in strong_patterns
+    ):
+        return "strong"
+
+    # Opinions often happen after viewing, but aren't safe enough
+    # to automatically declare something watched.
+    possible_patterns = [
+        r"\bwas good\b",
+        r"\bwas great\b",
+        r"\bwas amazing\b",
+        r"\bwas terrible\b",
+        r"\bwas awful\b",
+        r"\bwas scary\b",
+        r"\bwas funny\b",
+        r"\bloved\b",
+        r"\bhated\b",
+        r"\bending\b",
+        r"\bfinale\b",
+        r"\bthat movie\b",
+        r"\bthat film\b",
+    ]
+
+    if any(
+        re.search(pattern, content_norm)
+        for pattern in possible_patterns
+    ):
+        return "possible"
+
+    return None
+
+
+async def movie_club_find_discord_watch_evidence(
+    ctx,
+    title: str,
+) -> dict:
+    """
+    Search configured Discord channels for evidence that a movie/show
+    was previously watched.
+
+    This function is read-only. It never changes watched history,
+    journey progress, or the watchlist.
+    """
+    title = str(title or "").strip()
+
+    result = {
+        "status": "none",
+        "confidence": None,
+        "message_id": None,
+        "channel_id": None,
+        "author_id": None,
+        "created_at": None,
+        "content": None,
+    }
+
+    if not title or not ctx.guild:
+        return result
+
+    guild = ctx.guild
+    requester = ctx.author
+    me = guild.me
+
+    channels = []
+
+    # Explicitly configured movie/history channels are preferred.
+    for channel_id in MOVIE_CLUB_HISTORY_CHANNEL_IDS:
+        channel = guild.get_channel(channel_id)
+
+        if isinstance(
+            channel,
+            (discord.TextChannel, discord.Thread),
+        ):
+            channels.append(channel)
+
+    # Always include the channel where the command was used.
+    if isinstance(
+        ctx.channel,
+        (discord.TextChannel, discord.Thread),
+    ):
+        if ctx.channel not in channels:
+            channels.append(ctx.channel)
+
+    strong_match = None
+    possible_match = None
+
+    for channel in channels:
+        try:
+            requester_perms = channel.permissions_for(
+                requester
+            )
+
+            if (
+                not requester_perms.view_channel
+                or not requester_perms.read_message_history
+            ):
+                continue
+
+            if me is not None:
+                bot_perms = channel.permissions_for(me)
+
+                if (
+                    not bot_perms.view_channel
+                    or not bot_perms.read_message_history
+                ):
+                    continue
+
+            async for msg in channel.history(
+                limit=MOVIE_CLUB_HISTORY_SCAN_LIMIT,
+                oldest_first=False,
+            ):
+                if msg.author.bot:
+                    continue
+
+                content = (
+                    msg.clean_content
+                    or msg.content
+                    or ""
+                ).strip()
+
+                evidence = _movie_club_history_evidence_level(
+                    content,
+                    title,
+                )
+
+                if not evidence:
+                    continue
+
+                payload = {
+                    "status": "found",
+                    "confidence": evidence,
+                    "message_id": msg.id,
+                    "channel_id": channel.id,
+                    "author_id": msg.author.id,
+                    "created_at": (
+                        msg.created_at.isoformat()
+                        if msg.created_at
+                        else None
+                    ),
+                    "content": content[:500],
+                }
+
+                if evidence == "strong":
+                    strong_match = payload
+                    break
+
+                if possible_match is None:
+                    possible_match = payload
+
+            if strong_match is not None:
+                break
+
+        except (
+            discord.Forbidden,
+            discord.HTTPException,
+        ):
+            continue
+
+        except Exception as e:
+            print(
+                "MOVIE CLUB HISTORY SEARCH ERROR ❌ "
+                f"channel={getattr(channel, 'id', None)} "
+                f"{type(e).__name__}: {e}"
+            )
+            continue
+
+    if strong_match is not None:
+        return strong_match
+
+    if possible_match is not None:
+        return possible_match
+
+    return result
+    
 # ================== Fergie Movie Club Commands ==================
 
 MOVIE_CLUB_DEFAULT_JOURNEY = "star_wars"
