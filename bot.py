@@ -197,6 +197,11 @@ async def _fergie_random_pinterest_fit():
 
             boards = board_data.get("items", [])
 
+            print(
+                "PINTEREST BOARDS FOUND ✅",
+                [(item.get("id"), item.get("name")) for item in boards]
+            )
+
             board = next(
                 (
                     item
