@@ -11300,15 +11300,28 @@ async def selftest(ctx, mode: str = "fast"):
         "movie_club_get_confirmed_completed_ids",
         "movie_club_get_ordered_path",
         "movie_club_get_next_entry_from_progress",
+        "movie_club_get_next_entry",
         "movie_club_build_guidance_context",
         "movie_club_spoiler_safe_reason",
         "movie_club_guidance_status",
         "movie_club_get_available_journeys",
         "movie_club_get_current_work",
         "movie_club_generate_gemini_explanation",
+
+        # Movie Club V2 persistence / history
+        "movie_club_load_progress",
+        "movie_club_save_progress",
+        "movie_club_mark_work_complete",
+        "movie_club_load_watched_history",
+        "movie_club_save_watched_history",
+        "movie_club_add_watched_history",
+        "movie_club_load_watchlist",
+        "movie_club_save_watchlist",
+        "movie_club_add_watchlist",
+        "movie_club_find_discord_watch_evidence",
+        "movie_club_work_is_in_watched_history",
         
         # GIF helper
-        "fetch_gif",
     ]
 
     for name in function_checks:
@@ -11421,6 +11434,10 @@ async def selftest(ctx, mode: str = "fast"):
     command_checks = [
         "halp",
         "movieclub",
+        "movieclub next",
+        "movieclub progress",
+        "movieclub watched",
+        "movieclub watch",
         "version",
         "art",
         "resetart",
