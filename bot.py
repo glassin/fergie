@@ -8135,11 +8135,6 @@ async def _fergie_soulseek_search_preview(query: str):
     returns eligible search results and does not start a download.
     """
     query = str(query or "").strip()
-        force_watchlist_add = False
-
-    if query.casefold().startswith("add "):
-        force_watchlist_add = True
-        query = query[4:].strip()
 
     if not query:
         raise ValueError("empty Soulseek search query")
@@ -9862,6 +9857,11 @@ async def movieclub_watch(
     query: str = "",
 ):
     query = str(query or "").strip()
+           force_watchlist_add = False
+
+    if query.casefold().startswith("add "):
+        force_watchlist_add = True
+        query = query[4:].strip()
 
     # No title = show personal watchlist.
     if not query:
