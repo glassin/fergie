@@ -9322,9 +9322,44 @@ async def movieclub_progress(
 
     next_work = next_result.get("next_work")
 
+    journey_path = movie_club_get_ordered_path(journey_id)
+    total_entries = len(journey_path)
+    completed_in_path = len(
+        [
+            work_id
+            for work_id in completed_ids
+            if work_id in journey_path
+        ]
+    )
+
+    if total_entries > 0:
+        progress_percent = min(
+            100.0,
+            (completed_in_path / total_entries) * 100.0,
+        )
+    else:
+        progress_percent = 0.0
+
+    progress_slots = 20
+
+    filled_slots = min(
+        progress_slots,
+        int(round(
+            (progress_percent / 100.0) * progress_slots
+        )),
+    )
+
+    progress_bar = (
+        "█" * filled_slots
+        + "░" * (progress_slots - filled_slots)
+    )
+
     description = (
-        f"**Journey:** {journey.get('name', journey_id)}\n"
-        f"**Confirmed completed:** {len(completed_ids)}"
+        f"**Journey:** {journey.get('name', journey_id)}\n\n"
+        f"`{progress_bar}`\n"
+        f"**{completed_in_path} / {total_entries}** "
+        f"— **{progress_percent:.1f}% complete**\n\n"
+        f"✅ **Confirmed watched:** {len(completed_ids)}"
     )
 
     if completed_titles:
