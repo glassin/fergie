@@ -5636,9 +5636,6 @@ TODAY'S ACCESSIBLE DISCORD MESSAGES:
         return "fak. google is being dramatic again. i can't make the TL;DR rn. 🙄"
 
     return cleaned
-        cleaned = cleaned[:1797].rstrip() + "..."
-
-    return cleaned
 
 def _fergie_split_discord_message(text: str, limit: int = 1900):
     text = (text or "").strip()
