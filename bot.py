@@ -10725,13 +10725,19 @@ async def halp(ctx, *, command: str | None = None):
     e.add_field(
         name="🎬 Movie Club",
         value=(
-            "`!movieclub` — Show active Movie Club journeys and commands\n"
-            "`!movieclub next [journey]` — Show your next confirmed entry\n"
-            "`!movieclub progress [journey]` — Show your confirmed watch progress\n"
-            "`!movieclub watched <work_id> [journey]` — Confirm a movie/show you watched\n"
-            "• Movie Club progress is saved per member and journey\n"
-            "• Recommendations use confirmed progress only and stay spoiler-safe\n"
-            "• Horror Canon remains unavailable until its approval/normalization step is complete"
+            "`!movieclub` — Show Movie Club journeys and available commands\n"
+            "`!movieclub next [journey]` — Show your next spoiler-safe journey entry\n"
+            "`!movieclub progress [journey]` — Show your confirmed progress + progress bar\n"
+            "`!movieclub watched` — Show your permanent confirmed watched history\n"
+            "`!movieclub watched <work_id> [journey]` — Confirm a Movie Club entry as watched\n"
+            "`!movieclub watch` — Show your personal watchlist\n"
+            "`!movieclub watch <title> [year]` — Check/add something to your watchlist\n"
+            "`!movieclub watch add <title> [year]` — Force-add when Discord history looks suspicious\n"
+            "• Permanent watched history and journey progress survive restarts\n"
+            "• Fergie checks confirmed watched history before recommending the next journey entry\n"
+            "• Confirmed watched entries can automatically catch journey progress up\n"
+            "• Old Discord chatter is evidence only — it never silently confirms a watch\n"
+            "• Recommendations remain spoiler-safe unless you explicitly ask for spoilers"
         ),
         inline=False,
     )
