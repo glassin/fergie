@@ -9994,7 +9994,83 @@ async def movieclub_watch(
                 mention_author=False,
             )
             return
+            
+    # Then check Discord history for signs we may have already watched it.
+    discord_evidence = await movie_club_find_discord_watch_evidence(
+        ctx,
+        title,
+    )
 
+    evidence_confidence = discord_evidence.get("confidence")
+
+    if evidence_confidence == "strong":
+        channel_id = discord_evidence.get("channel_id")
+        message_id = discord_evidence.get("message_id")
+
+        jump_link = ""
+
+        if (
+            ctx.guild
+            and channel_id
+            and message_id
+        ):
+            jump_link = (
+                f"https://discord.com/channels/"
+                f"{ctx.guild.id}/"
+                f"{channel_id}/"
+                f"{message_id}"
+            )
+
+        evidence_note = (
+            f"\n👀 i found the receipts: {jump_link}"
+            if jump_link
+            else ""
+        )
+
+        await ctx.reply(
+            f"hold awn. 😭 i found old Discord evidence that "
+            f"we already watched **{title}**."
+            f"{evidence_note}\n"
+            "i'm not adding it to the watchlist until you tell me "
+            "my receipts are lying. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if evidence_confidence == "possible":
+        channel_id = discord_evidence.get("channel_id")
+        message_id = discord_evidence.get("message_id")
+
+        jump_link = ""
+
+        if (
+            ctx.guild
+            and channel_id
+            and message_id
+        ):
+            jump_link = (
+                f"https://discord.com/channels/"
+                f"{ctx.guild.id}/"
+                f"{channel_id}/"
+                f"{message_id}"
+            )
+
+        evidence_note = (
+            f"\n👀 suspicious evidence: {jump_link}"
+            if jump_link
+            else ""
+        )
+
+        await ctx.reply(
+            f"hmmm. i found old Discord chatter about **{title}** "
+            "that makes me think we *might* have watched it already."
+            f"{evidence_note}\n"
+            "i'm leaving it off the watchlist for now because "
+            "apparently i have to investigate your cinematic past. 🙄",
+            mention_author=False,
+        )
+        return
+        
     result = await movie_club_add_watchlist(
         ctx.author.id,
         title=title,
