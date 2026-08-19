@@ -6179,12 +6179,30 @@ async def on_message(message: discord.Message):
             .strip()
         )
 
-        is_comic_request = bool(
-            re.search(r"\bcomic\b", art_question, flags=re.IGNORECASE)
-        )
-        
-        art_prompt = _fergie_image_generation_prompt(art_question)
+        # Archive generated Art only when the requested scene actually
+        # contains an established Fergie cast character.
+        archive_refs = _fergie_visual_refs_for_prompt(art_question)
 
+        # Also recognize when a known cast member explicitly asks to put
+        # themselves into the generated scene.
+        art_speaker = FERGIE_CAST.get(message.author.id)
+
+        speaker_is_subject = bool(
+            art_speaker
+            and re.search(
+                r"\b(?:draw|depict|show|put|place|include)\s+me\b"
+                r"|\b(?:picture|image|pic|drawing|comic|art)\s+(?:of|with)\s+me\b"
+                r"|\bme\s+(?:with|and|at|in|on|wearing|holding|doing)\b",
+                art_question,
+                flags=re.IGNORECASE,
+            )
+        )
+
+        should_archive_cast_art = bool(
+            archive_refs or speaker_is_subject
+        )
+
+        art_prompt = _fergie_image_generation_prompt(art_question)
         if art_prompt:
             art_speaker = FERGIE_CAST.get(message.author.id)
 
@@ -6272,8 +6290,8 @@ async def on_message(message: discord.Message):
                 mention_author=False,
             )
 
-            # Archive generated COMICS only.
-            if is_comic_request:
+            # Archive generated Art involving established Fergie cast only.
+            if should_archive_cast_art:
                 try:
                     archive_channel = bot.get_channel(
                         FERGIE_COMIC_ARCHIVE_CHANNEL_ID
@@ -6289,13 +6307,13 @@ async def on_message(message: discord.Message):
 
                         await archive_channel.send(
                             content=(
-                                f"🎨 **Fergie Comic**\n"
+                                f"🎨 **Fergie Cast Art**\n"
                                 f"Requested by: **{requester_name}**\n"
                                 f"Prompt: {art_question}"
                             ),
                             file=discord.File(
                                 io.BytesIO(image_bytes),
-                                filename="fergie_comic.png",
+                                filename="fergie_cast_art.png",
                             ),
                         )
                     else:
