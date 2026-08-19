@@ -6297,36 +6297,43 @@ async def on_message(message: discord.Message):
                         FERGIE_COMIC_ARCHIVE_CHANNEL_ID
                     )
 
-                    if archive_channel:
-                        requester = FERGIE_CAST.get(message.author.id)
-                        requester_name = (
-                            requester.get("name", message.author.display_name)
-                            if requester
-                            else message.author.display_name
+                    # Fallback if the channel is not in discord.py's local cache.
+                    if archive_channel is None:
+                        archive_channel = await bot.fetch_channel(
+                            FERGIE_COMIC_ARCHIVE_CHANNEL_ID
                         )
 
-                        await archive_channel.send(
-                            content=(
-                                f"🎨 **Fergie Cast Art**\n"
-                                f"Requested by: **{requester_name}**\n"
-                                f"Prompt: {art_question}"
-                            ),
-                            file=discord.File(
-                                io.BytesIO(image_bytes),
-                                filename="fergie_cast_art.png",
-                            ),
-                        )
-                    else:
-                        print(
-                            "FERGIE COMIC ARCHIVE ❌ "
-                            f"channel {FERGIE_COMIC_ARCHIVE_CHANNEL_ID} not found"
-                        )
+                    requester = FERGIE_CAST.get(message.author.id)
+                    requester_name = (
+                        requester.get("name", message.author.display_name)
+                        if requester
+                        else message.author.display_name
+                    )
+
+                    await archive_channel.send(
+                        content=(
+                            f"🎨 **Fergie Cast Art**\n"
+                            f"Requested by: **{requester_name}**\n"
+                            f"Prompt: {art_question}"
+                        ),
+                        file=discord.File(
+                            io.BytesIO(image_bytes),
+                            filename="fergie_cast_art.png",
+                        ),
+                    )
+
+                    print(
+                        "FERGIE CAST ART ARCHIVE ✅ "
+                        f"user={message.author.id} "
+                        f"channel={FERGIE_COMIC_ARCHIVE_CHANNEL_ID}"
+                    )
 
                 except Exception as e:
                     print(
-                        f"FERGIE COMIC ARCHIVE ERROR ❌ "
+                        f"FERGIE CAST ART ARCHIVE ERROR ❌ "
                         f"{type(e).__name__}: {e}"
                     )
+
             return
 
     # Fergie Eyes: direct image mentions always get a reaction; other images have a passive chance.
