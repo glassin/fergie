@@ -2755,9 +2755,70 @@ FERGIE_VISUAL_REFS = {
 def _fergie_visual_refs_for_prompt(prompt: str):
     text = (prompt or "").lower()
     found = []
+    seen = set()
+
+    # Collective Discord-cast phrases.
+    # These mean the human Discord crew — NOT pets/lore-only characters.
+    whole_cord_pattern = (
+        r"\b(?:"
+        r"(?:the\s+)?cord"
+        r"|(?:the\s+)?discord"
+        r"|whole\s+(?:crew|gang|server|group)"
+        r"|entire\s+(?:cord|discord|crew|gang|server|group)"
+        r"|everyone\s+in\s+(?:the\s+)?(?:cord|discord|server|crew)"
+        r"|all\s+(?:the\s+)?(?:cord|discord|server|crew|members)"
+        r")\b"
+    )
+
+    if re.search(whole_cord_pattern, text, flags=re.IGNORECASE):
+        discord_cast = (
+            "viviana",
+            "jonathan",
+            "papo",
+            "khurty",
+            "chadwin",
+            "raquel",
+            "jose",
+            "lobo",
+        )
+
+        for canonical in discord_cast:
+            info = FERGIE_VISUAL_REFS.get(canonical)
+
+            if info and canonical not in seen:
+                found.append((canonical, info["path"]))
+                seen.add(canonical)
+
+    # Always also detect characters explicitly named in the request.
+    # This allows requests such as "whole cord with Reggie" or
+    # "everyone hanging out with Chai".
     for canonical, info in FERGIE_VISUAL_REFS.items():
-        if any(re.search(rf"(?<!\w){re.escape(alias)}(?!\w)", text) for alias in info["aliases"]):
+        if canonical in seen:
+            continue
+
+        if any(
+            re.search(
+                rf"(?<!\w){re.escape(alias)}(?!\w)",
+                text,
+            )
+            for alias in info["aliases"]
+        ):
             found.append((canonical, info["path"]))
+            seen.add(canonical)
+
+    return found
+
+    # Normal named-character detection.
+    for canonical, info in FERGIE_VISUAL_REFS.items():
+        if any(
+            re.search(
+                rf"(?<!\w){re.escape(alias)}(?!\w)",
+                text,
+            )
+            for alias in info["aliases"]
+        ):
+            found.append((canonical, info["path"]))
+
     return found
 
 
@@ -2803,6 +2864,30 @@ f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for
 "Reggie is Raquel's male dog and should likewise never be referred to as a human. "
 "Do NOT swap, replace, merge, blend, duplicate, or transform one established character into another. "
 "If multiple established characters appear, keep each one as a separate, visually distinct person "
+"and match each person ONLY to their own attached reference. "
+"Aliases such as Papo/Miguel/Sancho, Chadwin/Edwin, Lobo/Pinche Lobo, "
+"Kurtie/Khurty, and Viv/Viviana refer to the SAME established character, not different characters. "
+
+"COMIC CAST AND CONTINUITY RULES: "
+"Every established character explicitly requested by the user MUST appear in the finished scene. "
+"Do not silently omit a requested established character just because the scene is crowded. "
+"Each requested established character must appear exactly ONCE in a scene unless the user explicitly "
+"asks for twins, clones, duplicates, multiple versions, or multiple copies of that character. "
+"Never duplicate an established character to fill background space. "
+"Never introduce an unrequested established Fergie cast member into the scene. "
+"Any background people must be generic strangers and must NOT resemble or reuse the appearance "
+"of an established Fergie cast character. "
+
+"For multi-panel comics, preserve strict visual and story continuity from panel to panel. "
+"The same character must keep the same identity, approximate age, body/build, face, hair, clothing, "
+"and defining visual traits unless the story explicitly changes them. "
+"Do not make a character disappear, duplicate, switch identities, or suddenly become another person "
+"between panels. "
+"Recurring vehicles, locations, furniture, pets, clothing, and important props must remain the SAME "
+"objects throughout the comic unless the user's story explicitly changes them. "
+"Do not randomly replace a vehicle with a different model, color, or type between panels. "
+"Do not place characters in impossible new locations between panels unless the story shows or implies "
+"that movement. "
 "and match each person ONLY to their own attached reference. "
 "Aliases such as Papo/Miguel/Sancho, Chadwin/Edwin, Lobo/Pinche Lobo, "
 "Kurtie/Khurty, and Viv/Viviana refer to the SAME established character, not different characters. "
