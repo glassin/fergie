@@ -3625,6 +3625,12 @@ async def _fergie_load_aux_week(week_key: str):
         "week_key": week_key,
         "events": events,
         "imports": imports,
+
+        # Wednesday midweek standings reminder.
+        "midweek_posted_at": data.get("midweek_posted_at"),
+        "midweek_message_id": data.get("midweek_message_id"),
+
+        # Sunday official winner post.
         "posted_at": data.get("posted_at"),
         "message_id": data.get("message_id"),
     }
@@ -3898,27 +3904,55 @@ def _fergie_aux_leaderboard_message(data: dict):
 
     return "\n".join(lines)
 
+def _fergie_aux_midweek_message(data: dict):
+    summary = _fergie_aux_week_summary(data)
+    standings = summary["standings"]
+
+    if not standings:
+        return (
+            "📊 **FERGIE'S MIDWEEK AUX CHECK-IN**\n"
+            "nobody has scored anything yet this week. wake up. 🙄🎧"
+        )
+
+    medals = ["🥇", "🥈", "🥉"]
+    lines = [
+        "📊 **FERGIE'S MIDWEEK AUX CHECK-IN**",
+        "here's where everyone stands right now — Sunday decides the winner. 👀🎧",
+        "",
+    ]
+
+    for index, row in enumerate(standings[:10]):
+        prefix = medals[index] if index < 3 else f"**{index + 1}.**"
+        lines.append(
+            f"{prefix} <@{row['user_id']}> — **{row['points']} pts** "
+            f"({row['submissions']} submission"
+            f"{'' if row['submissions'] == 1 else 's'}, "
+            f"{row['imports']} crate add"
+            f"{'' if row['imports'] == 1 else 's'})"
+        )
+
+    lines.append("")
+    lines.append(
+        "still plenty of time to ruin somebody else's lead before Sunday. 🙄"
+    )
+
+    return "\n".join(lines)
+
 
 async def _fergie_post_weekly_aux_leaderboard():
     tz = ZoneInfo("America/Los_Angeles")
     now = datetime.now(tz)
 
-    # Sunday only, at/after the configured hour.
-    if now.weekday() != 6 or now.hour < FERGIE_AUX_LEAGUE_SUNDAY_HOUR:
-        return False
-
     week_key = _fergie_aux_week_key(now)
     data = await _fergie_load_aux_week(week_key)
-
-    # Exactly once per week, even if Railway restarts later Sunday.
-    if data.get("posted_at"):
-        return False
 
     channel = bot.get_channel(FERGIE_AUX_LEAGUE_CHANNEL_ID)
 
     if channel is None:
         try:
-            channel = await bot.fetch_channel(FERGIE_AUX_LEAGUE_CHANNEL_ID)
+            channel = await bot.fetch_channel(
+                FERGIE_AUX_LEAGUE_CHANNEL_ID
+            )
         except Exception as e:
             print(
                 f"FERGIE AUX LEAGUE CHANNEL ERROR ❌ "
@@ -3926,21 +3960,56 @@ async def _fergie_post_weekly_aux_leaderboard():
             )
             return False
 
-    message = await channel.send(
-        _fergie_aux_leaderboard_message(data)
-    )
+    # Wednesday midweek standings reminder.
+    if now.weekday() == 2 and now.hour >= 12:
+        if not data.get("midweek_posted_at"):
+            message = await channel.send(
+                _fergie_aux_midweek_message(data)
+            )
 
-    data["posted_at"] = datetime.now(timezone.utc).isoformat()
-    data["message_id"] = message.id
-    await _fergie_save_aux_week(data)
+            data["midweek_posted_at"] = (
+                datetime.now(timezone.utc).isoformat()
+            )
+            data["midweek_message_id"] = message.id
 
-    print(
-        f"FERGIE AUX LEAGUE POSTED 🏆 week={week_key} "
-        f"channel={channel.id} message={message.id}"
-    )
+            await _fergie_save_aux_week(data)
 
-    return True
+            print(
+                f"FERGIE AUX MIDWEEK POSTED 📊 "
+                f"week={week_key} "
+                f"channel={channel.id} "
+                f"message={message.id}"
+            )
 
+            return True
+
+    # Sunday official winner post.
+    if (
+        now.weekday() == 6
+        and now.hour >= FERGIE_AUX_LEAGUE_SUNDAY_HOUR
+    ):
+        if not data.get("posted_at"):
+            message = await channel.send(
+                _fergie_aux_leaderboard_message(data)
+            )
+
+            data["posted_at"] = (
+                datetime.now(timezone.utc).isoformat()
+            )
+            data["message_id"] = message.id
+
+            await _fergie_save_aux_week(data)
+
+            print(
+                f"FERGIE AUX LEAGUE POSTED 🏆 "
+                f"week={week_key} "
+                f"channel={channel.id} "
+                f"message={message.id}"
+            )
+
+            return True
+
+    return False
 
 @tasks.loop(minutes=15)
 async def fergie_aux_league_watcher():
@@ -6208,6 +6277,45 @@ async def auxboardtest(ctx):
         )
         await ctx.reply(
             "aux board test face-planted. check Railway. 🙄",
+            mention_author=False,
+        )
+
+@bot.command(name="auxmidweektest")
+async def auxmidweektest(ctx):
+    """
+    Jonathan-only preview of Wednesday's Aux League standings.
+    Does NOT consume the real Wednesday reminder.
+    """
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try. this one belongs to Jonathan. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        week_key = _fergie_aux_week_key()
+        data = await _fergie_load_aux_week(week_key)
+
+        await ctx.send(
+            "🧪 **AUX MIDWEEK TEST — Wednesday reminder is NOT being consumed**\n\n"
+            + _fergie_aux_midweek_message(data)
+        )
+
+        print(
+            f"FERGIE AUX MIDWEEK TEST 🧪 "
+            f"admin={ctx.author.id} "
+            f"week={week_key}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE AUX MIDWEEK TEST ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "midweek aux test ate shit. check Railway. 🙄",
             mention_author=False,
         )
 
