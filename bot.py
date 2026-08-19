@@ -65,6 +65,7 @@ fergie_art_cooldown_until = 0.0
 fergie_art_last_error = ""
 FERGIE_ADMIN_USER_ID = 939225086341296209
 FERGIE_TEST_CHANNEL_ID = 1537659216066641990
+FERGIE_COMIC_ARCHIVE_CHANNEL_ID = 1539482440895045672
 
 CHANNEL_ID  = 1273436116699058290
 
@@ -6177,6 +6178,11 @@ async def on_message(message: discord.Message):
             .replace(f"<@!{bot.user.id}>", "")
             .strip()
         )
+
+        is_comic_request = bool(
+            re.search(r"\bcomic\b", art_question, flags=re.IGNORECASE)
+        )
+        
         art_prompt = _fergie_image_generation_prompt(art_question)
 
         if art_prompt:
@@ -6265,6 +6271,44 @@ async def on_message(message: discord.Message):
                 file=discord.File(io.BytesIO(image_bytes), filename="fergie_art.png"),
                 mention_author=False,
             )
+
+            # Archive generated COMICS only.
+            if is_comic_request:
+                try:
+                    archive_channel = bot.get_channel(
+                        FERGIE_COMIC_ARCHIVE_CHANNEL_ID
+                    )
+
+                    if archive_channel:
+                        requester = FERGIE_CAST.get(message.author.id)
+                        requester_name = (
+                            requester.get("name", message.author.display_name)
+                            if requester
+                            else message.author.display_name
+                        )
+
+                        await archive_channel.send(
+                            content=(
+                                f"🎨 **Fergie Comic**\n"
+                                f"Requested by: **{requester_name}**\n"
+                                f"Prompt: {art_question}"
+                            ),
+                            file=discord.File(
+                                io.BytesIO(image_bytes),
+                                filename="fergie_comic.png",
+                            ),
+                        )
+                    else:
+                        print(
+                            "FERGIE COMIC ARCHIVE ❌ "
+                            f"channel {FERGIE_COMIC_ARCHIVE_CHANNEL_ID} not found"
+                        )
+
+                except Exception as e:
+                    print(
+                        f"FERGIE COMIC ARCHIVE ERROR ❌ "
+                        f"{type(e).__name__}: {e}"
+                    )
             return
 
     # Fergie Eyes: direct image mentions always get a reaction; other images have a passive chance.
