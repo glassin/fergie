@@ -178,6 +178,27 @@ FERGIE_AUX_LEAGUE_CHANNEL_ID = int(
 FERGIE_AUX_LEAGUE_SUNDAY_HOUR = int(
     os.getenv("FERGIE_AUX_LEAGUE_SUNDAY_HOUR", "12")
 )
+
+# ---------- Fergie 5.3 Movie Club ----------
+FERGIE_MOVIECLUB_CHANNEL_ID = 1278568510787817603
+
+# Jonathan-only Movie Club admin controls.
+FERGIE_MOVIECLUB_ADMIN_USER_ID = FERGIE_ADMIN_USER_ID
+
+# Pacific-time daily schedule.
+FERGIE_MOVIECLUB_MORNING_HOUR = 9
+FERGIE_MOVIECLUB_POLL_HOUR = 12
+
+# Persistent Postgres KV key.
+FERGIE_MOVIECLUB_DB_KEY = "fergie_movieclub"
+
+# Only use this when it is actually time to watch the selected movie.
+FERGIE_MOVIECLUB_WATCH_EMOTE = "<a:movietime:1284260652021452971>"
+
+# Pagination controls for long Movie Club catalog/history views.
+FERGIE_MOVIECLUB_PAGE_SIZE = 12
+FERGIE_MOVIECLUB_PREV_EMOJI = "◀️"
+FERGIE_MOVIECLUB_NEXT_EMOJI = "▶️"
 # ---------------------------------------------------------------------------
 # -----------------------------------------
 
@@ -730,7 +751,112 @@ async def _db_set(key: str, value: dict):
             VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
-        
+
+# ================== Fergie 5.3 Movie Club ==================
+
+def _fergie_movieclub_default_state():
+    """Return a fresh default Movie Club state."""
+    return {
+        "version": 1,
+        "settings": {
+            "daily_enabled": True,
+            "morning_hour": FERGIE_MOVIECLUB_MORNING_HOUR,
+            "poll_hour": FERGIE_MOVIECLUB_POLL_HOUR,
+        },
+        "movies": {},
+        "history": [],
+        "today": {
+            "date": None,
+            "phase": "idle",
+            "nomination_message_id": None,
+            "poll_message_id": None,
+            "nominations": [],
+            "votes": {},
+            "absent_voter_ids": [],
+            "winner": None,
+        },
+        "import": {
+            "last_scan_at": None,
+            "messages_scanned": 0,
+            "movies_found": 0,
+        },
+    }
+
+
+async def _fergie_movieclub_load():
+    """Load Movie Club state from persistent Postgres storage."""
+    data = await _db_get(FERGIE_MOVIECLUB_DB_KEY)
+
+    if not isinstance(data, dict):
+        return _fergie_movieclub_default_state()
+
+    default = _fergie_movieclub_default_state()
+
+    # Preserve stored data while safely filling any fields added by updates.
+    for key, value in default.items():
+        if key not in data:
+            data[key] = value
+
+    if not isinstance(data.get("settings"), dict):
+        data["settings"] = default["settings"].copy()
+    else:
+        for key, value in default["settings"].items():
+            data["settings"].setdefault(key, value)
+
+    if not isinstance(data.get("movies"), dict):
+        data["movies"] = {}
+
+    if not isinstance(data.get("history"), list):
+        data["history"] = []
+
+    if not isinstance(data.get("today"), dict):
+        data["today"] = default["today"].copy()
+    else:
+        for key, value in default["today"].items():
+            data["today"].setdefault(key, value)
+
+    if not isinstance(data.get("import"), dict):
+        data["import"] = default["import"].copy()
+    else:
+        for key, value in default["import"].items():
+            data["import"].setdefault(key, value)
+
+    return data
+
+
+async def _fergie_movieclub_save(data):
+    """Persist the complete Movie Club state."""
+    if not isinstance(data, dict):
+        raise ValueError("Movie Club state must be a dictionary.")
+
+    await _db_set(FERGIE_MOVIECLUB_DB_KEY, data)
+
+
+def _fergie_movieclub_normalize_title(title: str) -> str:
+    """Create a stable comparison key for movie titles."""
+    title = str(title or "").strip()
+
+    # Remove Discord strikethrough markers before comparing titles.
+    title = title.replace("~~", "")
+
+    # Collapse repeated whitespace.
+    title = re.sub(r"\s+", " ", title).strip()
+
+    return title.casefold()
+
+
+def _fergie_movieclub_in_channel(ctx) -> bool:
+    """True only inside the dedicated Movie Club channel."""
+    return bool(
+        getattr(ctx, "channel", None)
+        and getattr(ctx.channel, "id", None) == FERGIE_MOVIECLUB_CHANNEL_ID
+    )
+
+
+def _fergie_movieclub_is_admin(user_id: int) -> bool:
+    """Jonathan-only Movie Club administration check."""
+    return int(user_id) == int(FERGIE_MOVIECLUB_ADMIN_USER_ID)
+    
 # ================== Fergie Birthday ==================
 
 async def maybe_post_fergie_birthday():
@@ -6319,6 +6445,602 @@ async def auxmidweektest(ctx):
             mention_author=False,
         )
 
+# ================== Fergie 5.3 Movie Club Commands ==================
+
+@bot.group(name="movieclub", invoke_without_command=True)
+async def movieclub(ctx):
+    """Movie Club 5.3 command group."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "movie club business belongs in the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    await ctx.reply(
+        "🎬 **FERGIE MOVIE CLUB 5.3**\n"
+        "use `!movieclub status`, `!movieclub list`, `!movieclub history`, "
+        "`!movieclub progress`, or the Movie Club admin controls.",
+        mention_author=False,
+    )
+
+
+@movieclub.command(name="rescan")
+async def movieclub_rescan(ctx):
+    """
+    Jonathan-only one-and-done reconciliation scan of the Movie Club channel.
+    Reads historical messages and imports obvious movie-list entries into
+    Fergie's persistent Movie Club databank.
+    """
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "nice try. only Jonathan gets to rewrite my movie brain. 🙄",
+            mention_author=False,
+        )
+        return
+
+    progress_message = await ctx.reply(
+        "🎬 scanning Movie Club history... this could take a minute. don't touch anything. 🙄",
+        mention_author=False,
+    )
+
+    try:
+        data = await _fergie_movieclub_load()
+        movies = data["movies"]
+
+        messages_scanned = 0
+        entries_found = 0
+        new_movies = 0
+        updated_movies = 0
+
+        async for msg in ctx.channel.history(
+            limit=None,
+            oldest_first=True,
+        ):
+            messages_scanned += 1
+
+            # Ignore Fergie's own generated Movie Club messages.
+            if bot.user and msg.author.id == bot.user.id:
+                continue
+
+            content = (msg.content or "").strip()
+
+            if not content:
+                continue
+
+            # Process the message line-by-line because historical movie lists
+            # may contain many titles inside one Discord message.
+            for raw_line in content.splitlines():
+                line = raw_line.strip()
+
+                if not line:
+                    continue
+
+                # A historical strikethrough entry means watched.
+                watched = (
+                    line.startswith("~~")
+                    and line.endswith("~~")
+                    and len(line) > 4
+                )
+
+                # Remove common list formatting while preserving the title.
+                cleaned = line
+
+                if watched:
+                    cleaned = cleaned[2:-2].strip()
+
+                cleaned = re.sub(
+                    r"^\s*(?:[-*•]\s+|\d+[.)]\s+)",
+                    "",
+                    cleaned,
+                ).strip()
+
+                # Ignore obvious non-title/chat lines.
+                if not cleaned:
+                    continue
+
+                if len(cleaned) > 180:
+                    continue
+
+                if cleaned.startswith(("http://", "https://")):
+                    continue
+
+                if cleaned.startswith("<@"):
+                    continue
+
+                # Skip commands and obvious Fergie/system-style lines.
+                if cleaned.startswith("!"):
+                    continue
+
+                # Require at least one letter so reactions/numbers/etc.
+                # are not imported as fake movie titles.
+                if not re.search(r"[A-Za-z]", cleaned):
+                    continue
+
+                key = _fergie_movieclub_normalize_title(cleaned)
+
+                if not key:
+                    continue
+
+                entries_found += 1
+
+                existing = movies.get(key)
+
+                if existing:
+                    changed = False
+
+                    # A crossed-out historical entry is authoritative evidence
+                    # that this movie has already been watched.
+                    if watched and not existing.get("watched", False):
+                        existing["watched"] = True
+                        changed = True
+
+                    sources = existing.get("sources", [])
+
+                    if not isinstance(sources, list):
+                        sources = []
+
+                    if "channel_import" not in sources:
+                        sources.append("channel_import")
+                        existing["sources"] = sources
+                        changed = True
+
+                    existing["last_seen_message_id"] = msg.id
+
+                    if changed:
+                        updated_movies += 1
+
+                    continue
+
+                movies[key] = {
+                    "title": cleaned,
+                    "watched": watched,
+                    "source": "channel_import",
+                    "sources": ["channel_import"],
+                    "added_at": datetime.now(timezone.utc).isoformat(),
+                    "watched_at": None,
+                    "times_nominated": 0,
+                    "times_won": 0,
+                    "last_seen_message_id": msg.id,
+                }
+
+                new_movies += 1
+
+        data["movies"] = movies
+        data["import"]["last_scan_at"] = (
+            datetime.now(timezone.utc).isoformat()
+        )
+        data["import"]["messages_scanned"] = messages_scanned
+        data["import"]["movies_found"] = len(movies)
+
+        await _fergie_movieclub_save(data)
+
+        watched_count = sum(
+            1
+            for movie in movies.values()
+            if movie.get("watched", False)
+        )
+
+        unwatched_count = len(movies) - watched_count
+
+        await progress_message.edit(
+            content=(
+                "🎬 **MOVIE CLUB DATABASE SCAN COMPLETE**\n\n"
+                f"Messages scanned: **{messages_scanned}**\n"
+                f"Possible list entries found: **{entries_found}**\n"
+                f"New movies added: **{new_movies}**\n"
+                f"Existing movies updated: **{updated_movies}**\n"
+                f"Total movies known: **{len(movies)}**\n"
+                f"Watched/crossed off: **{watched_count}**\n"
+                f"Still available: **{unwatched_count}**\n\n"
+                "movie brain acquired. unfortunately i've seen your taste now. 🙄🍿"
+            )
+        )
+
+        print(
+            f"FERGIE MOVIECLUB RESCAN ✅ "
+            f"messages={messages_scanned} "
+            f"entries={entries_found} "
+            f"movies={len(movies)} "
+            f"new={new_movies} "
+            f"updated={updated_movies}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB RESCAN ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await progress_message.edit(
+            content=(
+                "fak. Movie Club scan face-planted. 🙄🍿 "
+                "check Railway before trying again."
+            )
+        )
+
+@movieclub.command(name="status")
+async def movieclub_status(ctx):
+    """Show the current Movie Club 5.3 state."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "movie club business belongs in the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        settings = data.get("settings", {})
+        today = data.get("today", {})
+        movies = data.get("movies", {})
+
+        daily_enabled = bool(settings.get("daily_enabled", True))
+        phase = str(today.get("phase") or "idle").upper()
+
+        nominations = today.get("nominations", [])
+        if not isinstance(nominations, list):
+            nominations = []
+
+        votes = today.get("votes", {})
+        if not isinstance(votes, dict):
+            votes = {}
+
+        absent_ids = today.get("absent_voter_ids", [])
+        if not isinstance(absent_ids, list):
+            absent_ids = []
+
+        watched_count = sum(
+            1
+            for movie in movies.values()
+            if isinstance(movie, dict)
+            and movie.get("watched", False)
+        )
+
+        unwatched_count = len(movies) - watched_count
+
+        await ctx.send(
+            "🎬 **FERGIE MOVIE CLUB 5.3**\n\n"
+            f"Daily automation: **{'ON ✅' if daily_enabled else 'PAUSED ⏸️'}**\n"
+            f"Morning nominations: **{FERGIE_MOVIECLUB_MORNING_HOUR}:00 AM PT**\n"
+            f"Poll opens: **{FERGIE_MOVIECLUB_POLL_HOUR}:00 PM PT**\n\n"
+            f"Today's phase: **{phase}**\n"
+            f"Nominations: **{len(nominations)}**\n"
+            f"Votes recorded: **{len(votes)}**\n"
+            f"Absent voters: **{len(absent_ids)}**\n\n"
+            f"Movies known: **{len(movies)}**\n"
+            f"Watched: **{watched_count}**\n"
+            f"Still available: **{unwatched_count}**"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB STATUS ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "movie club status just fell down the stairs. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+
+@movieclub.command(name="progress")
+async def movieclub_progress(ctx):
+    """Show overall watched vs. remaining Movie Club progress."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "movie club business belongs in the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+        movies = data.get("movies", {})
+
+        if not isinstance(movies, dict):
+            movies = {}
+
+        total = len(movies)
+
+        watched = sum(
+            1
+            for movie in movies.values()
+            if isinstance(movie, dict)
+            and movie.get("watched", False)
+        )
+
+        remaining = total - watched
+
+        if total > 0:
+            percent = round((watched / total) * 100, 1)
+        else:
+            percent = 0.0
+
+        await ctx.send(
+            "🎬 **MOVIE CLUB PROGRESS**\n\n"
+            f"Total movies known: **{total}**\n"
+            f"Watched: **{watched}** ✅\n"
+            f"Remaining: **{remaining}** 🍿\n"
+            f"Completion: **{percent}%**"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB PROGRESS ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "apparently counting movies is difficult now. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+async def _fergie_movieclub_paginate(
+    ctx,
+    pages,
+    *,
+    timeout_seconds=180,
+):
+    """
+    Send one paginated Movie Club message and let users turn pages
+    with ◀️ / ▶️ reactions.
+
+    Self-contained: does NOT modify Fergie's existing global reaction handler.
+    """
+    if not pages:
+        pages = ["nothing to show. embarrassing. 🙄🍿"]
+
+    current_page = 0
+
+    message = await ctx.send(pages[current_page])
+
+    if len(pages) <= 1:
+        return
+
+    try:
+        await message.add_reaction(FERGIE_MOVIECLUB_PREV_EMOJI)
+        await message.add_reaction(FERGIE_MOVIECLUB_NEXT_EMOJI)
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB PAGINATION REACTION ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+        return
+
+    def check(reaction, user):
+        if user.bot:
+            return False
+
+        if reaction.message.id != message.id:
+            return False
+
+        emoji = str(reaction.emoji)
+
+        return emoji in {
+            FERGIE_MOVIECLUB_PREV_EMOJI,
+            FERGIE_MOVIECLUB_NEXT_EMOJI,
+        }
+
+    while True:
+        try:
+            reaction, user = await bot.wait_for(
+                "reaction_add",
+                timeout=timeout_seconds,
+                check=check,
+            )
+
+        except asyncio.TimeoutError:
+            try:
+                await message.clear_reactions()
+            except Exception:
+                pass
+            return
+
+        emoji = str(reaction.emoji)
+
+        if emoji == FERGIE_MOVIECLUB_NEXT_EMOJI:
+            current_page = (current_page + 1) % len(pages)
+
+        elif emoji == FERGIE_MOVIECLUB_PREV_EMOJI:
+            current_page = (current_page - 1) % len(pages)
+
+        try:
+            await message.edit(
+                content=pages[current_page]
+            )
+
+            # Remove the user's reaction so they can press it again.
+            try:
+                await reaction.remove(user)
+            except Exception:
+                pass
+
+        except Exception as e:
+            print(
+                f"FERGIE MOVIECLUB PAGINATION ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+            return
+
+
+def _fergie_movieclub_build_pages(
+    movies,
+    *,
+    watched_filter=None,
+    title="🎬 MOVIE CLUB",
+):
+    """
+    Build Discord-safe pages from Movie Club movie entries.
+
+    watched_filter:
+    - None  = all movies
+    - True  = watched only
+    - False = unwatched only
+    """
+    rows = []
+
+    for movie in movies.values():
+        if not isinstance(movie, dict):
+            continue
+
+        watched = bool(movie.get("watched", False))
+
+        if watched_filter is not None and watched != watched_filter:
+            continue
+
+        movie_title = str(movie.get("title") or "").strip()
+
+        if not movie_title:
+            continue
+
+        rows.append(
+            {
+                "title": movie_title,
+                "watched": watched,
+            }
+        )
+
+    rows.sort(
+        key=lambda item: item["title"].casefold()
+    )
+
+    if not rows:
+        return [
+            f"{title}\n\n"
+            "nothing here yet. deeply cinematic. 🙄🍿"
+        ]
+
+    pages = []
+
+    for start in range(
+        0,
+        len(rows),
+        FERGIE_MOVIECLUB_PAGE_SIZE,
+    ):
+        chunk = rows[
+            start:start + FERGIE_MOVIECLUB_PAGE_SIZE
+        ]
+
+        page_number = len(pages) + 1
+        total_pages = math.ceil(
+            len(rows) / FERGIE_MOVIECLUB_PAGE_SIZE
+        )
+
+        lines = [
+            f"{title} — Page {page_number}/{total_pages}",
+            "",
+        ]
+
+        for index, row in enumerate(
+            chunk,
+            start=start + 1,
+        ):
+            marker = "✅" if row["watched"] else "🍿"
+
+            lines.append(
+                f"**{index}.** {marker} {row['title']}"
+            )
+
+        lines.append("")
+        lines.append("◀️ previous • ▶️ next")
+
+        pages.append("\n".join(lines))
+
+    return pages
+
+
+@movieclub.command(name="list")
+async def movieclub_list(ctx):
+    """Show the current unwatched Movie Club catalog with reaction pagination."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "movie club business belongs in the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        movies = data.get("movies", {})
+
+        if not isinstance(movies, dict):
+            movies = {}
+
+        pages = _fergie_movieclub_build_pages(
+            movies,
+            watched_filter=False,
+            title="🍿 **MOVIE CLUB — STILL AVAILABLE**",
+        )
+
+        await _fergie_movieclub_paginate(
+            ctx,
+            pages,
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB LIST ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "the movie list just combusted. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+
+@movieclub.command(name="history")
+async def movieclub_history(ctx):
+    """Show watched Movie Club history with reaction pagination."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "movie club business belongs in the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        movies = data.get("movies", {})
+
+        if not isinstance(movies, dict):
+            movies = {}
+
+        pages = _fergie_movieclub_build_pages(
+            movies,
+            watched_filter=True,
+            title="✅ **MOVIE CLUB — WATCHED HISTORY**",
+        )
+
+        await _fergie_movieclub_paginate(
+            ctx,
+            pages,
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB HISTORY ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "apparently remembering movies is impossible now. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+        
+        
 @bot.event
 async def on_message(message: discord.Message):
 
