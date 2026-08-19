@@ -1290,7 +1290,7 @@ async def _fergie_movieclub_resolve_winner():
         f"{tie_note}"
     )
 
-        try:
+    try:
         commentary_prompt = (
             "You are Fergie, a sarcastic but enthusiastic Discord Movie Club host. "
             f"The winning movie is: {winner_title}. "
