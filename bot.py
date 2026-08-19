@@ -6489,7 +6489,7 @@ async def on_ready():
         fergie_aux_league_watcher.start()
 
     if not fergie_movieclub_watcher.is_running():
-    fergie_movieclub_watcher.start()
+        fergie_movieclub_watcher.start()
 
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
