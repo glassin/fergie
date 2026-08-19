@@ -179,7 +179,7 @@ FERGIE_AUX_LEAGUE_SUNDAY_HOUR = int(
     os.getenv("FERGIE_AUX_LEAGUE_SUNDAY_HOUR", "12")
 )
 
-# ---------- Fergie 5.3 Movie Club ----------
+# ---------- Fergie Movie Club ----------
 FERGIE_MOVIECLUB_CHANNEL_ID = 1278568510787817603
 
 # Jonathan-only Movie Club admin controls.
@@ -752,7 +752,7 @@ async def _db_set(key: str, value: dict):
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
 
-# ================== Fergie 5.3 Movie Club ==================
+# ================== Fergie Movie Club ==================
 
 def _fergie_movieclub_default_state():
     """Return a fresh default Movie Club state."""
@@ -6445,11 +6445,11 @@ async def auxmidweektest(ctx):
             mention_author=False,
         )
 
-# ================== Fergie 5.3 Movie Club Commands ==================
+# ================== Fergie Movie Club Commands ==================
 
 @bot.group(name="movieclub", invoke_without_command=True)
 async def movieclub(ctx):
-    """Movie Club 5.3 command group."""
+    """Movie Club command group."""
     if not _fergie_movieclub_in_channel(ctx):
         await ctx.reply(
             "movie club business belongs in the Movie Club channel. 🙄🍿",
@@ -6458,13 +6458,64 @@ async def movieclub(ctx):
         return
 
     await ctx.reply(
-        "🎬 **FERGIE MOVIE CLUB 5.3**\n"
+        "🎬 **FERGIE MOVIE CLUB**\n"
         "use `!movieclub status`, `!movieclub list`, `!movieclub history`, "
         "`!movieclub progress`, or the Movie Club admin controls.",
         mention_author=False,
     )
 
+@movieclub.command(name="cleardb")
+async def movieclub_cleardb(ctx):
+    """
+    Jonathan-only Movie Club database reset.
 
+    Deletes ONLY Movie Club's persistent databank.
+    Does not touch any other Fergie feature or database key.
+    """
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "absolutely not. only Jonathan gets to erase my movie brain. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        fresh_state = _fergie_movieclub_default_state()
+
+        await _fergie_movieclub_save(fresh_state)
+
+        await ctx.reply(
+            "🧹 **MOVIE CLUB DATABASE CLEARED**\n\n"
+            "Movie catalog: **0**\n"
+            "Watched history: **0**\n"
+            "Today's Movie Club session: **reset**\n\n"
+            "my movie brain has been pressure washed. 🙄🍿",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB CLEARDB ✅ "
+            f"admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB CLEARDB ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "fak. couldn't clear the Movie Club database. check Railway. 🙄🍿",
+            mention_author=False,
+        )
+        
 @movieclub.command(name="rescan")
 async def movieclub_rescan(ctx):
     """
@@ -6515,53 +6566,140 @@ async def movieclub_rescan(ctx):
             if not content:
                 continue
 
-            # Process the message line-by-line because historical movie lists
-            # may contain many titles inside one Discord message.
+            # Process historical list entries conservatively.
+            # Only import lines that clearly look like intentional list items,
+            # checkboxes, or fully crossed-out movie titles.
             for raw_line in content.splitlines():
                 line = raw_line.strip()
 
                 if not line:
                     continue
 
-                # A historical strikethrough entry means watched.
-                watched = (
-                    line.startswith("~~")
-                    and line.endswith("~~")
-                    and len(line) > 4
+                cleaned = None
+                watched = False
+
+                # ---------------------------------------------
+                # 1. Entire line is Discord strikethrough.
+                #    Example: ~~The Thing~~
+                # ---------------------------------------------
+                strike_match = re.fullmatch(
+                    r"~~\s*(.+?)\s*~~",
+                    line,
                 )
 
-                # Remove common list formatting while preserving the title.
-                cleaned = line
+                if strike_match:
+                    cleaned = strike_match.group(1).strip()
+                    watched = True
 
-                if watched:
-                    cleaned = cleaned[2:-2].strip()
+                # ---------------------------------------------
+                # 2. Markdown checkbox.
+                #    Examples:
+                #    - [ ] Alien
+                #    - [x] The Fly
+                # ---------------------------------------------
+                if cleaned is None:
+                    checkbox_match = re.match(
+                        r"^\s*(?:[-*•]\s*)?\[([xX ])\]\s+(.+?)\s*$",
+                        line,
+                    )
 
-                cleaned = re.sub(
-                    r"^\s*(?:[-*•]\s+|\d+[.)]\s+)",
-                    "",
+                    if checkbox_match:
+                        watched = checkbox_match.group(1).lower() == "x"
+                        cleaned = checkbox_match.group(2).strip()
+
+                # ---------------------------------------------
+                # 3. Normal bullet or numbered list item.
+                #    Examples:
+                #    - Alien
+                #    • Scream
+                #    12. The Exorcist
+                # ---------------------------------------------
+                if cleaned is None:
+                    list_match = re.match(
+                        r"^\s*(?:[-*•]\s+|\d{1,3}[.)]\s+)(.+?)\s*$",
+                        line,
+                    )
+
+                    if list_match:
+                        cleaned = list_match.group(1).strip()
+
+                # Plain conversational lines are NOT movie-list entries.
+                if cleaned is None:
+                    continue
+
+                # A bullet itself may contain a crossed-out title.
+                nested_strike = re.fullmatch(
+                    r"~~\s*(.+?)\s*~~",
                     cleaned,
-                ).strip()
+                )
 
-                # Ignore obvious non-title/chat lines.
+                if nested_strike:
+                    cleaned = nested_strike.group(1).strip()
+                    watched = True
+
+                # Remove harmless Markdown emphasis.
+                cleaned = cleaned.strip("*_` ").strip()
+
                 if not cleaned:
                     continue
 
-                if len(cleaned) > 180:
+                # Ignore headings such as:
+                # "1999 Golden Years of JP Horror:"
+                if cleaned.endswith(":"):
                     continue
 
-                if cleaned.startswith(("http://", "https://")):
+                # Ignore URLs, commands, mentions, and obvious Discord junk.
+                if cleaned.startswith(
+                    (
+                        "http://",
+                        "https://",
+                        "!",
+                        "<@",
+                        "<#",
+                        "<:",
+                        "<a:",
+                    )
+                ):
                     continue
 
-                if cleaned.startswith("<@"):
-                    continue
-
-                # Skip commands and obvious Fergie/system-style lines.
-                if cleaned.startswith("!"):
-                    continue
-
-                # Require at least one letter so reactions/numbers/etc.
-                # are not imported as fake movie titles.
+                # Movie titles need at least one real letter.
                 if not re.search(r"[A-Za-z]", cleaned):
+                    continue
+
+                # Keep absurdly long chat/commentary lines out of the catalog.
+                if len(cleaned) > 120:
+                    continue
+
+                if len(cleaned.split()) > 15:
+                    continue
+
+                # Reject obvious conversational sentences.
+                conversational_patterns = (
+                    r"\bi think\b",
+                    r"\bi thought\b",
+                    r"\bi like\b",
+                    r"\bi love\b",
+                    r"\bi hate\b",
+                    r"\bpretty good\b",
+                    r"\breally good\b",
+                    r"\bwe should\b",
+                    r"\bwe need\b",
+                    r"\byou should\b",
+                    r"\bgoing to\b",
+                    r"\bgonna\b",
+                    r"\blmao\b",
+                    r"\blmfao\b",
+                    r"\blol\b",
+                )
+
+                if any(
+                    re.search(
+                        pattern,
+                        cleaned,
+                        flags=re.IGNORECASE,
+                    )
+                    for pattern in conversational_patterns
+                ):
                     continue
 
                 key = _fergie_movieclub_normalize_title(cleaned)
@@ -6576,8 +6714,8 @@ async def movieclub_rescan(ctx):
                 if existing:
                     changed = False
 
-                    # A crossed-out historical entry is authoritative evidence
-                    # that this movie has already been watched.
+                    # Historical crossed-out entries are authoritative:
+                    # crossed out = watched.
                     if watched and not existing.get("watched", False):
                         existing["watched"] = True
                         changed = True
@@ -6612,7 +6750,6 @@ async def movieclub_rescan(ctx):
                 }
 
                 new_movies += 1
-
         data["movies"] = movies
         data["import"]["last_scan_at"] = (
             datetime.now(timezone.utc).isoformat()
@@ -6668,7 +6805,7 @@ async def movieclub_rescan(ctx):
 
 @movieclub.command(name="status")
 async def movieclub_status(ctx):
-    """Show the current Movie Club 5.3 state."""
+    """Show the current Movie Club state."""
     if not _fergie_movieclub_in_channel(ctx):
         await ctx.reply(
             "movie club business belongs in the Movie Club channel. 🙄🍿",
@@ -6708,7 +6845,7 @@ async def movieclub_status(ctx):
         unwatched_count = len(movies) - watched_count
 
         await ctx.send(
-            "🎬 **FERGIE MOVIE CLUB 5.3**\n\n"
+            "🎬 **FERGIE MOVIE CLUB**\n\n"
             f"Daily automation: **{'ON ✅' if daily_enabled else 'PAUSED ⏸️'}**\n"
             f"Morning nominations: **{FERGIE_MOVIECLUB_MORNING_HOUR}:00 AM PT**\n"
             f"Poll opens: **{FERGIE_MOVIECLUB_POLL_HOUR}:00 PM PT**\n\n"
