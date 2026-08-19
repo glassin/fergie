@@ -199,6 +199,17 @@ FERGIE_MOVIECLUB_WATCH_EMOTE = "<a:movietime:1284260652021452971>"
 FERGIE_MOVIECLUB_PAGE_SIZE = 12
 FERGIE_MOVIECLUB_PREV_EMOJI = "◀️"
 FERGIE_MOVIECLUB_NEXT_EMOJI = "▶️"
+# Required Movie Club voters.
+FERGIE_MOVIECLUB_REQUIRED_VOTER_IDS = [
+    939225086341296209,   # Jonathan
+    661077262468382761,   # Viviana
+    1028310674318839878,  # Papo / Sancho
+    534227493360762891,   # Kurtie
+    1422010902680567918,  # Raquel
+    805819966678630420,   # Jose
+    176064030623006721,   # Chadwin / Edwin
+    919405253470871562,   # Lobo
+]
 # ---------------------------------------------------------------------------
 # -----------------------------------------
 
@@ -759,7 +770,7 @@ def _fergie_movieclub_default_state():
     return {
         "version": 1,
         "settings": {
-            "daily_enabled": True,
+            "daily_enabled": False,
             "morning_hour": FERGIE_MOVIECLUB_MORNING_HOUR,
             "poll_hour": FERGIE_MOVIECLUB_POLL_HOUR,
         },
@@ -856,6 +867,493 @@ def _fergie_movieclub_in_channel(ctx) -> bool:
 def _fergie_movieclub_is_admin(user_id: int) -> bool:
     """Jonathan-only Movie Club administration check."""
     return int(user_id) == int(FERGIE_MOVIECLUB_ADMIN_USER_ID)
+    
+# ================== Movie Club Daily Scheduler ==================
+
+async def _fergie_movieclub_open_morning_nominations():
+    """
+    Open today's Movie Club nomination session if daily automation is enabled.
+
+    Safe for repeated checks:
+    - only runs in the Movie Club channel
+    - only opens one nomination session per calendar day
+    - does nothing while Movie Club automation is paused
+    """
+    data = await _fergie_movieclub_load()
+
+    settings = data.get("settings", {})
+
+    if not settings.get("daily_enabled", False):
+        return False
+
+    tz = ZoneInfo("America/Los_Angeles")
+    now = datetime.now(tz)
+    today_key = now.date().isoformat()
+
+    today = data.get("today", {})
+
+    # Already opened today's Movie Club.
+    if (
+        today.get("date") == today_key
+        and today.get("phase") != "idle"
+    ):
+        return False
+
+    channel = bot.get_channel(FERGIE_MOVIECLUB_CHANNEL_ID)
+
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(
+                FERGIE_MOVIECLUB_CHANNEL_ID
+            )
+        except Exception as e:
+            print(
+                f"FERGIE MOVIECLUB CHANNEL ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+            return False
+
+    nomination_message = await channel.send(
+        "🎬 **MOVIE CLUB NOMINATIONS ARE OPEN**\n\n"
+        "what do we want to watch today, freaks? 🙄🍿\n"
+        "drop your nomination with `!movieclub nominate <movie>`.\n\n"
+        f"nominations close at **{FERGIE_MOVIECLUB_POLL_HOUR}:00 PM PT**."
+    )
+
+    nominations = []
+
+    # Fergie contributes one random unwatched movie from her databank.
+    movies = data.get("movies", {})
+
+    if not isinstance(movies, dict):
+        movies = {}
+
+    eligible_movies = []
+
+    for movie_key, movie in movies.items():
+        if not isinstance(movie, dict):
+            continue
+
+        if movie.get("watched", False):
+            continue
+
+        movie_title = str(movie.get("title") or "").strip()
+
+        if not movie_title:
+            continue
+
+        eligible_movies.append(
+            {
+                "movie_key": movie_key,
+                "title": movie_title,
+            }
+        )
+
+    if eligible_movies:
+        fergie_pick = random.choice(eligible_movies)
+
+        nominations.append(
+            {
+                "user_id": None,
+                "display_name": "Fergie",
+                "title": fergie_pick["title"],
+                "movie_key": fergie_pick["movie_key"],
+                "nominated_at": datetime.now(timezone.utc).isoformat(),
+                "source": "fergie",
+            }
+        )
+
+        picked_movie = movies.get(
+            fergie_pick["movie_key"],
+            {},
+        )
+
+        if isinstance(picked_movie, dict):
+            picked_movie["times_nominated"] = (
+                int(picked_movie.get("times_nominated", 0) or 0)
+                + 1
+            )
+
+        try:
+            await channel.send(
+                f"🙄 fine. i'm putting **{fergie_pick['title']}** "
+                "into the nominations too. somebody around here needs taste. 🍿"
+            )
+        except Exception as e:
+            print(
+                f"FERGIE MOVIECLUB SELF PICK MESSAGE ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+
+    data["today"] = {
+        "date": today_key,
+        "phase": "nominations",
+        "nomination_message_id": nomination_message.id,
+        "poll_message_id": None,
+        "nominations": nominations,
+        "votes": {},
+        "absent_voter_ids": [],
+        "winner": None,
+    }
+
+    data["movies"] = movies
+
+    await _fergie_movieclub_save(data)
+
+    print(
+        f"FERGIE MOVIECLUB NOMINATIONS OPEN ✅ "
+        f"date={today_key} "
+        f"message={nomination_message.id}"
+    )
+
+    return True
+    
+async def _fergie_movieclub_open_poll():
+    """
+    Convert today's nominations into the noon Movie Club reaction poll.
+    Safe for repeated watcher checks.
+    """
+    data = await _fergie_movieclub_load()
+
+    settings = data.get("settings", {})
+
+    if not settings.get("daily_enabled", False):
+        return False
+
+    today = data.get("today", {})
+
+    if today.get("phase") != "nominations":
+        return False
+
+    nominations = today.get("nominations", [])
+
+    if not isinstance(nominations, list):
+        nominations = []
+
+    if not nominations:
+        return False
+
+    channel = bot.get_channel(FERGIE_MOVIECLUB_CHANNEL_ID)
+
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(
+                FERGIE_MOVIECLUB_CHANNEL_ID
+            )
+        except Exception as e:
+            print(
+                f"FERGIE MOVIECLUB POLL CHANNEL ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+            return False
+
+    vote_emojis = [
+        "1️⃣",
+        "2️⃣",
+        "3️⃣",
+        "4️⃣",
+        "5️⃣",
+        "6️⃣",
+        "7️⃣",
+        "8️⃣",
+        "9️⃣",
+        "🔟",
+    ]
+
+    # Keep the poll to Discord-friendly size.
+    poll_nominations = nominations[:10]
+
+    lines = [
+        "🗳️ **MOVIE CLUB POLL**",
+        "",
+        "nominations are closed. vote with the reactions below. 🙄🍿",
+        "",
+    ]
+
+    for index, nomination in enumerate(poll_nominations):
+        title = str(
+            nomination.get("title")
+            or "Unknown movie"
+        )
+
+        nominator = str(
+            nomination.get("display_name")
+            or "Fergie"
+        )
+
+        lines.append(
+            f"{vote_emojis[index]} **{title}** — {nominator}"
+        )
+
+    poll_message = await channel.send(
+        "\n".join(lines)
+    )
+
+    for index in range(len(poll_nominations)):
+        try:
+            await poll_message.add_reaction(
+                vote_emojis[index]
+            )
+        except Exception as e:
+            print(
+                f"FERGIE MOVIECLUB POLL REACTION ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+
+    today["phase"] = "voting"
+    today["poll_message_id"] = poll_message.id
+    today["votes"] = {}
+    today["poll_options"] = [
+        {
+            "emoji": vote_emojis[index],
+            "movie_key": nomination.get("movie_key"),
+            "title": nomination.get("title"),
+        }
+        for index, nomination in enumerate(poll_nominations)
+    ]
+
+    data["today"] = today
+
+    await _fergie_movieclub_save(data)
+
+    print(
+        f"FERGIE MOVIECLUB POLL OPEN ✅ "
+        f"message={poll_message.id} "
+        f"options={len(poll_nominations)}"
+    )
+
+    return True
+
+def _fergie_movieclub_required_voters_today(today: dict):
+    """
+    Return the required voter IDs for today after removing absentees.
+    """
+    absent_ids = today.get("absent_voter_ids", [])
+
+    if not isinstance(absent_ids, list):
+        absent_ids = []
+
+    absent_ids = {
+        int(user_id)
+        for user_id in absent_ids
+        if str(user_id).isdigit()
+    }
+
+    return [
+        int(user_id)
+        for user_id in FERGIE_MOVIECLUB_REQUIRED_VOTER_IDS
+        if int(user_id) not in absent_ids
+    ]
+
+
+def _fergie_movieclub_voting_complete(today: dict):
+    """
+    True once every currently-required voter has submitted a stored vote.
+    """
+    required_voters = _fergie_movieclub_required_voters_today(today)
+
+    votes = today.get("votes", {})
+
+    if not isinstance(votes, dict):
+        votes = {}
+
+    voted_ids = {
+        int(user_id)
+        for user_id in votes.keys()
+        if str(user_id).isdigit()
+    }
+
+    return all(
+        user_id in voted_ids
+        for user_id in required_voters
+    )
+
+async def _fergie_movieclub_resolve_winner():
+    """
+    Resolve today's Movie Club vote once all required voters are finished.
+    Ties are broken randomly between the tied movies.
+    """
+    data = await _fergie_movieclub_load()
+    today = data.get("today", {})
+
+    if today.get("phase") != "voting":
+        return False
+
+    if not _fergie_movieclub_voting_complete(today):
+        return False
+
+    votes = today.get("votes", {})
+
+    if not isinstance(votes, dict) or not votes:
+        return False
+
+    vote_counts = {}
+
+    for vote in votes.values():
+        if not isinstance(vote, dict):
+            continue
+
+        movie_key = str(
+            vote.get("movie_key")
+            or ""
+        ).strip()
+
+        if not movie_key:
+            continue
+
+        vote_counts[movie_key] = (
+            vote_counts.get(movie_key, 0)
+            + 1
+        )
+
+    if not vote_counts:
+        return False
+
+    highest_votes = max(vote_counts.values())
+
+    tied_keys = [
+        movie_key
+        for movie_key, count in vote_counts.items()
+        if count == highest_votes
+    ]
+
+    winner_key = random.choice(tied_keys)
+
+    poll_options = today.get("poll_options", [])
+
+    winner_title = winner_key
+
+    if isinstance(poll_options, list):
+        for option in poll_options:
+            if not isinstance(option, dict):
+                continue
+
+            if str(option.get("movie_key")) == winner_key:
+                winner_title = str(
+                    option.get("title")
+                    or winner_key
+                )
+                break
+
+    movies = data.get("movies", {})
+
+    if not isinstance(movies, dict):
+        movies = {}
+
+    winner_movie = movies.get(winner_key)
+
+    if isinstance(winner_movie, dict):
+        winner_movie["times_won"] = (
+            int(winner_movie.get("times_won", 0) or 0)
+            + 1
+        )
+
+    today["winner"] = {
+        "movie_key": winner_key,
+        "title": winner_title,
+        "votes": highest_votes,
+        "resolved_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    today["phase"] = "winner"
+
+    data["today"] = today
+    data["movies"] = movies
+
+    await _fergie_movieclub_save(data)
+
+    channel = bot.get_channel(FERGIE_MOVIECLUB_CHANNEL_ID)
+
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(
+                FERGIE_MOVIECLUB_CHANNEL_ID
+            )
+        except Exception as e:
+            print(
+                f"FERGIE MOVIECLUB WINNER CHANNEL ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+            return False
+
+    tie_note = ""
+
+    if len(tied_keys) > 1:
+        tie_note = (
+            "\n🎲 there was a tie, so i broke it randomly "
+            "because apparently democracy needed help."
+        )
+
+    await channel.send(
+        f"🏆 **MOVIE CLUB WINNER: {winner_title}**\n"
+        f"Votes: **{highest_votes}**"
+        f"{tie_note}"
+    )
+
+        try:
+        commentary_prompt = (
+            "You are Fergie, a sarcastic but enthusiastic Discord Movie Club host. "
+            f"The winning movie is: {winner_title}. "
+            "Give a short 1-3 sentence description/commentary about the movie. "
+            "Do not invent plot details if you are unsure. "
+            "Do not mention voting mechanics, databases, prompts, or APIs. "
+            "Keep it fun, concise, and in Fergie's personality."
+        )
+
+        commentary = await ask_gemini(commentary_prompt)
+
+        if commentary:
+            commentary = commentary.strip()
+
+        if (
+            commentary
+            and not commentary.startswith("error:")
+            and not commentary.startswith("Gemini error:")
+        ):
+            await channel.send(
+                f"🎬 {commentary}"
+            )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB COMMENTARY ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+    print(
+        f"FERGIE MOVIECLUB WINNER ✅ "
+        f"title={winner_title!r} "
+        f"votes={highest_votes}"
+    )
+
+    return True
+    
+    
+@tasks.loop(minutes=5)
+async def fergie_movieclub_watcher():
+    """
+    Lightweight Movie Club scheduler.
+    Opens morning nominations and the noon reaction poll.
+    """
+    tz = ZoneInfo("America/Los_Angeles")
+    now = datetime.now(tz)
+
+    try:
+        if now.hour >= FERGIE_MOVIECLUB_MORNING_HOUR:
+            await _fergie_movieclub_open_morning_nominations()
+
+        if now.hour >= FERGIE_MOVIECLUB_POLL_HOUR:
+            await _fergie_movieclub_open_poll()
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB WATCHER ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+@fergie_movieclub_watcher.before_loop
+async def _wait_for_fergie_movieclub_watcher():
+    await bot.wait_until_ready()
     
 # ================== Fergie Birthday ==================
 
@@ -5990,6 +6488,9 @@ async def on_ready():
     if not fergie_aux_league_watcher.is_running():
         fergie_aux_league_watcher.start()
 
+    if not fergie_movieclub_watcher.is_running():
+    fergie_movieclub_watcher.start()
+
 @tasks.loop(minutes=1)
 async def kewchie_daily_scheduler():
     now_utc = datetime.now(timezone.utc).replace(second=0, microsecond=0)
@@ -6463,7 +6964,1033 @@ async def movieclub(ctx):
         "`!movieclub progress`, or the Movie Club admin controls.",
         mention_author=False,
     )
+    
+@movieclub.command(name="start")
+async def movieclub_start(ctx):
+    """Jonathan-only control to enable the daily Movie Club cycle."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
 
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "nice try. only Jonathan controls the Movie Club schedule. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        settings = data.setdefault("settings", {})
+
+        if settings.get("daily_enabled", True):
+            await ctx.reply(
+                "🎬 Movie Club is already running daily. calm down, Spielberg. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        settings["daily_enabled"] = True
+
+        await _fergie_movieclub_save(data)
+
+        await ctx.reply(
+            "🎬 **MOVIE CLUB STARTED**\n\n"
+            "Daily Movie Club is **ON**. ✅\n"
+            f"I'll open nominations every morning at "
+            f"**{FERGIE_MOVIECLUB_MORNING_HOUR}:00 AM PT** "
+            "until you tell me to stop.",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB STARTED ✅ "
+            f"admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB START ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't start Movie Club. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+
+@movieclub.command(name="stop")
+async def movieclub_stop(ctx):
+    """Jonathan-only control to pause the daily Movie Club cycle."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "nice try. only Jonathan controls the Movie Club schedule. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        settings = data.setdefault("settings", {})
+
+        if not settings.get("daily_enabled", True):
+            await ctx.reply(
+                "Movie Club is already paused. i'm literally doing nothing. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        settings["daily_enabled"] = False
+
+        await _fergie_movieclub_save(data)
+
+        await ctx.reply(
+            "⏸️ **MOVIE CLUB PAUSED**\n\n"
+            "Daily Movie Club is **OFF**.\n"
+            "I won't start another morning nomination cycle until "
+            "`!movieclub start` turns it back on.",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB STOPPED ⏸️ "
+            f"admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB STOP ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't pause Movie Club. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+@movieclub.command(name="nominate")
+async def movieclub_nominate(ctx, *, movie_title: str = ""):
+    """
+    Nominate one movie during today's nomination window.
+
+    Every accepted nomination is also learned by Fergie's
+    permanent Movie Club databank if it is new.
+    """
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "movie club business belongs in the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    movie_title = re.sub(
+        r"\s+",
+        " ",
+        str(movie_title or "").strip(),
+    )
+
+    if not movie_title:
+        await ctx.reply(
+            "you have to actually give me a movie, babe. 🙄🍿\n"
+            "`!movieclub nominate <movie>`",
+            mention_author=False,
+        )
+        return
+
+    if len(movie_title) > 180:
+        await ctx.reply(
+            "that is a dissertation, not a movie title. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        today = data.get("today", {})
+
+        if today.get("phase") != "nominations":
+            await ctx.reply(
+                "nominations aren't open right now. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        key = _fergie_movieclub_normalize_title(movie_title)
+
+        if not key:
+            await ctx.reply(
+                "that movie title gave me absolutely nothing. 🙄",
+                mention_author=False,
+            )
+            return
+
+        movies = data.setdefault("movies", {})
+        existing_movie = movies.get(key)
+
+        # Already watched = cannot nominate again.
+        if (
+            isinstance(existing_movie, dict)
+            and existing_movie.get("watched", False)
+        ):
+            existing_title = (
+                existing_movie.get("title")
+                or movie_title
+            )
+
+            await ctx.reply(
+                f"we already watched **{existing_title}**. "
+                "pick something we haven't crossed off. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        nominations = today.get("nominations", [])
+
+        if not isinstance(nominations, list):
+            nominations = []
+
+        user_id = int(ctx.author.id)
+
+        # See whether this member already nominated something today.
+        previous_nomination = None
+
+        for item in nominations:
+            if (
+                isinstance(item, dict)
+                and int(item.get("user_id", 0) or 0) == user_id
+            ):
+                previous_nomination = item
+                break
+
+        # Don't allow the exact same movie to appear twice in today's poll.
+        for item in nominations:
+            if not isinstance(item, dict):
+                continue
+
+            existing_key = _fergie_movieclub_normalize_title(
+                item.get("title", "")
+            )
+
+            if (
+                existing_key == key
+                and item is not previous_nomination
+            ):
+                await ctx.reply(
+                    f"**{movie_title}** is already nominated today. "
+                    "great minds or whatever. 🙄🍿",
+                    mention_author=False,
+                )
+                return
+
+        # Learn a brand-new movie permanently.
+        if not isinstance(existing_movie, dict):
+            movies[key] = {
+                "title": movie_title,
+                "watched": False,
+                "source": "nomination",
+                "sources": ["nomination"],
+                "added_at": datetime.now(timezone.utc).isoformat(),
+                "watched_at": None,
+                "times_nominated": 0,
+                "times_won": 0,
+                "last_seen_message_id": None,
+            }
+
+            existing_movie = movies[key]
+
+        else:
+            sources = existing_movie.get("sources", [])
+
+            if not isinstance(sources, list):
+                sources = []
+
+            if "nomination" not in sources:
+                sources.append("nomination")
+
+            existing_movie["sources"] = sources
+
+        # If they already nominated something today, replace it.
+        if previous_nomination is not None:
+            old_title = str(
+                previous_nomination.get("title")
+                or "their previous movie"
+            )
+
+            previous_nomination["title"] = movie_title
+            previous_nomination["movie_key"] = key
+            previous_nomination["nominated_at"] = (
+                datetime.now(timezone.utc).isoformat()
+            )
+
+            existing_movie["times_nominated"] = (
+                int(existing_movie.get("times_nominated", 0) or 0)
+                + 1
+            )
+
+            today["nominations"] = nominations
+            data["today"] = today
+            data["movies"] = movies
+
+            await _fergie_movieclub_save(data)
+
+            await ctx.reply(
+                f"🎬 swapped your nomination from **{old_title}** "
+                f"to **{movie_title}**. fickle, but allowed. 🙄🍿",
+                mention_author=False,
+            )
+
+            return
+
+        # First nomination from this member today.
+        nominations.append(
+            {
+                "user_id": user_id,
+                "display_name": ctx.author.display_name,
+                "title": movie_title,
+                "movie_key": key,
+                "nominated_at": datetime.now(timezone.utc).isoformat(),
+                "source": "member",
+            }
+        )
+
+        existing_movie["times_nominated"] = (
+            int(existing_movie.get("times_nominated", 0) or 0)
+            + 1
+        )
+
+        today["nominations"] = nominations
+        data["today"] = today
+        data["movies"] = movies
+
+        await _fergie_movieclub_save(data)
+
+        await ctx.reply(
+            f"🎬 **{movie_title}** is in.\n"
+            f"nominated by {ctx.author.mention}. "
+            "i'll judge this decision later. 🙄🍿",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB NOMINATION ✅ "
+            f"user={ctx.author.id} "
+            f"title={movie_title!r}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB NOMINATION ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "your nomination fell into the cinematic void. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+@movieclub.command(name="absent")
+async def movieclub_absent(ctx, member: discord.Member = None):
+    """Jonathan-only: excuse a required voter from today's Movie Club."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to excuse people from movie court. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if member is None:
+        await ctx.reply(
+            "tell me who is absent. 🙄\n"
+            "`!movieclub absent @member`",
+            mention_author=False,
+        )
+        return
+
+    if member.id not in FERGIE_MOVIECLUB_REQUIRED_VOTER_IDS:
+        await ctx.reply(
+            f"{member.mention} isn't on the required Movie Club voter list.",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+        today = data.get("today", {})
+
+        absent_ids = today.get("absent_voter_ids", [])
+
+        if not isinstance(absent_ids, list):
+            absent_ids = []
+
+        if member.id in absent_ids:
+            await ctx.reply(
+                f"{member.mention} is already marked absent today. 🙄",
+                mention_author=False,
+            )
+            return
+
+        absent_ids.append(member.id)
+
+        today["absent_voter_ids"] = absent_ids
+        data["today"] = today
+
+        await _fergie_movieclub_save(data)
+        
+        # If voting is already open, removing this absent voter may
+        # complete the required vote count immediately.
+        if today.get("phase") == "voting":
+            await _fergie_movieclub_resolve_winner()
+
+        await ctx.reply(
+            f"🛌 {member.mention} is **absent** for today's Movie Club.\n"
+            "their missing vote won't hold everybody hostage. 🙄🍿",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB ABSENT ✅ "
+            f"user={member.id} admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB ABSENT ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't update the absentee list. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+
+@movieclub.command(name="present")
+async def movieclub_present(ctx, member: discord.Member = None):
+    """Jonathan-only: restore an absent voter to today's required voters."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to change movie court attendance. 🙄",
+            mention_author=False,
+        )
+        return
+
+    if member is None:
+        await ctx.reply(
+            "tell me who came back. 🙄\n"
+            "`!movieclub present @member`",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+        today = data.get("today", {})
+
+        absent_ids = today.get("absent_voter_ids", [])
+
+        if not isinstance(absent_ids, list):
+            absent_ids = []
+
+        if member.id not in absent_ids:
+            await ctx.reply(
+                f"{member.mention} isn't marked absent today.",
+                mention_author=False,
+            )
+            return
+
+        absent_ids.remove(member.id)
+
+        today["absent_voter_ids"] = absent_ids
+        data["today"] = today
+
+        await _fergie_movieclub_save(data)
+
+        await ctx.reply(
+            f"🎬 {member.mention} is **present** again.\n"
+            "their vote counts toward finishing today's poll.",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB PRESENT ✅ "
+            f"user={member.id} admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB PRESENT ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't update the attendance list. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+@movieclub.command(name="watched")
+async def movieclub_watched(ctx, *, movie_title: str = ""):
+    """Jonathan-only: mark a Movie Club title as officially watched."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to officially cross movies off. 🙄",
+            mention_author=False,
+        )
+        return
+
+    movie_title = re.sub(
+        r"\s+",
+        " ",
+        str(movie_title or "").strip(),
+    )
+
+    if not movie_title:
+        await ctx.reply(
+            "tell me what we actually watched. 🙄🍿\n"
+            "`!movieclub watched <movie>`",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+        movies = data.get("movies", {})
+
+        if not isinstance(movies, dict):
+            movies = {}
+
+        key = _fergie_movieclub_normalize_title(movie_title)
+
+        movie = movies.get(key)
+
+        if not isinstance(movie, dict):
+            await ctx.reply(
+                f"I don't have **{movie_title}** in my Movie Club databank yet. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        if movie.get("watched", False):
+            await ctx.reply(
+                f"**{movie.get('title', movie_title)}** is already marked watched. ✅",
+                mention_author=False,
+            )
+            return
+
+        movie["watched"] = True
+        movie["watched_at"] = datetime.now(timezone.utc).isoformat()
+
+        movies[key] = movie
+        data["movies"] = movies
+
+        history = data.get("history", [])
+
+        if not isinstance(history, list):
+            history = []
+
+        history.append(
+            {
+                "movie_key": key,
+                "title": movie.get("title", movie_title),
+                "watched_at": movie["watched_at"],
+                "marked_by": int(ctx.author.id),
+            }
+        )
+
+        data["history"] = history
+
+        await _fergie_movieclub_save(data)
+
+        await ctx.reply(
+            f"✅ **{movie.get('title', movie_title)}** is officially watched.\n"
+            "crossed off. never haunting the random-pick pool again. 🙄🍿",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB WATCHED ✅ "
+            f"title={movie.get('title', movie_title)!r} "
+            f"admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB WATCHED ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't mark that movie watched. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+
+@movieclub.command(name="unwatched")
+async def movieclub_unwatched(ctx, *, movie_title: str = ""):
+    """Jonathan-only: reverse a watched mark."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to undo watched status. 🙄",
+            mention_author=False,
+        )
+        return
+
+    movie_title = re.sub(
+        r"\s+",
+        " ",
+        str(movie_title or "").strip(),
+    )
+
+    if not movie_title:
+        await ctx.reply(
+            "tell me which movie to put back in circulation. 🙄🍿\n"
+            "`!movieclub unwatched <movie>`",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+        movies = data.get("movies", {})
+
+        if not isinstance(movies, dict):
+            movies = {}
+
+        key = _fergie_movieclub_normalize_title(movie_title)
+        movie = movies.get(key)
+
+        if not isinstance(movie, dict):
+            await ctx.reply(
+                f"I don't have **{movie_title}** in my Movie Club databank.",
+                mention_author=False,
+            )
+            return
+
+        if not movie.get("watched", False):
+            await ctx.reply(
+                f"**{movie.get('title', movie_title)}** is already unwatched.",
+                mention_author=False,
+            )
+            return
+
+        movie["watched"] = False
+        movie["watched_at"] = None
+
+        movies[key] = movie
+        data["movies"] = movies
+
+        await _fergie_movieclub_save(data)
+
+        await ctx.reply(
+            f"🍿 **{movie.get('title', movie_title)}** is back in the unwatched pool.",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB UNWATCHED ✅ "
+            f"title={movie.get('title', movie_title)!r} "
+            f"admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB UNWATCHED ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't undo that watched mark. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+        
+@movieclub.command(name="movietime")
+async def movieclub_movietime(ctx):
+    """Jonathan-only: announce that it is actually time to watch today's winner."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to call actual movie time. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+        today = data.get("today", {})
+
+        winner = today.get("winner")
+
+        if not isinstance(winner, dict):
+            await ctx.reply(
+                "we don't even have a winner yet. be serious. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        winner_title = str(
+            winner.get("title")
+            or "tonight's movie"
+        ).strip()
+
+        await ctx.send(
+            f"{FERGIE_MOVIECLUB_WATCH_EMOTE}\n"
+            f"🎬 **MOVIE TIME — {winner_title}**\n"
+            "okay freaks, sit down, shut up, snacks ready. we're actually watching now. 🍿"
+        )
+
+        today["phase"] = "watching"
+        today["watch_started_at"] = (
+            datetime.now(timezone.utc).isoformat()
+        )
+
+        data["today"] = today
+
+        await _fergie_movieclub_save(data)
+
+        print(
+            f"FERGIE MOVIECLUB MOVIETIME ✅ "
+            f"title={winner_title!r} "
+            f"admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB MOVIETIME ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "movie time tripped over the projector cable. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+@movieclub.command(name="forcepoll")
+async def movieclub_forcepoll(ctx):
+    """Jonathan-only: manually close nominations and open today's poll."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to force movie court forward. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+        today = data.get("today", {})
+
+        if today.get("phase") != "nominations":
+            await ctx.reply(
+                "there isn't an open nomination session to force into a poll. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        nominations = today.get("nominations", [])
+
+        if not isinstance(nominations, list) or not nominations:
+            await ctx.reply(
+                "we have no nominations. i'm not polling air. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        opened = await _fergie_movieclub_open_poll()
+
+        if opened:
+            await ctx.reply(
+                "🗳️ poll forced open. democracy has been manually activated. 🙄🍿",
+                mention_author=False,
+            )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB FORCEPOLL ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't force the poll open. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+@movieclub.command(name="forcewinner")
+async def movieclub_forcewinner(ctx):
+    """Jonathan-only: resolve today's current votes even if voters are still missing."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to override movie democracy. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+        today = data.get("today", {})
+
+        if today.get("phase") != "voting":
+            await ctx.reply(
+                "there isn't an active vote to force-resolve. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        votes = today.get("votes", {})
+
+        if not isinstance(votes, dict) or not votes:
+            await ctx.reply(
+                "nobody has voted yet. i cannot crown a winner from vibes alone. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        # Temporarily neutralize all currently-missing required voters.
+        required_ids = _fergie_movieclub_required_voters_today(today)
+
+        voted_ids = {
+            int(user_id)
+            for user_id in votes.keys()
+            if str(user_id).isdigit()
+        }
+
+        absent_ids = today.get("absent_voter_ids", [])
+
+        if not isinstance(absent_ids, list):
+            absent_ids = []
+
+        for user_id in required_ids:
+            if user_id not in voted_ids and user_id not in absent_ids:
+                absent_ids.append(user_id)
+
+        today["absent_voter_ids"] = absent_ids
+        data["today"] = today
+
+        await _fergie_movieclub_save(data)
+
+        resolved = await _fergie_movieclub_resolve_winner()
+
+        if resolved:
+            await ctx.reply(
+                "🏆 forced the result. movie court is adjourned. 🙄🍿",
+                mention_author=False,
+            )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB FORCEWINNER ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't force the winner. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+@movieclub.command(name="resetday")
+async def movieclub_resetday(ctx):
+    """Jonathan-only: reset today's session without touching the permanent movie catalog."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to reset movie court. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        data["today"] = {
+            "date": None,
+            "phase": "idle",
+            "nomination_message_id": None,
+            "poll_message_id": None,
+            "nominations": [],
+            "votes": {},
+            "absent_voter_ids": [],
+            "winner": None,
+        }
+
+        await _fergie_movieclub_save(data)
+
+        await ctx.reply(
+            "🧹 **TODAY'S MOVIE CLUB RESET**\n\n"
+            "nominations, votes, attendance, and today's winner are cleared.\n"
+            "the permanent movie databank and watched history are untouched. ✅",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB RESETDAY ✅ "
+            f"admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB RESETDAY ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't reset today's Movie Club. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+
+@movieclub.command(name="add")
+async def movieclub_add(ctx, *, movie_title: str = ""):
+    """Jonathan-only: manually add a movie to the permanent Movie Club databank."""
+    if not _fergie_movieclub_in_channel(ctx):
+        await ctx.reply(
+            "run that inside the Movie Club channel. 🙄🍿",
+            mention_author=False,
+        )
+        return
+
+    if not _fergie_movieclub_is_admin(ctx.author.id):
+        await ctx.reply(
+            "only Jonathan gets to manually add movies to my brain. 🙄",
+            mention_author=False,
+        )
+        return
+
+    movie_title = re.sub(
+        r"\s+",
+        " ",
+        str(movie_title or "").strip(),
+    )
+
+    if not movie_title:
+        await ctx.reply(
+            "give me a movie title. 🙄🍿\n"
+            "`!movieclub add <movie>`",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        movies = data.get("movies", {})
+
+        if not isinstance(movies, dict):
+            movies = {}
+
+        key = _fergie_movieclub_normalize_title(movie_title)
+
+        existing = movies.get(key)
+
+        if isinstance(existing, dict):
+            await ctx.reply(
+                f"**{existing.get('title', movie_title)}** is already in my Movie Club databank. 🙄🍿",
+                mention_author=False,
+            )
+            return
+
+        movies[key] = {
+            "title": movie_title,
+            "watched": False,
+            "source": "manual",
+            "sources": ["manual"],
+            "added_at": datetime.now(timezone.utc).isoformat(),
+            "watched_at": None,
+            "times_nominated": 0,
+            "times_won": 0,
+            "last_seen_message_id": None,
+        }
+
+        data["movies"] = movies
+
+        await _fergie_movieclub_save(data)
+
+        await ctx.reply(
+            f"➕ **{movie_title}** added to Movie Club.\n"
+            "it's officially in the unwatched pool now. 🍿",
+            mention_author=False,
+        )
+
+        print(
+            f"FERGIE MOVIECLUB ADD ✅ "
+            f"title={movie_title!r} "
+            f"admin={ctx.author.id}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB ADD ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't add that movie. 🙄🍿 check Railway.",
+            mention_author=False,
+        )
+        
 @movieclub.command(name="cleardb")
 async def movieclub_cleardb(ctx):
     """
@@ -6853,6 +8380,7 @@ async def movieclub_status(ctx):
             f"Nominations: **{len(nominations)}**\n"
             f"Votes recorded: **{len(votes)}**\n"
             f"Absent voters: **{len(absent_ids)}**\n\n"
+            f"Required voters today: **{len(_fergie_movieclub_required_voters_today(today))}**\n"
             f"Movies known: **{len(movies)}**\n"
             f"Watched: **{watched_count}**\n"
             f"Still available: **{unwatched_count}**"
@@ -7177,6 +8705,119 @@ async def movieclub_history(ctx):
             mention_author=False,
         )
         
+# ================== Movie Club Reaction Voting ==================
+
+@bot.listen("on_reaction_add")
+async def _fergie_movieclub_reaction_vote(reaction, user):
+    """
+    Record Movie Club reaction votes without replacing Fergie's
+    existing global on_reaction_add handler.
+    """
+    if user.bot:
+        return
+
+    message = reaction.message
+
+    if message.channel.id != FERGIE_MOVIECLUB_CHANNEL_ID:
+        return
+
+    try:
+        data = await _fergie_movieclub_load()
+
+        today = data.get("today", {})
+
+        if today.get("phase") != "voting":
+            return
+
+        poll_message_id = today.get("poll_message_id")
+
+        if not poll_message_id:
+            return
+
+        if int(message.id) != int(poll_message_id):
+            return
+
+        poll_options = today.get("poll_options", [])
+
+        if not isinstance(poll_options, list):
+            return
+
+        emoji = str(reaction.emoji)
+
+        selected_option = None
+
+        for option in poll_options:
+            if not isinstance(option, dict):
+                continue
+
+            if str(option.get("emoji")) == emoji:
+                selected_option = option
+                break
+
+        # Ignore reactions that are not actual poll choices.
+        if selected_option is None:
+            return
+
+        votes = today.get("votes", {})
+
+        if not isinstance(votes, dict):
+            votes = {}
+
+        user_key = str(user.id)
+
+        previous_vote = votes.get(user_key)
+
+        votes[user_key] = {
+            "user_id": int(user.id),
+            "display_name": getattr(
+                user,
+                "display_name",
+                getattr(user, "name", str(user.id)),
+            ),
+            "emoji": emoji,
+            "movie_key": selected_option.get("movie_key"),
+            "title": selected_option.get("title"),
+            "voted_at": datetime.now(timezone.utc).isoformat(),
+        }
+
+        today["votes"] = votes
+        data["today"] = today
+
+        await _fergie_movieclub_save(data)
+        
+        await _fergie_movieclub_resolve_winner()
+
+        # If this member changed their vote, try to remove their
+        # previous reaction so the Discord poll stays visually clean.
+        if (
+            isinstance(previous_vote, dict)
+            and str(previous_vote.get("emoji")) != emoji
+        ):
+            old_emoji = str(previous_vote.get("emoji") or "")
+
+            for existing_reaction in message.reactions:
+                if str(existing_reaction.emoji) != old_emoji:
+                    continue
+
+                try:
+                    await existing_reaction.remove(user)
+                except Exception:
+                    pass
+
+                break
+
+        print(
+            f"FERGIE MOVIECLUB VOTE ✅ "
+            f"user={user.id} "
+            f"title={selected_option.get('title')!r} "
+            f"emoji={emoji}"
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB VOTE ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
         
 @bot.event
 async def on_message(message: discord.Message):
