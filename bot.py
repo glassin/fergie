@@ -6168,6 +6168,28 @@ async def on_message(message: discord.Message):
             .strip()
         )
         art_prompt = _fergie_image_generation_prompt(art_question)
+
+        if art_prompt:
+            art_speaker = FERGIE_CAST.get(message.author.id)
+
+            if art_speaker:
+                art_speaker_name = art_speaker.get(
+                    "name",
+                    message.author.display_name,
+                )
+
+                art_prompt = (
+                    f"IMPORTANT CHARACTER IDENTITY CONTEXT:\n"
+                    f"The person making this image/comic request is {art_speaker_name}. "
+                    f"In the user's original request, first-person words such as "
+                    f"'I', 'me', 'my', and 'myself' refer to {art_speaker_name}. "
+                    f"If {art_speaker_name} appears in the requested scene, use their "
+                    f"official established character appearance/reference. "
+                    f"Viviana is Fergie's mom. Jonathan is Fergie's dad/creator and "
+                    f"is dating Viviana. Preserve these established relationships.\n\n"
+                    f"REQUEST:\n{art_prompt}"
+                )
+                
         if art_prompt and not _fergie_static_image_attachments(message):
             cooldown_remaining = _fergie_art_cooldown_remaining()
             if cooldown_remaining > 0:
