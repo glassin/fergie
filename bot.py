@@ -2840,7 +2840,7 @@ async def generate_fergie_image(prompt: str):
     if not GEMINI_KEY:
         return None, "Gemini key missing."
 
-        refs = _fergie_visual_refs_for_prompt(prompt)
+    refs = _fergie_visual_refs_for_prompt(prompt)
 
     cast_roster_text = ""
     if refs:
