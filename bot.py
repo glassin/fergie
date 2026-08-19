@@ -2946,7 +2946,7 @@ f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for
 "Do not turn background extras into lookalikes of referenced cast members. "
 "When many characters are requested, prioritize accurate character identity over elaborate staging. "
         )})
-                ref_display_names = {
+        ref_display_names = {
             "viviana": "Viviana",
             "jonathan": "Jonathan",
             "papo": "Papo/Sancho",
