@@ -6288,6 +6288,33 @@ async def on_message(message: discord.Message):
         )
 
         art_prompt = _fergie_image_generation_prompt(art_question)
+        
+        # Clarify "the cord" / Discord-group language for image generation.
+        # Never let the image model interpret "cord" as an electrical cord.
+        if art_prompt and re.search(
+            r"\b(?:"
+            r"(?:the\s+)?cord"
+            r"|(?:the\s+)?discord"
+            r"|whole\s+(?:crew|gang|server|group)"
+            r"|entire\s+(?:cord|discord|crew|gang|server|group)"
+            r"|everyone\s+in\s+(?:the\s+)?(?:cord|discord|server|crew)"
+            r"|all\s+(?:the\s+)?(?:cord|discord|server|crew|members)"
+            r")\b",
+            art_question,
+            flags=re.IGNORECASE,
+        ):
+            art_prompt = (
+                "IMPORTANT GROUP TERMINOLOGY: "
+                "In this request, 'the cord', 'cord', 'whole cord', 'the Discord', "
+                "'whole crew', and similar group wording means Fergie's established "
+                "human Discord friend group/cast. It does NOT mean an electrical cord, "
+                "cable, wire, rope, plug, or physical object. "
+                "Show the established Discord cast members whose official visual "
+                "references are attached. Do not depict a literal cord.\n\n"
+                f"{art_prompt}"
+            )
+
+        
         if art_prompt:
             art_speaker = FERGIE_CAST.get(message.author.id)
 
