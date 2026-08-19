@@ -85,6 +85,41 @@ USER2_ID = 534227493360762891
 USER3_ID = 661077262468382761
 LOBO_ID  = 919405253470871562
 
+# ---------- Local reaction GIFs ----------
+REACTION_GIF_DIR = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "reaction_gifs",
+)
+
+FERGIE_EYEROLL_GIF = "fergieeyeroll.gif"
+FERGIE_SIPPIES_GIF = "sippies.gif"
+FERGIE_HMM_GIF = "hmm.gif"
+FERGIE_SHRUG_GIF = "shrug.gif"
+FERGIE_I_HATE_IT_HERE_GIF = "ihateithere.gif"
+FERGIE_TWERK_GIF = "twerk.gif"
+
+# Lightweight RAM-only cooldowns. No Neon/database use.
+fergie_reaction_gif_cooldowns = {}
+
+PAPO_REACTION_GIF_CHANCE = 0.12
+PAPO_REACTION_GIF_COOLDOWN = 3 * 60 * 60
+PAPO_REACTION_GIF_DAILY_MAX = 2
+
+SIPPIES_GIF_CHANCE = 0.15
+SIPPIES_GIF_COOLDOWN = 60 * 60
+
+HMM_GIF_CHANCE = 0.30
+HMM_GIF_COOLDOWN = 2 * 60 * 60
+
+SHRUG_GIF_CHANCE = 0.12
+SHRUG_GIF_COOLDOWN = 60 * 60
+
+I_HATE_IT_HERE_GIF_CHANCE = 0.20
+I_HATE_IT_HERE_GIF_COOLDOWN = 2 * 60 * 60
+
+TWERK_GIF_CHANCE = 0.05
+TWERK_GIF_COOLDOWN = 6 * 60 * 60
+
 # ---------- Jump scare (global) ----------
 JUMPSCARE_TRIGGER = "concha"
 JUMPSCARE_IMAGE_URL = "https://preview.redd.it/66wjyydtpwe01.jpg?width=640&crop=smart&auto=webp&s=d20129184b19b41e455ba9c66715e2ab496b9b49"
@@ -474,6 +509,85 @@ FERGIE_BORED_LINES = [
 # ================== Shared runtime helpers ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
+
+def _fergie_reaction_gif_path(filename: str) -> str:
+    return os.path.join(REACTION_GIF_DIR, filename)
+
+
+def _fergie_reaction_gif_ready(key: str, cooldown_seconds: int) -> bool:
+    now = _now()
+    last = fergie_reaction_gif_cooldowns.get(key, 0)
+
+    if now - last < cooldown_seconds:
+        return False
+
+    return True
+
+
+def _fergie_mark_reaction_gif_used(key: str):
+    fergie_reaction_gif_cooldowns[key] = _now()
+
+
+async def _fergie_send_reaction_gif(
+    message: discord.Message,
+    filename: str,
+    cooldown_key: str,
+    cooldown_seconds: int,
+) -> bool:
+    if not _fergie_reaction_gif_ready(
+        cooldown_key,
+        cooldown_seconds,
+    ):
+        return False
+
+    path = _fergie_reaction_gif_path(filename)
+
+    if not os.path.isfile(path):
+        print(f"FERGIE REACTION GIF MISSING ❌ {path}")
+        return False
+
+    try:
+        await message.reply(
+            file=discord.File(path),
+            mention_author=False,
+        )
+
+        _fergie_mark_reaction_gif_used(cooldown_key)
+
+        print(
+            f"FERGIE REACTION GIF ✅ "
+            f"{filename} user={message.author.id} "
+            f"channel={message.channel.id}"
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            f"FERGIE REACTION GIF ERROR ❌ "
+            f"{filename} {type(e).__name__}: {e}"
+        )
+        return False
+        
+def _fergie_reply_is_disgusted(text: str) -> bool:
+    lowered = (text or "").lower()
+
+    disgust_phrases = (
+        "i hate it here",
+        "the hellies",
+        "ugh",
+        "fak",
+        "disgusting",
+        "be so serious",
+        "why are you like this",
+        "why do you people",
+        "i'm tired of",
+        "im tired of",
+        "absolutely not",
+        "what is wrong with",
+    )
+
+    return any(phrase in lowered for phrase in disgust_phrases)
     
 gemini_cooldowns = {}
 GEMINI_COOLDOWN_SECONDS = 15
@@ -5953,6 +6067,84 @@ async def on_message(message: discord.Message):
     content = (message.content or "")
     lower = content.lower().strip()
 
+    # ---------- Fergie local reaction GIF triggers ----------
+
+    # Papo: occasionally eye-roll when he posts.
+    if message.author.id == USER1_ID:
+        today = _today_key()
+
+        if not hasattr(bot, "_papo_reaction_gif_daily"):
+            bot._papo_reaction_gif_daily = {
+                "date": today,
+                "count": 0,
+            }
+
+        papo_daily = bot._papo_reaction_gif_daily
+
+        if papo_daily.get("date") != today:
+            papo_daily["date"] = today
+            papo_daily["count"] = 0
+
+        if (
+            papo_daily.get("count", 0) < PAPO_REACTION_GIF_DAILY_MAX
+            and random.random() < PAPO_REACTION_GIF_CHANCE
+        ):
+            sent = await _fergie_send_reaction_gif(
+                message,
+                FERGIE_EYEROLL_GIF,
+                "papo_eyeroll",
+                PAPO_REACTION_GIF_COOLDOWN,
+            )
+
+            if sent:
+                papo_daily["count"] = papo_daily.get("count", 0) + 1
+
+    # Coffee / latte / Bloom / energy drink reaction.
+    caffeine_pattern = (
+        r"\b(?:coffee|coffees|latte|lattes|bloom|energy\s+drink|energy\s+drinks)\b"
+    )
+
+    if (
+        re.search(caffeine_pattern, lower, flags=re.IGNORECASE)
+        and random.random() < SIPPIES_GIF_CHANCE
+    ):
+        await _fergie_send_reaction_gif(
+            message,
+            FERGIE_SIPPIES_GIF,
+            "sippies",
+            SIPPIES_GIF_COOLDOWN,
+        )
+
+    # Jonathan: Viv ass / slo references.
+    jonathan_viv_pattern = r"\b(?:ass|slo|slos|slo's)\b"
+
+    if (
+        message.author.id == 939225086341296209
+        and re.search(r"\b(?:viv|vivvy|viviana)\b", lower, flags=re.IGNORECASE)
+        and re.search(jonathan_viv_pattern, lower, flags=re.IGNORECASE)
+        and random.random() < HMM_GIF_CHANCE
+    ):
+        await _fergie_send_reaction_gif(
+            message,
+            FERGIE_HMM_GIF,
+            "jonathan_hmm",
+            HMM_GIF_COOLDOWN,
+        )
+
+    # Anyone saying they're tired.
+    tired_pattern = r"\b(?:tired|i'm tired|im tired|so tired|really tired)\b"
+
+    if (
+        re.search(tired_pattern, lower, flags=re.IGNORECASE)
+        and random.random() < SHRUG_GIF_CHANCE
+    ):
+        await _fergie_send_reaction_gif(
+            message,
+            FERGIE_SHRUG_GIF,
+            "tired_shrug",
+            SHRUG_GIF_COOLDOWN,
+        )
+        
     # Resolve direct Fergie mention early so image features can use it.
     mentioned = False
     if bot.user and (bot.user in message.mentions):
@@ -6086,6 +6278,29 @@ async def on_message(message: discord.Message):
 
         if not song_title:
             song_title = "this spotify link"
+
+        # Rare twerk GIF for dance-worthy tracks in the music channel only.
+        if (
+            message.channel.id == KEWCHIE_CHANNEL_ID
+            and _fergie_reaction_gif_ready(
+                "music_twerk",
+                TWERK_GIF_COOLDOWN,
+            )
+            and random.random() < TWERK_GIF_CHANCE
+        ):
+            danceable = await _fergie_dj_track_is_danceable(
+                song_title=song_title,
+                artist=artist,
+                album=album,
+            )
+
+            if danceable:
+                await _fergie_send_reaction_gif(
+                    message,
+                    FERGIE_TWERK_GIF,
+                    "music_twerk",
+                    TWERK_GIF_COOLDOWN,
+                )       
 
         # J.3: prior aux history can color Fergie's personality, never the score.
         taste_profile = await _fergie_member_taste_profile(
@@ -6811,6 +7026,17 @@ Respond naturally as Fergie.
                 await wait.edit(
                     content=answer
                 )
+
+                if (
+                    _fergie_reply_is_disgusted(answer)
+                    and random.random() < I_HATE_IT_HERE_GIF_CHANCE
+                ):
+                    await _fergie_send_reaction_gif(
+                        message,
+                        FERGIE_I_HATE_IT_HERE_GIF,
+                        "i_hate_it_here",
+                        I_HATE_IT_HERE_GIF_COOLDOWN,
+                    )
 
             return
 
