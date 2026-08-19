@@ -6120,8 +6120,13 @@ async def on_message(message: discord.Message):
 
     if (
         message.author.id == 939225086341296209
-        and re.search(r"\b(?:viv|vivvy|viviana)\b", lower, flags=re.IGNORECASE)
-        and re.search(jonathan_viv_pattern, lower, flags=re.IGNORECASE)
+        and (
+            re.search(r"\bslos\b", lower, flags=re.IGNORECASE)
+            or (
+                re.search(r"\b(?:viv|vivvy|viviana)\b", lower, flags=re.IGNORECASE)
+                and re.search(jonathan_viv_pattern, lower, flags=re.IGNORECASE)
+            )
+        )
         and random.random() < HMM_GIF_CHANCE
     ):
         await _fergie_send_reaction_gif(
