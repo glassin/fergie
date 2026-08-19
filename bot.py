@@ -2840,13 +2840,44 @@ async def generate_fergie_image(prompt: str):
     if not GEMINI_KEY:
         return None, "Gemini key missing."
 
-    refs = _fergie_visual_refs_for_prompt(prompt)
+        refs = _fergie_visual_refs_for_prompt(prompt)
+
+    cast_roster_text = ""
+    if refs:
+        roster_names = []
+
+        for canonical, _ in refs:
+            display_name = {
+                "viviana": "Viviana",
+                "jonathan": "Jonathan",
+                "papo": "Papo/Sancho",
+                "khurty": "Kurtie",
+                "chadwin": "Chadwin/Edwin",
+                "raquel": "Raquel",
+                "jose": "Jose",
+                "lobo": "Lobo",
+                "chalan": "Chalan",
+                "reggie": "Reggie",
+                "chai": "Chai",
+            }.get(canonical, canonical)
+
+            roster_names.append(display_name)
+
+        cast_roster_text = (
+            "\n\nREQUIRED CAST ROSTER — EXACTLY ONE OF EACH:\n"
+            + "\n".join(f"- {name} x1" for name in roster_names)
+            + f"\nTOTAL REQUIRED DISTINCT CHARACTERS: {len(roster_names)}.\n"
+            "Every listed character must appear exactly once in each scene where the full group is present. "
+            "Do not create a second copy, alternate version, twin, duplicate, clone, background copy, "
+            "or lookalike of any listed character unless the user's request explicitly asks for one."
+        )
+
     parts = []
 
     if refs:
         names = ", ".join(name for name, _ in refs)
         parts.append({"text": (
-            f"Create this requested image: {prompt.strip()}\n\n"
+            f"Create this requested image: {prompt.strip()}{cast_roster_text}\n\n"
 f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for: {names}. "
 "Character identity is immutable. Each referenced character MUST remain the same character "
 "throughout the entire image and across EVERY PANEL of a multi-panel comic. "
