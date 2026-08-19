@@ -2842,6 +2842,18 @@ async def generate_fergie_image(prompt: str):
 
     refs = _fergie_visual_refs_for_prompt(prompt)
 
+    if (
+        len(refs) >= 6
+        and re.search(r"\bcomic\b", prompt, flags=re.IGNORECASE)
+    ):
+        prompt = (
+            f"{prompt}\n\n"
+            "LARGE CAST COMIC RULE: Use no more than 4 panels. "
+            "Prefer clear group compositions over repeatedly redrawing every character "
+            "in complicated positions. Character accuracy and reference fidelity are "
+            "more important than panel count or elaborate staging."
+        )
+
     cast_roster_text = ""
     if refs:
         roster_names = []
@@ -2925,17 +2937,61 @@ f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for
 "For multi-panel comics, character identity and defining sprite appearance MUST remain consistent "
 "from the first panel through the final panel. Clothing, pose, expression, action, lighting, "
 "and setting may change only when requested; identity-defining features must not."
+"REFERENCE BINDING IS STRICT: each numbered reference image below belongs to ONE character only. "
+"Never mix facial features, hairstyles, skin tones, body types, clothing silhouettes, tattoos, "
+"glasses, piercings, or other physical traits between references. "
+"Do not invent substitute bodies for referenced characters. "
+"A character's head AND body must come from that same character's reference identity. "
+"Do not put one character's face onto another character's body. "
+"Do not turn background extras into lookalikes of referenced cast members. "
+"When many characters are requested, prioritize accurate character identity over elaborate staging. "
         )})
-        for name, path in refs:
+                ref_display_names = {
+            "viviana": "Viviana",
+            "jonathan": "Jonathan",
+            "papo": "Papo/Sancho",
+            "khurty": "Kurtie",
+            "chadwin": "Chadwin/Edwin",
+            "raquel": "Raquel",
+            "jose": "Jose",
+            "lobo": "Lobo",
+            "chalan": "Chalan",
+            "reggie": "Reggie",
+            "chai": "Chai",
+        }
+
+        for ref_number, (name, path) in enumerate(refs, start=1):
             data = _fergie_load_visual_ref(path)
+
+            display_name = ref_display_names.get(name, name)
+
             if data:
-                parts.append({"text": f"Visual reference for {name}:"})
-                parts.append({"inlineData": {
-                    "mimeType": "image/png",
-                    "data": base64.b64encode(data).decode("ascii"),
-                }})
+                parts.append({
+                    "text": (
+                        f"REFERENCE {ref_number} OF {len(refs)} — {display_name}. "
+                        f"This attached image defines ONLY {display_name}. "
+                        f"Use this exact reference for {display_name}'s face, skin tone, "
+                        f"hair, body type, build, apparent age, height relationship, "
+                        f"clothing silhouette, accessories, tattoos, glasses, piercings, "
+                        f"and other identity-defining features. "
+                        f"Do NOT borrow any visual features from another character's reference. "
+                        f"Do NOT use {display_name}'s appearance for background characters or "
+                        f"for any other member of the cast."
+                    )
+                })
+
+                parts.append({
+                    "inlineData": {
+                        "mimeType": "image/png",
+                        "data": base64.b64encode(data).decode("ascii"),
+                    }
+                })
+
             else:
-                print(f"FERGIE ART REF SKIPPED: {name} ({path})")
+                print(
+                    f"FERGIE ART REF SKIPPED: "
+                    f"{display_name} ({path})"
+                )
     else:
         parts.append({"text": prompt.strip()})
 
