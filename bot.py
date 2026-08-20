@@ -188,6 +188,7 @@ FERGIE_MOVIECLUB_ADMIN_USER_ID = FERGIE_ADMIN_USER_ID
 # Pacific-time daily schedule.
 FERGIE_MOVIECLUB_MORNING_HOUR = 9
 FERGIE_MOVIECLUB_POLL_HOUR = 12
+FERGIE_MOVIECLUB_VOTING_CLOSE_HOUR = 16  # 4:00 PM Pacific
 
 # Persistent Postgres KV key.
 FERGIE_MOVIECLUB_DB_KEY = "fergie_movieclub"
@@ -1067,6 +1068,7 @@ async def _fergie_movieclub_open_poll():
         "🗳️ **MOVIE CLUB POLL**",
         "",
         "nominations are closed. vote with the reactions below. 🙄🍿",
+        f"voting closes automatically at **4:00 PM PT**.",
         "",
     ]
 
@@ -1168,7 +1170,7 @@ def _fergie_movieclub_voting_complete(today: dict):
         for user_id in required_voters
     )
 
-async def _fergie_movieclub_resolve_winner():
+async def _fergie_movieclub_resolve_winner():(force: bool = False):
     """
     Resolve today's Movie Club vote once all required voters are finished.
     Ties are broken randomly between the tied movies.
@@ -1179,7 +1181,7 @@ async def _fergie_movieclub_resolve_winner():
     if today.get("phase") != "voting":
         return False
 
-    if not _fergie_movieclub_voting_complete(today):
+    if not force and not _fergie_movieclub_voting_complete(today):
         return False
 
     votes = today.get("votes", {})
@@ -1207,8 +1209,29 @@ async def _fergie_movieclub_resolve_winner():
         )
 
     if not vote_counts:
-        return False
+        if not force:
+            return False
 
+        # Hard deadline reached with zero votes.
+        # Treat every poll option as tied at 0 and let Fergie break the tie.
+        poll_options = today.get("poll_options", [])
+
+        if not isinstance(poll_options, list) or not poll_options:
+                return False
+
+        tied_keys = [
+            str(option.get("movie_key") or "").strip()
+            for option in poll_options
+            if isinstance(option, dict)
+            and str(option.get("movie_key") or "").strip()
+          ]  
+
+        if not tied_keys:
+            return False
+
+        highest_votes = 0
+
+    else:
     highest_votes = max(vote_counts.values())
 
     tied_keys = [
@@ -1333,7 +1356,8 @@ async def _fergie_movieclub_resolve_winner():
 async def fergie_movieclub_watcher():
     """
     Lightweight Movie Club scheduler.
-    Opens morning nominations and the noon reaction poll.
+    Opens morning nominations, opens the noon poll,
+    and closes voting automatically at 4 PM Pacific.
     """
     tz = ZoneInfo("America/Los_Angeles")
     now = datetime.now(tz)
@@ -1344,6 +1368,9 @@ async def fergie_movieclub_watcher():
 
         if now.hour >= FERGIE_MOVIECLUB_POLL_HOUR:
             await _fergie_movieclub_open_poll()
+
+        if now.hour >= FERGIE_MOVIECLUB_VOTING_CLOSE_HOUR:
+            await _fergie_movieclub_resolve_winner(force=True)
 
     except Exception as e:
         print(
