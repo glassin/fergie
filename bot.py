@@ -10555,6 +10555,33 @@ async def fit(ctx):
 
     bot._fit_waiting[msg.id] = _now() + 20
 
+FERGIE_PINTEREST_MOM_LINES = [
+    "lurking mamá's Pinterest again. mind your business. 🙄",
+    "found this while snooping through my mom's Pinterest.",
+    "mamá doesn't know i'm in here. shhhhh.",
+    "me??? lurking my mother's Pinterest??? jamás. 👀",
+    "just doing my daily surveillance of mamá's Pinterest.",
+    "caught mamá pinning again. reporting live from the scene.",
+    "i've infiltrated my mother's Pinterest. otra vez.",
+    "currently hiding in mamá's Pinterest like a little digital cucaracha.",
+    "don't mind me. i'm just creeping through my mom's boards.",
+    "mamá left the Pinterest unattended. rookie mistake.",
+    "Vivianaaaaa what are you doing in here 👀",
+    "i saw mamá open Pinterest and obviously i followed her.",
+    "another artifact recovered from mother's Pinterest.",
+    "reporting directly from inside mamá's Pinterest. 🫡",
+    "mom's Pinterest investigation continues. no further questions.",
+    "i'm not stalking mamá's Pinterest. i'm conducting research.",
+    "found this during today's unauthorized inspection of mother's Pinterest.",
+    "mamá really thought she could pin things without me noticing.",
+    "breaking news: i've been lurking my mom's Pinterest again.",
+    "your honor i was simply observing mamá's Pinterest.",
+    "snuck out of the fridge and into mamá's Pinterest again.",
+    "apparently being an AI means i have unlimited access to mamá's Pinterest. unfortunate for her.",
+    "mother has been pinning. i have been watching. 👁️",
+    "nothing to see here. just me violating mamá's Pinterest privacy again. 🙄",
+    "i live in her fridge AND her Pinterest now. she can't escape me.",
+]
 
 @tasks.loop(hours=24)
 async def fit_auto_daily():
@@ -10569,8 +10596,10 @@ async def fit_auto_daily():
         print("PINTEREST DAILY FIT SKIPPED ❌")
         return
 
+    caption = random.choice(FERGIE_PINTEREST_MOM_LINES)
+
     msg = await ch.send(
-        f"OMFG look at this one girlie!!! we neeeeeeeeed! 💗\n{url}"
+        f"{caption}\n{url}"
     )
 
     bot._fit_waiting[msg.id] = _now() + 20
