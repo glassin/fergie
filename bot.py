@@ -10315,7 +10315,7 @@ async def user2_twice_daily_fixed():
     if channel:
         await channel.send(f"<@{USER2_ID}> the twist huh?")
 
-@tasks.loop(hours=8)
+@tasks.loop(hours=24)
 async def user3_task():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
@@ -10325,7 +10325,7 @@ async def user3_task():
 @user3_task.before_loop
 async def _wait_user3_task():
     await bot.wait_until_ready()
-    await asyncio.sleep(8 * 3600)
+    await asyncio.sleep(24 * 3600)
 
 @tasks.loop(hours=24)
 async def daily_scam_post():
