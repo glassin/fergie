@@ -3458,13 +3458,16 @@ def _fergie_load_visual_ref(path: str):
         return None
 
 
-async def generate_fergie_image(prompt: str):
+async def generate_fergie_image(prompt: str, refs_override=None):
     global fergie_art_cooldown_until, fergie_art_last_error
 
     if not GEMINI_KEY:
         return None, "Gemini key missing."
 
-    refs = _fergie_visual_refs_for_prompt(prompt)
+    if refs_override is None:
+        refs = _fergie_visual_refs_for_prompt(prompt)
+    else:
+        refs = list(refs_override)
 
     if (
         len(refs) >= 6
@@ -8962,6 +8965,7 @@ async def on_message(message: discord.Message):
         # Archive generated Art only when the requested scene actually
         # contains an established Fergie cast character.
         archive_refs = _fergie_visual_refs_for_prompt(art_question)
+        requested_art_refs = list(archive_refs)
 
         # Also recognize when a known cast member explicitly asks to put
         # themselves into the generated scene.
@@ -8977,6 +8981,28 @@ async def on_message(message: discord.Message):
                 flags=re.IGNORECASE,
             )
         )
+
+        if speaker_is_subject and art_speaker:
+            art_speaker_name = art_speaker.get(
+                "name",
+                message.author.display_name,
+            )
+
+            speaker_refs = _fergie_visual_refs_for_prompt(
+                art_speaker_name
+            )
+
+            existing_ref_names = {
+                canonical
+                for canonical, _ in requested_art_refs
+            }
+
+            for canonical, path in speaker_refs:
+                if canonical not in existing_ref_names:
+                    requested_art_refs.append(
+                        (canonical, path)
+                    )
+                    existing_ref_names.add(canonical)
 
         should_archive_cast_art = bool(
             archive_refs or speaker_is_subject
@@ -9055,7 +9081,11 @@ async def on_message(message: discord.Message):
                 return
 
             wait = await message.reply("ugh fine. let me cook. 🎨🙄", mention_author=False)
-            image_bytes, art_error = await generate_fergie_image(art_prompt)
+            image_bytes, art_error = await generate_fergie_image
+                art_prompt,
+                refs_override=requested_art_refs,
+            )
+            
             if not image_bytes:
                 await _fergie_refund_art_slot()
 
