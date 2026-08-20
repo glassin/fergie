@@ -3527,10 +3527,10 @@ async def generate_fergie_image(prompt: str, refs_override=None):
     else:
         refs = list(refs_override)
 
-if (
+    if (
     len(refs) >= 6
     and re.search(r"\bcomic\b", prompt, flags=re.IGNORECASE)
-):
+    ):
     large_cast_names = []
 
     large_cast_display_names = {
