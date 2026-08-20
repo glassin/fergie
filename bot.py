@@ -10309,7 +10309,7 @@ async def user1_twice_daily_fixed():
     if channel:
         await channel.send(f"<@{USER1_ID}> callate!")
 
-@tasks.loop(time=(dtime(hour=11, tzinfo=timezone.utc), dtime(hour=23, tzinfo=timezone.utc)))
+@tasks.loop(time=dtime(hour=23, tzinfo=timezone.utc))
 async def user2_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
