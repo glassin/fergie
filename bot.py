@@ -3547,17 +3547,17 @@ async def generate_fergie_image(prompt: str, refs_override=None):
     else:
         refs = list(refs_override)
 
-        # Fergie is digital-only and never counts as a physical cast member.
-        fergie_requested = any(
-            canonical == "fergie"
-            for canonical, _ in refs
-        )
+    # Fergie is digital-only and never counts as a physical cast member.
+    fergie_requested = any(
+        canonical == "fergie"
+        for canonical, _ in refs
+    )
 
-        physical_refs = [
-            (canonical, path)
-            for canonical, path in refs
-            if canonical != "fergie"
-        ]
+    physical_refs = [
+        (canonical, path)
+        for canonical, path in refs
+        if canonical != "fergie"
+    ]
 
     if (
         len(physical_refs) >= 6
@@ -3743,7 +3743,7 @@ f"{fergie_screen_rule}"
             "lobo": "Lobo",
             "chalan": "Chalan",
             "reggie": "Reggie",
-            "fergie": "fergie",
+            "fergie": "Fergie",
             "chai": "Chai",
         }
 
