@@ -1170,7 +1170,7 @@ def _fergie_movieclub_voting_complete(today: dict):
         for user_id in required_voters
     )
 
-async def _fergie_movieclub_resolve_winner():(force: bool = False):
+async def _fergie_movieclub_resolve_winner(force: bool = False):
     """
     Resolve today's Movie Club vote once all required voters are finished.
     Ties are broken randomly between the tied movies.
