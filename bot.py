@@ -3527,17 +3527,66 @@ async def generate_fergie_image(prompt: str, refs_override=None):
     else:
         refs = list(refs_override)
 
-    if (
-        len(refs) >= 6
-        and re.search(r"\bcomic\b", prompt, flags=re.IGNORECASE)
-    ):
-        prompt = (
-            f"{prompt}\n\n"
-            "LARGE CAST COMIC RULE: Use no more than 4 panels. "
-            "Prefer clear group compositions over repeatedly redrawing every character "
-            "in complicated positions. Character accuracy and reference fidelity are "
-            "more important than panel count or elaborate staging."
+if (
+    len(refs) >= 6
+    and re.search(r"\bcomic\b", prompt, flags=re.IGNORECASE)
+):
+    large_cast_names = []
+
+    large_cast_display_names = {
+        "viviana": "Viviana",
+        "jonathan": "Jonathan",
+        "papo": "Papo/Sancho",
+        "khurty": "Kurtie",
+        "chadwin": "Chadwin/Edwin",
+        "raquel": "Raquel",
+        "jose": "Jose",
+        "lobo": "Lobo",
+        "chalan": "Chalan",
+        "reggie": "Reggie",
+        "chai": "Chai",
+    }
+
+    for canonical, _ in refs:
+        large_cast_names.append(
+            large_cast_display_names.get(canonical, canonical)
         )
+
+    midpoint = max(1, len(large_cast_names) // 2)
+
+    first_group = large_cast_names[:midpoint]
+    second_group = large_cast_names[midpoint:]
+
+    prompt = (
+        f"{prompt}\n\n"
+        "LARGE CAST COMIC MODE — STRICT PANEL PLANNING:\n"
+        f"TOTAL NAMED CAST: {len(large_cast_names)}.\n"
+        f"THE ONLY NAMED CAST MEMBERS ALLOWED ARE: "
+        f"{', '.join(large_cast_names)}.\n\n"
+
+        "Do NOT try to cram the entire cast into every panel. "
+        "Use no more than 4 panels total. "
+        "Spread the cast across the earlier panels so each person's identity "
+        "is easier to preserve.\n\n"
+
+        f"PANEL 1 SHOULD FOCUS MAINLY ON: {', '.join(first_group)}.\n"
+        f"PANEL 2 SHOULD FOCUS MAINLY ON: {', '.join(second_group)}.\n"
+        "PANEL 3 may mix members from both groups, but every named person shown "
+        "must remain visually distinct and must appear only once in that panel.\n"
+        "PANEL 4 may show the full group together if composition allows, but "
+        "each named cast member must appear EXACTLY ONCE.\n\n"
+
+        "CRITICAL LARGE-CAST RULES:\n"
+        "- Never duplicate a named cast member.\n"
+        "- Never invent a new crew member.\n"
+        "- Never merge two cast members into one hybrid person.\n"
+        "- Never reuse one cast member's face, hair, outfit, body, or accessories "
+        "for another cast member.\n"
+        "- Background strangers must look generic and must NOT resemble the named cast.\n"
+        "- If accurate identity requires simpler staging, use simpler staging.\n"
+        "- Character accuracy is more important than showing everyone in every panel.\n"
+        "- Preserve each requested character's identity across the entire comic."
+    )
 
     cast_roster_text = ""
     if refs:
