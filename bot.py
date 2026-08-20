@@ -3677,7 +3677,7 @@ f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for
                 ref_info = FERGIE_VISUAL_REFS.get(name, {})
                 detail_path = ref_info.get("detail_path")
 
-                if detail_path:
+                if detail_path and len(refs) <= 3:
                     detail_data = _fergie_load_visual_ref(detail_path)
 
                     if detail_data:
