@@ -10313,7 +10313,7 @@ async def user1_twice_daily_fixed():
 async def user2_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER2_ID}> when jacuzzi?")
+        await channel.send(f"<@{USER2_ID}> the twist huh?")
 
 @tasks.loop(hours=8)
 async def user3_task():
