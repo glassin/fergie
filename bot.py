@@ -9081,7 +9081,8 @@ async def on_message(message: discord.Message):
                 return
 
             wait = await message.reply("ugh fine. let me cook. 🎨🙄", mention_author=False)
-            image_bytes, art_error = await generate_fergie_image
+            
+            image_bytes, art_error = await generate_fergie_image(
                 art_prompt,
                 refs_override=requested_art_refs,
             )
