@@ -3369,18 +3369,66 @@ def _fergie_art_error_kind(error_text: str | None) -> str:
 
 
 FERGIE_VISUAL_REFS = {
-    "viviana": {"path": "visual_refs/viviana.png", "aliases": ["viviana", "vivvy", "viv"]},
-    "khurty": {"path": "visual_refs/khurty.png", "aliases": ["khurty", "kurty", "ko", "kurt", "kurtis", "kurtie"]},
-    "papo": {"path": "visual_refs/papo.png", "aliases": ["papo", "sancho", "miguel"]},
-    "chadwin": {"path": "visual_refs/chadwin.png", "aliases": ["chadwin", "edwin"]},
-    "chalan": {"path": "visual_refs/chalan.png", "aliases": ["chalan"]},
-    "raquel": {"path": "visual_refs/raquel.png", "aliases": ["raquel"]},
-    "reggie": {"path": "visual_refs/reggie.png", "aliases": ["reggie"]},
-    "chai": {"path": "visual_refs/chai.png", "aliases": ["chai"]},
-    "jose": {"path": "visual_refs/jose.png", "aliases": ["jose"]},
-    "jonathan": {"path": "visual_refs/jonathan.png", "aliases": ["jonathan"]},
+    "viviana": {
+        "path": "visual_refs/viviana.png",
+        "detail_path": "visual_refs/viviana_detail.png",
+        "aliases": ["viviana", "vivvy", "viv"],
+    },
+
+    "khurty": {
+        "path": "visual_refs/khurty.png",
+        "detail_path": "visual_refs/khurty_detail.png",
+        "aliases": ["khurty", "kurty", "ko", "kurt", "kurtis", "kurtie"],
+    },
+
+    "papo": {
+        "path": "visual_refs/papo.png",
+        "detail_path": "visual_refs/papo_detail.png",
+        "aliases": ["papo", "sancho", "miguel"],
+    },
+
+    "chadwin": {
+        "path": "visual_refs/chadwin.png",
+        "detail_path": "visual_refs/chadwin_detail.png",
+        "aliases": ["chadwin", "edwin"],
+    },
+
+    "chalan": {
+        "path": "visual_refs/chalan.png",
+        "aliases": ["chalan"],
+    },
+
+    "raquel": {
+        "path": "visual_refs/raquel.png",
+        "detail_path": "visual_refs/raquel_detail.png",
+        "aliases": ["raquel"],
+    },
+
+    "reggie": {
+        "path": "visual_refs/reggie.png",
+        "aliases": ["reggie"],
+    },
+
+    "chai": {
+        "path": "visual_refs/chai.png",
+        "aliases": ["chai"],
+    },
+
+    "jose": {
+        "path": "visual_refs/jose.png",
+        "detail_path": "visual_refs/jose_detail.png",
+        "aliases": ["jose"],
+    },
+
+    "jonathan": {
+        "path": "visual_refs/jonathan.png",
+        "detail_path": "visual_refs/jonathan_detail.png",
+        "aliases": ["jonathan"],
+    },
+
     "lobo": {
         "path": "visual_refs/lobo.png",
+        "detail_path": "visual_refs/lobo_detail.png",
         "aliases": ["lobo", "pinche lobo"],
     },
 }
@@ -3605,15 +3653,17 @@ f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for
             if data:
                 parts.append({
                     "text": (
-                        f"REFERENCE {ref_number} OF {len(refs)} — {display_name}. "
+                        f"CHARACTER {ref_number} OF {len(refs)} — {display_name}. "
+                        f"PRIMARY REFERENCE — identity authority for {display_name}. "
                         f"This attached image defines ONLY {display_name}. "
-                        f"Use this exact reference for {display_name}'s face, skin tone, "
-                        f"hair, body type, build, apparent age, height relationship, "
-                        f"clothing silhouette, accessories, tattoos, glasses, piercings, "
-                        f"and other identity-defining features. "
-                        f"Do NOT borrow any visual features from another character's reference. "
-                        f"Do NOT use {display_name}'s appearance for background characters or "
-                        f"for any other member of the cast."
+                        f"Use this primary reference as the authoritative source for "
+                        f"{display_name}'s identity, face, skin tone, hair, body type, "
+                        f"build, apparent age, height relationship, clothing silhouette, "
+                        f"accessories, tattoos, glasses, piercings, and other "
+                        f"identity-defining features. "
+                        f"Do NOT borrow visual features from another character. "
+                        f"Do NOT use {display_name}'s appearance for background characters "
+                        f"or any other member of the cast."
                     )
                 })
 
@@ -3623,6 +3673,40 @@ f"The attached reference image(s) are the OFFICIAL, LOCKED character sprites for
                         "data": base64.b64encode(data).decode("ascii"),
                     }
                 })
+
+                ref_info = FERGIE_VISUAL_REFS.get(name, {})
+                detail_path = ref_info.get("detail_path")
+
+                if detail_path:
+                    detail_data = _fergie_load_visual_ref(detail_path)
+
+                    if detail_data:
+                        parts.append({
+                            "text": (
+                                f"{display_name} DETAIL REFERENCE — SUPPLEMENTARY ONLY. "
+                                f"This second attached image is the SAME SINGLE CHARACTER, "
+                                f"{display_name}; it is NOT another person and must NEVER "
+                                f"cause a duplicate {display_name} to appear. "
+                                f"Use it only to reinforce alternate angles, expressions, "
+                                f"body proportions, hair shape, clothing details, tattoos, "
+                                f"piercings, accessories, and other close-up details. "
+                                f"If the primary and detail references ever appear to conflict, "
+                                f"the PRIMARY REFERENCE wins."
+                            )
+                        })
+
+                        parts.append({
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": base64.b64encode(detail_data).decode("ascii"),
+                            }
+                        })
+
+                    else:
+                        print(
+                            f"FERGIE ART DETAIL REF SKIPPED: "
+                            f"{display_name} ({detail_path})"
+                        )
 
             else:
                 print(
