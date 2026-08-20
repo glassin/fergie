@@ -10307,7 +10307,7 @@ async def _fit_reply_watch(message: discord.Message):
 async def user1_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER1_ID}> callate!")
+        await channel.send(f"<@{USER1_ID}> aye papo!")
 
 @tasks.loop(time=dtime(hour=23, tzinfo=timezone.utc))
 async def user2_twice_daily_fixed():
