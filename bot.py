@@ -2760,7 +2760,17 @@ async def start_vc_bridge_server():
     
 
 # ================== Rare Text-Channel Voice Replies ==================
+def _fergie_clean_ai_mentions(text: str) -> str:
+    """Replace raw AI-generated cast mention tokens with canonical names."""
+    cleaned = str(text or "")
 
+    for user_id, member in FERGIE_CAST.items():
+        name = member.get("name", "someone")
+        cleaned = cleaned.replace(f"<@{user_id}>", name)
+        cleaned = cleaned.replace(f"<@!{user_id}>", name)
+
+    return cleaned
+    
 def _clean_text_for_voice(text: str) -> str:
     """Make a normal Fergie reply sound natural when ElevenLabs reads it aloud."""
     cleaned = (text or "").strip()
@@ -9952,7 +9962,8 @@ CURRENT message.
 Respond naturally as Fergie.
 """
 )
-
+            answer = _fergie_clean_ai_mentions(answer)
+            
             if len(answer) > 1800:
                 answer = answer[:1800]
 
