@@ -1232,9 +1232,9 @@ async def _fergie_movieclub_resolve_winner(force: bool = False):
         highest_votes = 0
 
     else:
-    highest_votes = max(vote_counts.values())
+        highest_votes = max(vote_counts.values())
 
-    tied_keys = [
+        tied_keys = [
         movie_key
         for movie_key, count in vote_counts.items()
         if count == highest_votes
