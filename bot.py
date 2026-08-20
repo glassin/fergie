@@ -10583,7 +10583,9 @@ FERGIE_PINTEREST_MOM_LINES = [
     "i live in her fridge AND her Pinterest now. she can't escape me.",
 ]
 
-@tasks.loop(hours=24)
+@tasks.loop(
+    time=dtime(hour=10, minute=0, tzinfo=ZoneInfo("America/Los_Angeles"))
+)
 async def fit_auto_daily():
     ch = bot.get_channel(FIT_CHANNEL_ID)
 
@@ -10608,7 +10610,6 @@ async def fit_auto_daily():
 @fit_auto_daily.before_loop
 async def _fit_wait_ready():
     await bot.wait_until_ready()
-    await asyncio.sleep(86400)
 
 # ================== Fergie DJ Soulseek Preview Helpers ==================
 async def _fergie_soulseek_search_preview(query: str):
