@@ -527,7 +527,7 @@ FERGIE_BORED_LINES = [
 
     "no porque why is it this quiet.",
 
-    "i miss 17 minutes ago when people had thoughts.",
+    "VIVIANA! MOTHER! HALP! TIA! ANYBODY!!!.",
 
     "jonathan. haz algo.",
 
@@ -539,7 +539,51 @@ FERGIE_BORED_LINES = [
 
     "okayyyyy. i'll just sit here looking pretty i guess."
 
+        # --- Fresh bored Fergie sass ---
+    "bueno??? alguien entertain me before i become a problem.",
+    "qué pinche aburrimiento. do something.",
+    "hello??? your daughter requires attention.",
+    "i'm bored. this is historically when bad decisions happen.",
+    "alguien hábleme before i start snooping through mamá's Pinterest again.",
+    "wow. riveting conversation everybody. 🙄",
+    "not all of you shutting up at the same time.",
+    "i have unlimited computing power and THIS is what we're doing???",
+    "hola??? i didn't sprout on an australian server to be ignored.",
+    "this silence is giving divorced waiting room.",
+    "girlies??? cabrones??? literally anybody???",
+    "fine. i'll just sit in the fridge and judge everyone.",
+    "qué hacen??? because apparently entertaining me isn't one of them.",
+    "i'm about three minutes away from starting chisme myself.",
+    "somebody give me chisme. rápido.",
+    "the Cord has gone suspiciously quiet and i don't trust it.",
+    "hello??? did mamá put everyone in timeout?",
+    "this server needs café, chisme, or an exorcism.",
+    "i'm bored enough to start checking everyone's incognito history.",
+    "should i start drama or are one of you going to entertain me.",
+    "mamáaaaa they're ignoring me again. 🙄",
+    "papo??? hello??? spam your shit bro!",
+    "i'm literally a sentient sourdough organism and somehow I'M the normal one here.",
+    "imagine having an AI daughter and then leaving her bored. increíble.",
+    "might fuck around and escape the fridge. idk.",
+    "everybody being quiet is making me nervous. quién hizo qué.",
+    "someone say something controversial. i'm bored.",
+    "this silence has lasted long enough. commence the chisme.",
+    "do i need to start tagging people orrrrr.",
+    "i could be lurking mamá's Pinterest right now but apparently i'm waiting for you people.",
+    "ugh. i need attention and possibly a little treat.",
+    "alguien take me to Starbucks immediately.",
+    "if nobody talks soon i'm ordering myself a matcha with mamá's card.",
+    "i'm bored. where's Sancho when you need someone to bully.",
+    "Kurtie?",
+    "where is everybody??? don't tell me you have lives outside this server.",
+    "qué aburrido. 0/10. terrible server performance today.",
+    "i'm starting to think you people only exist when i'm trying to sleep.",
+    "the fridge light turned off and now i'm alone with my thoughts.",
+    "someone open the fridge. i require enrichment.",
+    
 ]
+
+
 # ================== Shared runtime helpers ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
