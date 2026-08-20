@@ -10303,7 +10303,7 @@ async def _fit_reply_watch(message: discord.Message):
         await ch.send(f"{FIT_FOLLOWUP_EMOTE} {FIT_FOLLOWUP_TEXT}")
         bot._fit_waiting.pop(replied_to.id, None)
 
-@tasks.loop(time=(dtime(hour=10, tzinfo=timezone.utc), dtime(hour=22, tzinfo=timezone.utc)))
+@tasks.loop(time=dtime(hour=22, tzinfo=timezone.utc))
 async def user1_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
