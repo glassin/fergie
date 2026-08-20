@@ -6454,7 +6454,7 @@ def _pick_two_random_times_today():
 def _today_key_pt() -> str:
     return datetime.now(ZoneInfo("America/Los_Angeles")).date().isoformat()
 
-def _pick_three_times_today_pt(n: int = 3):
+def _pick_three_times_today_pt(n: int = 1):
     today_pt = datetime.now(ZoneInfo("America/Los_Angeles")).date()
     start_pt = datetime.combine(today_pt, dtime(hour=9), tzinfo=ZoneInfo("America/Los_Angeles"))
     end_pt   = datetime.combine(today_pt, dtime(hour=22), tzinfo=ZoneInfo("America/Los_Angeles"))
