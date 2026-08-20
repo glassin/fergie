@@ -3528,23 +3528,23 @@ async def generate_fergie_image(prompt: str, refs_override=None):
         refs = list(refs_override)
 
     if (
-    len(refs) >= 6
-    and re.search(r"\bcomic\b", prompt, flags=re.IGNORECASE)
+        len(refs) >= 6
+        and re.search(r"\bcomic\b", prompt, flags=re.IGNORECASE)
     ):
-    large_cast_names = []
+        large_cast_names = []
 
-    large_cast_display_names = {
-        "viviana": "Viviana",
-        "jonathan": "Jonathan",
-        "papo": "Papo/Sancho",
-        "khurty": "Kurtie",
-        "chadwin": "Chadwin/Edwin",
-        "raquel": "Raquel",
-        "jose": "Jose",
-        "lobo": "Lobo",
-        "chalan": "Chalan",
-        "reggie": "Reggie",
-        "chai": "Chai",
+        large_cast_display_names = {
+            "viviana": "Viviana",
+            "jonathan": "Jonathan",
+            "papo": "Papo/Sancho",
+            "khurty": "Kurtie",
+            "chadwin": "Chadwin/Edwin",
+            "raquel": "Raquel",
+            "jose": "Jose",
+            "lobo": "Lobo",
+            "chalan": "Chalan",
+            "reggie": "Reggie",
+            "chai": "Chai",
     }
 
     for canonical, _ in refs:
