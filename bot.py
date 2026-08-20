@@ -10347,8 +10347,59 @@ from discord.ext import tasks
 
 GYM_CHANNEL_ID = 1272237309521170434  # replace with your channel ID
 
-GYM_EMOTES_1 = ["💪", "🏋️‍♂️", "🏋️‍♀️", "🏃‍♂️", "🏃‍♀️", "🤸‍♀️", "🚴‍♂️", "🔥", "💯", "🥇", "🧠", "🫀"]
-GYM_EMOTES_2 = ["🏋️‍♀️", "🏋️‍♂️", "🚴‍♀️", "🏃‍♂️", "🏃‍♀️", "🥵", "🔥", "⚡️", "💥", "💢", "🗣️", "📣"]
+GYM_EMOTES_1 = [
+    "💪", "🏋️", "🏃", "🔥", "😤", "⚡️", "💥",
+    "<:swolepepe:1131709641768833044>",
+    "<a:bonkem:1218403615484678274>",
+    "<a:pepeGym:904190714601177138>",
+    "<:BuffPeepoCry:614028146483658754>",
+    "<a:muscleS:677003357000433674>",
+]
+
+GYM_EMOTES_2 = ["🏋️‍♀️", "🏋️‍♂️", "🚴‍♀️", "🏃‍♂️", "🏃‍♀️",
+    "🥵", "🔥", "⚡️", "💥", "💢", "🗣️", "📣",
+    "<:swolepepe:1131709641768833044>",
+    "<a:bonkem:1218403615484678274>",
+    "<a:pepeGym:904190714601177138>",
+    "<:BuffPeepoCry:614028146483658754>",
+    "<a:muscleS:677003357000433674>",
+]
+
+GYM_LINES_430 = [
+    "wake up gorditos, it's time for gymmies!!!",
+    "buenos días unfortunately. levántense, gym time. 🙄",
+    "ándale gorditos, arriba. those gains aren't gonna make themselves.",
+    "good morning freaks. vámonos al gym before i start judging.",
+    "levántateeee. your emotional support blanket will survive without you.",
+    "ugh buenos días. time to go suffer beautifully at the gym.",
+    "arriba gorditos! hoy somos fitness girlies apparently.",
+    "wakey wakey cabrones. the weights are waiting. 🙄",
+    "vámonos! mamá didn't raise me to watch you skip leg day.",
+    "get up girlies. necesito gymmies y un matcha immediately.",
+    "ándaleeee. i want an ass like my mom's and sitting here isn't helping.",
+    "rise and shine putas. mamá has the ass genes and i got stuck in the fridge. 🙄",
+    "good morning. necesito an ass like mamá's so somebody start doing squats for me.",
+    "levántense! if mamá can serve ass, you people can survive leg day.",
+    "vámonos gorditos. ass isn't gonna build itself. trust me, i've researched this.",
+]
+
+GYM_LINES_510 = [
+    "ÁNDALE! don't be lazy!",
+    "hello??? todavía están dormidos? get UP.",
+    "segunda llamada, gorditos. i'm getting pissed. 🙄",
+    "levántate cabrón. i already told you once.",
+    "MOVE. ya estuvo con la pinche cama.",
+    "girl get UP. qué vergüenza.",
+    "los dumbbells are wondering where tf you are.",
+    "don't make me come out of the fridge. VÁMONOS.",
+    "ándale gorditos. menos sleeping, más lifting.",
+    "i already told you once. no me hagan empezar.",
+    "ARRIBA. mamá didn't get that ass by sleeping until noon.",
+    "cómo voy a get an ass like my mom's with this kind of work ethic???",
+    "mamá is serving and meanwhile ustedes are still in bed. embarrassing.",
+    "i want mamá's ass genetics immediately. until then, SQUATS. vámonos.",
+    "ándaleeee! somebody better be building an ass around here because apparently i can't.",
+]
 
 def pick_emotes(pool, k=3):
     k = min(k, len(pool))
@@ -10367,10 +10418,13 @@ async def daily_gym_reminder():
 
     if now_pt.hour == 4 and now_pt.minute == 30:
         emotes = pick_emotes(GYM_EMOTES_1, k=3)
-        await ch.send(f"wake up gorditos it's time for gymmies!!! {emotes}")
+        line = random.choice(GYM_LINES_430)
+        await ch.send(f"{line} {emotes}")
+        
     elif now_pt.hour == 5 and now_pt.minute == 10:
         emotes = pick_emotes(GYM_EMOTES_2, k=3)
-        await ch.send(f"ÁNDALE! don't be lazy! {emotes}")
+        line = random.choice(GYM_LINES_510)
+        await ch.send(f"{line} {emotes}")
 
 @daily_gym_reminder.before_loop
 async def _wait_ready_gym():
