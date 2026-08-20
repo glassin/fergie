@@ -10330,7 +10330,7 @@ async def _wait_user3_task():
 @tasks.loop(hours=24)
 async def daily_scam_post():
     channel = bot.get_channel(CHANNEL_ID)
-    if channel and random.random() < 0.7:
+    if channel and random.random() < 0.3:
         await channel.send("I NEED MONIES!!!🙄💅")
 
 @daily_scam_post.before_loop
