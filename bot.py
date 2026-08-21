@@ -12433,7 +12433,7 @@ async def halp(ctx, *, command: str | None = None):
     )
 
     e.add_field(
-        name="🎧 Fergie 5.0 DJ & Spotify",
+        name="🎧 Fergie 5.0 DJ & Spotify & Sonic Crimes",
         value=(
             "Post a **Spotify track link** — Fergie reviews/rates it and learns member taste\n"
             "• **7.5+/10** can enter the DJ candidate pipeline for the local crate\n"
@@ -12443,12 +12443,31 @@ async def halp(ctx, *, command: str | None = None):
             "• Soulseek eligibility: **320 kbps MP3, FLAC, or M4A only**\n"
             "• Imported candidates are detected automatically and the poster gets a crate confirmation\n"
             "• Autonomous DJ uses a light taste nudge while preserving rotation/repeat protections\n"
-            "• **Aux League:** ratings earn weekly points; crate imports earn a **+3 bonus**\n"
-            "• Fergie posts the weekly Aux leaderboard automatically on Sunday"
+            "• **Sonic Crimes:** ratings earn weekly points; crate imports earn a **+3 bonus**\n"
+            "• Fergie posts the Sonic Crimes leaderboard automatically on Sunday\n"
+            "`!sonichistory [limit]` — Show archived weekly Sonic Crimes winners\n"
+            "`!sonicwins` — Show the all-time Sonic Crimes win leaderboard"
         ),
         inline=False
     )
 
+    e.add_field(
+        name="🎬 Movie Club",
+        value=(
+            "`!movieclub status` — Show today's Movie Club phase, nominations, voting status, and winner\n"
+            "`!movieclub nominate <movie>` — Nominate a movie while nominations are open\n"
+            "`!movieclub list` — Browse the unwatched movie catalog with reaction pagination\n"
+            "`!movieclub history` — Browse watched Movie Club history with reaction pagination\n"
+            "`!movieclub progress` — Show watched vs. remaining Movie Club progress\n"
+            "• Fergie opens nominations automatically in the morning\n"
+            "• Nominations close and voting opens at **12:00 PM PT**\n"
+            "• Voting closes automatically at **4:00 PM PT**\n"
+            "• Fergie may add one random unwatched movie of her own to the nominations"
+        ),
+        inline=False
+    )
+
+    
     e.add_field(
         name="🎙️ VC Slash & Spoken DJ",
         value=(
@@ -12474,8 +12493,19 @@ async def halp(ctx, *, command: str | None = None):
             "`!djcredit <#>` — Credit a pending wanted song already present in the DJ crate\n"
             "`!djcrate [page]` — Show Fergie's full DJ crate with pagination\n"
             "`!djrank [limit]` — Rank songs by server-wide DJ retention/popularity\n"
-            "`!auxboardtest` — Preview the current Aux League board without consuming Sunday's post\n"
-            f"`!selftest` / `!selftest full` — Fergie 5.0 diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
+            "`!sonicboardtest` — Preview the current Sonic Crimes Sunday board without consuming the real post\n"
+            "`!sonicmidweektest` — Preview the current Sonic Crimes midweek standings\n"
+            "`!sonicbackfill YYYY-MM-DD` — Archive a completed historical Sonic Crimes winner\n"
+            "`!movieclub start` / `!movieclub stop` — Enable or pause the automatic Movie Club cycle\n"
+            "`!movieclub absent @member` / `!movieclub present @member` — Manage today's required voters\n"
+            "`!movieclub watched <movie>` / `!movieclub unwatched <movie>` — Mark or reverse watched status\n"
+            "`!movieclub add <movie>` — Add a movie manually to the permanent Movie Club databank\n"
+            "`!movieclub movietime` — Announce that it is actually time to watch today's winner\n"
+            "`!movieclub forcepoll` — Manually close nominations and open today's poll\n"
+            "`!movieclub forcewinner` — Resolve today's current votes early\n"
+            "`!movieclub resetday` — Reset today's Movie Club session without deleting the permanent catalog\n"
+            "`!movieclub rescan` — Re-scan the Movie Club channel into the permanent databank\n"
+            f"`!selftest` / `!selftest full` — Fergie diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
         ),
         inline=False
     )
