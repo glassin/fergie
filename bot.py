@@ -13454,6 +13454,7 @@ async def selftest(ctx, mode: str = "fast"):
         "_fergie_movieclub_voting_complete",
         "_fergie_movieclub_open_morning_nominations",
         "_fergie_movieclub_open_poll",
+        "_fergie_movieclub_cast_vote",
         "_fergie_movieclub_resolve_winner",
 
         # GIF helper
