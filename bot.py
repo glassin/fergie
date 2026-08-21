@@ -13469,19 +13469,32 @@ async def selftest(ctx, mode: str = "fast"):
     else:
         overall = f"🔴 {failed_count} CHECK(S) FAILED"
 
-    embed = discord.Embed(
-        title="🧠 Fergie 5.0 Diagnostics",
-        description=(
-            f"**{overall}**\n"
-            f"Mode: **{'FULL' if full_mode else 'FAST'}**\n"
-            f"✅ {passed_count} passed • ❌ {failed_count} failed"
-        ),
-        colour=(
-            discord.Colour.green()
-            if failed_count == 0
-            else discord.Colour.red()
-        ),
-    )
+    def make_diagnostic_embed(first=False):
+        if first:
+            return discord.Embed(
+                title="🧠 Fergie 5.0 Diagnostics",
+                description=(
+                    f"**{overall}**\n"
+                    f"Mode: **{'FULL' if full_mode else 'FAST'}**\n"
+                    f"✅ {passed_count} passed • ❌ {failed_count} failed"
+                ),
+                colour=(
+                    discord.Colour.green()
+                    if failed_count == 0
+                    else discord.Colour.red()
+                ),
+            )
+
+        return discord.Embed(
+            title="🧠 Fergie Diagnostics — continued",
+            colour=(
+                discord.Colour.green()
+                if failed_count == 0
+                else discord.Colour.red()
+            ),
+        )
+
+    embeds = [make_diagnostic_embed(first=True)]
 
     sections = []
 
@@ -13511,20 +13524,40 @@ async def selftest(ctx, mode: str = "fast"):
                 f"{icon} **{row['name']}**{detail}"
             )
 
-        # Discord embed field limits are 1024 chars.
         text_block = "\n".join(lines)
 
         while text_block:
             chunk = text_block[:1000]
 
-            # Try to cut cleanly on a newline.
             if len(text_block) > 1000:
                 split_at = chunk.rfind("\n")
 
                 if split_at > 0:
                     chunk = chunk[:split_at]
 
-            embed.add_field(
+            current = embeds[-1]
+
+            # Discord allows 6000 total characters per embed.
+            current_size = (
+                len(current.title or "")
+                + len(current.description or "")
+                + sum(
+                    len(field.name) + len(field.value)
+                    for field in current.fields
+                )
+            )
+
+            added_size = len(section) + len(chunk)
+
+            # Leave a little safety margin below Discord's 6000 limit.
+            if (
+                current_size + added_size > 5500
+                or len(current.fields) >= 24
+            ):
+                current = make_diagnostic_embed()
+                embeds.append(current)
+
+            current.add_field(
                 name=section,
                 value=chunk,
                 inline=False,
@@ -13532,26 +13565,31 @@ async def selftest(ctx, mode: str = "fast"):
 
             text_block = text_block[len(chunk):].lstrip("\n")
 
-            # Avoid Discord's max field-count limit.
-            if len(embed.fields) >= 24:
-                break
-
-        if len(embed.fields) >= 24:
-            break
-
-    embed.set_footer(
-        text=(
-            "FAST = inspection/read-only • FULL = safe live checks; no playback/import/post triggers"
+    for embed in embeds:
+        embed.set_footer(
+            text=(
+                "FAST = inspection/read-only • "
+                "FULL = safe live checks; no playback/import/post triggers"
+            )
         )
-    )
 
     try:
         await wait.edit(
             content=None,
-            embed=embed,
+            embed=embeds[0],
         )
-    except Exception:
-        await ctx.send(embed=embed)
+
+        for extra_embed in embeds[1:]:
+            await ctx.send(embed=extra_embed)
+
+    except Exception as e:
+        print(
+            f"FERGIE SELFTEST REPORT ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        for diagnostic_embed in embeds:
+            await ctx.send(embed=diagnostic_embed)
         
 # ================== Start ==================
 if __name__ == "__main__":
