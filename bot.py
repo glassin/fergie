@@ -146,10 +146,16 @@ HYDRATION_TRIGGERS = [
 HYDRATION_COOLDOWN_SECONDS = 120
 # ---------------------------------------
 
-# ---------- Kewchie (Kali Uchis) ----------
+# ---------- Kewchies ----------
 SPOTIFY_CLIENT_ID = os.getenv("SPOTIFY_CLIENT_ID", "")
 SPOTIFY_CLIENT_SECRET = os.getenv("SPOTIFY_CLIENT_SECRET", "")
 SPOTIFY_PLAYLIST_ID = os.getenv("SPOTIFY_PLAYLIST_ID", "6l190qy5x9xY8Uk3bb2FYl")
+KEWCHIE_RECENT_LIMIT = 12
+KEWCHIE_PLAYLIST_IDS = [
+    SPOTIFY_PLAYLIST_ID,          # original Kewchie playlist
+    "4bbvQy1tVk4oWvcXBiR9tV",
+    "2blceVxH407xlmX4LZd7jD",
+]
 SPOTIFY_MARKET = os.getenv("SPOTIFY_MARKET", "US")
 KEWCHIE_CHANNEL_ID = int(os.getenv("KEWCHIE_CHANNEL_ID", "1131573379577675826"))
 
@@ -6439,6 +6445,70 @@ async def _fetch_playlist_tracks(playlist_id: str) -> list[str]:
     except Exception:
         pass
     return tracks
+    
+async def _fergie_random_kewchie_track():
+    """
+    Pick a random Kewchie playlist, then a random track from it.
+
+    Avoid recently posted tracks when possible.
+    If one playlist is unavailable, try the others before giving up.
+    """
+    playlist_ids = [
+        playlist_id
+        for playlist_id in KEWCHIE_PLAYLIST_IDS
+        if str(playlist_id or "").strip()
+    ]
+
+    if not playlist_ids:
+        return None
+
+    random.shuffle(playlist_ids)
+
+    recent_tracks = list(
+        getattr(bot, "_kewchie_recent_tracks", [])
+    )
+    recent_set = set(recent_tracks)
+
+    fallback_links = []
+
+    for playlist_id in playlist_ids:
+        links = await _fetch_playlist_tracks(playlist_id)
+
+        if not links:
+            continue
+
+        if not fallback_links:
+            fallback_links = links
+
+        fresh_links = [
+            link
+            for link in links
+            if link not in recent_set
+        ]
+
+        if fresh_links:
+            track_url = random.choice(fresh_links)
+
+            recent_tracks.append(track_url)
+            bot._kewchie_recent_tracks = recent_tracks[
+                -KEWCHIE_RECENT_LIMIT:
+            ]
+
+            return track_url
+
+    # Everything available was recently played.
+    # Allow a repeat rather than refusing to post.
+    if fallback_links:
+        track_url = random.choice(fallback_links)
+
+        recent_tracks.append(track_url)
+        bot._kewchie_recent_tracks = recent_tracks[
+            -KEWCHIE_RECENT_LIMIT:
+        ]
+
+        return track_url
+
+    return None
 
 # ================== Mimic (USER3 style) ==================
 # NOTE: This block is additive and does not modify any existing behavior.
@@ -6883,11 +6953,15 @@ async def kewchie_daily_scheduler():
         if now_utc == t and key not in bot._kewchie_posted:
             channel = bot.get_channel(KEWCHIE_CHANNEL_ID)
             if channel:
-                links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
-                if links:
-                    await channel.send(random.choice(links))
+                track_url = await _fergie_random_kewchie_track()
+
+                if track_url:
+                    caption = random.choice(KEWCHIE_POST_LINES)
+                    await channel.send(
+                        f"{caption}\n{track_url}"
+                    )
                 else:
-                    await channel.send("Playlist isn't available right now 😭")
+                    await channel.send("the kewchie vault is being dramatic right now 😭")
             bot._kewchie_posted.add(key)
 
 @kewchie_daily_scheduler.before_loop
@@ -10980,34 +11054,92 @@ async def hawaii(ctx):
     await ctx.send(random.choice(HAWAII_IMAGES))
 
 # ---- Kewchie commands ----
-@bot.command(name="kewchie", help="Post a random Kali Uchis song from the playlist (in the kewchie channel)")
+KEWCHIE_POST_LINES = [
+    "kewchie delivery. act grateful. 🙄",
+    "fine. here's your little song.",
+    "i brought music because apparently i do everything around here.",
+    "this one survived my quality control. barely.",
+    "another contribution to the cultural enrichment of this server.",
+    "your daily kewchie has arrived. you're welcome.",
+    "i picked this with my extremely expensive taste.",
+    "shut up and listen to this one.",
+    "clocked in. served kewchie. clocking back out.",
+    "i went digging through the playlists so you people don't have to.",
+    "this one kinda eats. unfortunately.",
+    "wait... whoever put this in here might've done something.",
+    "oh this one's cute. don't make me regret saying that.",
+    "adding a little seasoning to this miserable server.",
+    "kewchie o'clock. everybody behave.",
+    "i have arrived with enrichment for the enclosure.",
+    "here. develop some taste.",
+    "another day, another song i'm forcing upon you.",
+    "don't say i never gave you anything.",
+    "hold on... this one has a little kewchie to it. 🤭",
+]
+
+@bot.command(name="kewchie", help="fergie's kewchie's")
 async def kewchie(ctx):
     if ctx.channel.id != KEWCHIE_CHANNEL_ID:
-        await ctx.send(f"Use this in <#{KEWCHIE_CHANNEL_ID}>"); return
-    links = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID)
-    if not links:
-        await ctx.send("Playlist isn't available right now 😭"); return
-    await ctx.send(random.choice(links))
+        await ctx.send(f"Use this in <#{KEWCHIE_CHANNEL_ID}>")
+        return
 
-@bot.command(name="kewchie-debug", help="Debug Spotify playlist setup")
+    track_url = await _fergie_random_kewchie_track()
+
+    if not track_url:
+        await ctx.send("the kewchie vault is being dramatic right now 😭")
+        return
+
+    caption = random.choice(KEWCHIE_POST_LINES)
+
+    await ctx.send(
+        f"{caption}\n{track_url}"
+    )
+
+@bot.command(name="kewchie-debug", help="Debug Spotify Kewchie playlist setup")
 async def kewchie_debug(ctx):
-    cid_set = bool(SPOTIFY_CLIENT_ID); sec_set = bool(SPOTIFY_CLIENT_SECRET)
-    pid_set = bool(SPOTIFY_PLAYLIST_ID)
+    cid_set = bool(SPOTIFY_CLIENT_ID)
+    sec_set = bool(SPOTIFY_CLIENT_SECRET)
     ch_ok = (bot.get_channel(KEWCHIE_CHANNEL_ID) is not None)
+
     token = await _get_spotify_token()
     token_ok = bool(token)
-    tracks = await _fetch_playlist_tracks(SPOTIFY_PLAYLIST_ID) if token_ok else []
+
+    playlist_results = []
+
+    if token_ok:
+        for index, playlist_id in enumerate(
+            KEWCHIE_PLAYLIST_IDS,
+            start=1,
+        ):
+            tracks = await _fetch_playlist_tracks(playlist_id)
+
+            playlist_results.append(
+                f"Playlist {index}: "
+                f"{playlist_id} — {len(tracks)} track(s)"
+            )
+    else:
+        playlist_results.append(
+            "Playlists not checked because Spotify token failed"
+        )
+
+    recent_count = len(
+        getattr(bot, "_kewchie_recent_tracks", [])
+    )
+
     msg = (
         f"CID set: {cid_set}\n"
         f"SECRET set: {sec_set}\n"
-        f"PLAYLIST set: {pid_set}\n"
         f"Token: {'ok' if token_ok else 'failed'}\n"
-        f"Tracks fetched: {len(tracks)}\n"
+        f"Configured playlists: {len(KEWCHIE_PLAYLIST_IDS)}\n"
+        + "\n".join(playlist_results)
+        + f"\nRecent anti-repeat bank: "
+        f"{recent_count}/{KEWCHIE_RECENT_LIMIT}\n"
         f"Channel OK: {ch_ok} (<#{KEWCHIE_CHANNEL_ID}>)"
     )
+
     await ctx.send(f"```{msg}```")
 
-# ---- FIT command & auto daily ----
+# ---- Pinterest command & auto daily ----
 @bot.command(name="hongree", help="fergie's feasts")
 async def fit(ctx):
     if ctx.channel.id != FIT_CHANNEL_ID:
