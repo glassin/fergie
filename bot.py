@@ -1265,6 +1265,15 @@ async def _fergie_seasonal_save_state(
     if not state_key:
         return False
 
+    # Seasonal canonical progress must never pretend it was persisted
+    # when Postgres is unavailable.
+    if not db_pool:
+            print(
+                f"SEASONAL STATE SAVE BLOCKED ❌ "
+                f"{state_key}: database unavailable"
+            )
+            return False
+
     state["season_id"] = str(
         package.get("season_id")
         or ""
@@ -3486,7 +3495,33 @@ def _fergie_seasonal_story_stage_definition(
 
     return matches[0][1]
 
+def _fergie_seasonal_gemini_guidance(
+    package: dict,
+    state: dict,
+    now_dt=None,
+):
+    """
+    Return short hidden Gemini guidance for the crew's current story stage.
 
+    The story content comes from seasonal JSON.
+    Python only passes it through.
+    """
+    stage = _fergie_seasonal_story_stage_definition(
+        package,
+        state,
+        now_dt=now_dt,
+    )
+
+    if not isinstance(stage, dict):
+        return ""
+
+    guidance = str(
+        stage.get("gemini_guidance")
+        or ""
+    ).strip()
+
+    return guidance
+    
 def _fergie_seasonal_asset_stage_allowed(
     package: dict,
     asset_id: str,
