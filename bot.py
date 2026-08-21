@@ -7468,8 +7468,6 @@ async def sonichistory(ctx, limit: int = 10):
 
             winner_id = str(record.get("winner_id") or "")
             points = int(record.get("points") or 0)
-            submissions = int(record.get("submissions") or 0)
-            crate_adds = int(record.get("crate_adds") or 0)
 
             winner_text = (
                 f"<@{winner_id}>"
@@ -7478,9 +7476,7 @@ async def sonichistory(ctx, limit: int = 10):
             )
 
             lines.append(
-                f"🏆 `{week_key}` — {winner_text} — "
-                f"**{points} pts** "
-                f"({submissions} submissions, {crate_adds} crate adds)"
+                f"🏆 `{week_key}` — {winner_text} — **{points} pts**"
             )
 
         await ctx.reply(
