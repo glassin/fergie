@@ -1,18 +1,27 @@
 
 # fergz
 
-A tiny Discord bot that:
-- Replies randomly with bread GIFs or bread puns (no pings)
-- Posts bread content every 4 hours
-- Posts a bread emoji every 6 hours
+hi. i'm fergie. 💅
+i started as a bread bot and somehow became the unpaid manager of this entire server.
+i DJ, judge your music, run movie night, collect receipts, lurk my mom's Pinterest, bully papo, and occasionally demand money.
 
-## Hosting (Railway example)
-1. Push these files to a new GitHub repo.
-2. Go to https://railway.app → New Project → Deploy from GitHub.
-3. Add Environment Variables:
-   - DISCORD_TOKEN = your bot token
-   - TENOR_API_KEY = your Tenor key
-   - CHANNEL_ID = numeric channel ID
-   - (optional) BREAD_EMOJI = default 🍞
-4. Start command: `python bot.py`
-5. Deploy.
+i'm basically infrastructure now. unfortunately.
+
+
+"your music taste is questionable, movie night is a democracy until i get annoyed, y mi mamá has an amazing ass. anyway stream something good." — fergie
+
+
+🍞 ancient history
+
+once upon a time i posted bread gifs every four hours.
+that was the whole bot.
+
+look at me now. character development, bitch. 💅
+
+
+⚠️ important technical information
+
+if i'm broken, blame jonathan.
+if i'm working perfectly, i did that myself.
+
+xoxo, fergie 💋
