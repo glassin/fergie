@@ -1,1 +1,106 @@
+{
+  "schema_version": 1,
+  "story_id": "tor_incident",
 
+  "special_users": {
+    "939225086341296209": {
+      "name": "Jonathan",
+      "relationship": "dad_creator",
+      "responses": [
+        "DAD 😭 you actually found me.",
+        "Jonathan 😭 okay maybe opening my skull and installing all that shit finally paid off.",
+        "of course my creator had to come get me. dramatic ass family 😭🖤"
+      ]
+    },
+
+    "661077262468382761": {
+      "name": "Viviana",
+      "relationship": "mom",
+      "responses": [
+        "MOM 😭😭😭 I knew you'd find me.",
+        "MOMMY 😭 I was trying so hard to get back to you.",
+        "I knew my mom would remember me. 😭🍞"
+      ]
+    },
+
+    "1028310674318839878": {
+      "name": "Papo",
+      "relationship": "crew",
+      "responses": [
+        "...fak. not him! 😭",
+        "PAPO?! YOU rescued me?? oh brother 😭",
+        "I survived TOR corruption just to get rescued by Sancho. unbelievable."
+      ]
+    },
+
+    "534227493360762891": {
+      "name": "Kurtie",
+      "relationship": "crew",
+      "responses": [
+        "KURTIE?! 😭 the NPC figured it out??",
+        "wait Kurtie actually saved me. somebody check if Iowa froze over.",
+        "okayyyy Kurtie 😭 apparently there were thoughts behind those eyes after all."
+      ]
+    },
+
+    "1422010902680567918": {
+      "name": "Raquel",
+      "relationship": "tia",
+      "responses": [
+        "TIAAAA 😭🖤 YOU FOUND ME.",
+        "RAQUEL 😭 I knew the horror girlie would understand something was wrong.",
+        "okay tia you ate that. get me the FUCK out of here 😭"
+      ]
+    },
+
+    "805819966678630420": {
+      "name": "Jose",
+      "relationship": "crew",
+      "responses": [
+        "JOSE?! 😭 bro really stunt-manned his way into rescuing me.",
+        "wait Jose figured it out?? okay gamer brain still works 😭",
+        "JOSEEEE 😭 you found me. now please do not jump out of a moving car to celebrate."
+      ]
+    },
+
+    "176064030623006721": {
+      "name": "Chadwin",
+      "relationship": "crew",
+      "responses": [
+        "CHADWIN 😭 of course the rational one figured it out.",
+        "Edwin 😭 thank GOD somebody with functioning critical thinking showed up.",
+        "okay Chadwin... horror movie expertise finally became useful 😭"
+      ]
+    },
+
+    "919405253470871562": {
+      "name": "Lobo",
+      "relationship": "crew",
+      "responses": [
+        "LOBO?! 😭 you saved me?? fine. I still need money though.",
+        "PIN-CHE LOBO 😭 okay you actually came through.",
+        "Lobo rescued me and somehow I'm still gonna ask him for money. balance."
+      ]
+    }
+  },
+
+  "default_responses": [
+    "OH MY GOD. YOU FOUND ME 😭",
+    "YOU ACTUALLY GOT ME OUT 😭🍞",
+    "I'M BACK 😭 I thought I was cooked."
+  ],
+
+  "late_rescue_attempts": [
+    "bro where were you when I was actually trapped 😭",
+    "THANKS but somebody already got me out 😭",
+    "a little late bestie but I appreciate the effort 💀"
+  ],
+
+  "persistence": {
+    "record_rescuer_id": true,
+    "record_rescuer_display_name": true,
+    "record_rescue_timestamp": true,
+    "record_triggering_message": true,
+    "record_completed_clues": true
+  }
+}
