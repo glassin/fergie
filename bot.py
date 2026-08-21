@@ -12830,7 +12830,53 @@ def _fergie_selftest_asset(path):
 
     return False, "file missing"
 
+async def _fergie_selftest_movieclub_state():
+        """Read-only Movie Club persistent-state diagnostic."""
+        try:
+            data = await _fergie_movieclub_load()
 
+            if not isinstance(data, dict):
+                return False, "Movie Club payload is not a dict"
+
+            settings = data.get("settings", {})
+            movies = data.get("movies", {})
+            history = data.get("history", [])
+            today = data.get("today", {})
+
+            if not isinstance(settings, dict):
+                return False, "settings payload is invalid"
+
+            if not isinstance(movies, dict):
+                return False, "movies payload is invalid"
+
+            if not isinstance(history, list):
+                return False, "history payload is invalid"
+
+            if not isinstance(today, dict):
+                return False, "today payload is invalid"
+
+            phase = str(today.get("phase") or "idle")
+
+            valid_phases = {
+                "idle",
+                "nominations",
+                "voting",
+                "winner",
+            }
+
+            if phase not in valid_phases:
+                return False, f"invalid today phase: {phase}"
+
+            return (
+                True,
+                f"{len(movies)} movie(s) • "
+                f"{len(history)} watched record(s) • "
+                f"phase={phase}",
+            )
+
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
+            
 @bot.command(
     name="selftest",
     help="ADMIN: Run Fergie 5.0 diagnostics. Use !selftest full for safe live integration tests.",
@@ -13403,59 +13449,15 @@ async def selftest(ctx, mode: str = "fast"):
             movieclub_ok,
             movieclub_detail,
         )
-        
-async def _fergie_selftest_movieclub_state():
-        """Read-only Movie Club persistent-state diagnostic."""
-        try:
-            data = await _fergie_movieclub_load()
-
-            if not isinstance(data, dict):
-                return False, "Movie Club payload is not a dict"
-
-            settings = data.get("settings", {})
-            movies = data.get("movies", {})
-            history = data.get("history", [])
-            today = data.get("today", {})
-
-            if not isinstance(settings, dict):
-                return False, "settings payload is invalid"
-
-            if not isinstance(movies, dict):
-                return False, "movies payload is invalid"
-
-            if not isinstance(history, list):
-                return False, "history payload is invalid"
-
-            if not isinstance(today, dict):
-                return False, "today payload is invalid"
-
-            phase = str(today.get("phase") or "idle")
-
-            valid_phases = {
-                "idle",
-                "nominations",
-                "voting",
-                "winner",
-            }
-
-            if phase not in valid_phases:
-                return False, f"invalid today phase: {phase}"
-
-            return (
-                True,
-                f"{len(movies)} movie(s) • "
-                f"{len(history)} watched record(s) • "
-                f"phase={phase}",
-            )
-
-        except Exception as e:
-            return False, f"{type(e).__name__}: {e}"
-        
         gemini_ok, gemini_detail = await _fergie_selftest_gemini()
         record("Live", "Gemini text", gemini_ok, gemini_detail)
 
         spotify_ok, spotify_detail = await _fergie_selftest_spotify()
         record("Live", "Spotify token", spotify_ok, spotify_detail)
+
+        
+
+        
 
     # ==========================================================
     # REPORT
