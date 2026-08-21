@@ -7018,7 +7018,73 @@ async def vc_brain_http(request):
         }
     )
 
+async def vc_seasonal_voice_http(request):
+    """
+    Protected read-only endpoint for the Node VC/DJ service.
 
+    Returns one seasonal voice-mode decision for the next spoken
+    Fergie VC/DJ line.
+
+    This never modifies seasonal story state.
+    """
+    if not VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "bridge_not_configured",
+            },
+            status=503,
+        )
+
+    supplied_secret = request.headers.get(
+        "X-VC-Bridge-Secret",
+        "",
+    )
+
+    if supplied_secret != VC_BRIDGE_SECRET:
+        return web.json_response(
+            {
+                "ok": False,
+                "error": "unauthorized",
+            },
+            status=401,
+        )
+
+    try:
+        mode = await _fergie_seasonal_choose_voice_mode()
+
+    except Exception as e:
+        print(
+            f"VC SEASONAL VOICE ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        # Seasonal voice failure must never break normal VC.
+        mode = "normal"
+
+    allowed_modes = {
+        "normal",
+        "whisper",
+        "scared",
+        "hollow",
+        "possessed",
+        "unstable",
+    }
+
+    mode = str(
+        mode or "normal"
+    ).strip().lower()
+
+    if mode not in allowed_modes:
+        mode = "normal"
+
+    return web.json_response(
+        {
+            "ok": True,
+            "mode": mode,
+        }
+    )
+    
 async def start_vc_bridge_server():
     global vc_bridge_runner
 
@@ -7036,7 +7102,13 @@ async def start_vc_bridge_server():
         "/vc-brain",
         vc_brain_http
     )
-
+    
+    # Reusable seasonal voice-mode decision for VC/DJ ElevenLabs.
+    app.router.add_get(
+        "/seasonal-voice",
+        vc_seasonal_voice_http
+    )
+    
     # Fergie 5.0 J.4: read-only taste signal for autonomous DJ selection.
     app.router.add_get(
         "/dj-taste-signals",
