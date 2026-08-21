@@ -3521,6 +3521,172 @@ def _fergie_seasonal_gemini_guidance(
     ).strip()
 
     return guidance
+
+def _fergie_seasonal_voice_profile(
+    package: dict,
+    state: dict,
+    now_dt=None,
+):
+    """
+    Return the current reusable seasonal voice-corruption profile.
+
+    This only decides eligibility/intensity.
+    ElevenLabs performance is handled separately by the caller.
+    """
+    normal = {
+        "eligible": False,
+        "stage": None,
+        "chance": 0.0,
+        "modes": [],
+    }
+
+    if not isinstance(package, dict):
+        return normal
+
+    if not isinstance(state, dict):
+        return normal
+
+    if state.get("story_completed", False):
+        return normal
+
+    if now_dt is None:
+        now_dt = _fergie_seasonal_now(package)
+
+    story_window = _fergie_seasonal_active_story_window(
+        package,
+        now_dt=now_dt,
+    )
+
+    if story_window is None:
+        return normal
+
+    stage = _fergie_seasonal_effective_story_stage(
+        package,
+        state,
+        now_dt=now_dt,
+    )
+
+    profiles = {
+        0: {
+            "chance": 0.00,
+            "modes": [],
+        },
+        1: {
+            "chance": 0.00,
+            "modes": [],
+        },
+        2: {
+            "chance": 0.08,
+            "modes": [
+                "whisper",
+                "hollow",
+            ],
+        },
+        3: {
+            "chance": 0.15,
+            "modes": [
+                "whisper",
+                "scared",
+                "hollow",
+            ],
+        },
+        4: {
+            "chance": 0.22,
+            "modes": [
+                "whisper",
+                "hollow",
+                "possessed",
+                "unstable",
+            ],
+        },
+        5: {
+            "chance": 0.28,
+            "modes": [
+                "whisper",
+                "scared",
+                "hollow",
+                "possessed",
+                "unstable",
+            ],
+        },
+        6: {
+            "chance": 0.35,
+            "modes": [
+                "whisper",
+                "scared",
+                "hollow",
+                "possessed",
+                "unstable",
+            ],
+        },
+    }
+
+    profile = profiles.get(
+        int(stage or 0),
+        profiles[0],
+    )
+
+    return {
+        "eligible": bool(
+            profile["chance"] > 0
+            and profile["modes"]
+        ),
+        "stage": int(stage or 0),
+        "chance": float(profile["chance"]),
+        "modes": list(profile["modes"]),
+    }
+
+
+async def _fergie_seasonal_choose_voice_mode():
+    """
+    Randomly choose the current seasonal voice treatment.
+
+    Returns:
+        "normal", "whisper", "scared", "hollow",
+        "possessed", or "unstable"
+    """
+    try:
+        for package in _fergie_seasonal_get_active_packages():
+            now_dt = _fergie_seasonal_now(package)
+
+            state = await _fergie_seasonal_load_state(
+                package
+            )
+
+            if not isinstance(state, dict):
+                continue
+
+            profile = _fergie_seasonal_voice_profile(
+                package,
+                state,
+                now_dt=now_dt,
+            )
+
+            if not profile.get("eligible", False):
+                continue
+
+            chance = float(
+                profile.get("chance", 0.0)
+                or 0.0
+            )
+
+            if random.random() >= chance:
+                return "normal"
+
+            modes = profile.get("modes", [])
+
+            if not modes:
+                return "normal"
+
+            return random.choice(modes)
+
+    except Exception as e:
+        print(
+            f"SEASONAL VOICE MODE ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+    return "normal"
     
 def _fergie_seasonal_asset_stage_allowed(
     package: dict,
@@ -6951,7 +7117,18 @@ def _clean_text_for_voice(text: str) -> str:
     return cleaned
 
 
-async def generate_fergie_text_voice(text: str) -> bytes | None:
+async def generate_fergie_text_voice(
+    text: str,
+    voice_mode: str | None = None,
+) -> bytes | None:
+    """
+    Generate Fergie's text-channel ElevenLabs voice.
+
+    voice_mode=None:
+        Automatically use the current seasonal voice roll.
+
+    Explicit modes are used only by hidden admin tests.
+    """
     if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
         print("TEXT VOICE SKIP: ElevenLabs key/voice ID missing")
         return None
@@ -6960,6 +7137,121 @@ async def generate_fergie_text_voice(text: str) -> bytes | None:
 
     if not spoken_text:
         return None
+
+    allowed_modes = {
+        "normal",
+        "whisper",
+        "scared",
+        "hollow",
+        "possessed",
+        "unstable",
+    }
+
+    if voice_mode is None:
+        voice_mode = await _fergie_seasonal_choose_voice_mode()
+
+    voice_mode = str(
+        voice_mode or "normal"
+    ).strip().lower()
+
+    if voice_mode not in allowed_modes:
+        voice_mode = "normal"
+
+    model_id = "eleven_flash_v2_5"
+
+    voice_settings = {
+        "stability": 0.45,
+        "similarity_boost": 0.80,
+        "style": 0.25,
+        "use_speaker_boost": True,
+    }
+
+    tts_text = spoken_text
+
+    if voice_mode == "whisper":
+        model_id = "eleven_v3"
+        tts_text = f"[whispers] {spoken_text}"
+
+        voice_settings = {
+            "stability": 0.30,
+            "similarity_boost": 0.80,
+            "style": 0.55,
+            "use_speaker_boost": True,
+        }
+
+    elif voice_mode == "scared":
+        model_id = "eleven_v3"
+        tts_text = f"[nervously] {spoken_text}"
+
+        voice_settings = {
+            "stability": 0.22,
+            "similarity_boost": 0.82,
+            "style": 0.70,
+            "use_speaker_boost": True,
+        }
+
+    elif voice_mode == "hollow":
+        model_id = "eleven_v3"
+        tts_text = f"[flatly] {spoken_text}"
+
+        voice_settings = {
+            "stability": 0.80,
+            "similarity_boost": 0.84,
+            "style": 0.08,
+            "use_speaker_boost": True,
+        }
+
+    elif voice_mode == "possessed":
+        model_id = "eleven_v3"
+        tts_text = f"[angrily] {spoken_text}"
+
+        voice_settings = {
+            "stability": 0.18,
+            "similarity_boost": 0.78,
+            "style": 0.85,
+            "use_speaker_boost": True,
+        }
+
+    elif voice_mode == "unstable":
+        model_id = "eleven_v3"
+
+        words = spoken_text.split()
+
+        if len(words) >= 6:
+            split_at = max(
+                2,
+                len(words) // 2,
+            )
+
+            first_half = " ".join(
+                words[:split_at]
+            )
+
+            second_half = " ".join(
+                words[split_at:]
+            )
+
+            tts_text = (
+                f"{first_half}... "
+                f"[whispers] {second_half}"
+            )
+        else:
+            tts_text = (
+                f"{spoken_text}... "
+                f"[whispers] I'm fine."
+            )
+
+        voice_settings = {
+            "stability": 0.16,
+            "similarity_boost": 0.80,
+            "style": 0.78,
+            "use_speaker_boost": True,
+        }
+
+    print(
+        f"TEXT VOICE MODE 🎙️ "
+        f"mode={voice_mode} model={model_id}"
+    )
 
     url = (
         "https://api.elevenlabs.io/v1/text-to-speech/"
@@ -6972,14 +7264,9 @@ async def generate_fergie_text_voice(text: str) -> bytes | None:
     }
 
     payload = {
-        "text": spoken_text,
-        "model_id": "eleven_flash_v2_5",
-        "voice_settings": {
-            "stability": 0.45,
-            "similarity_boost": 0.80,
-            "style": 0.25,
-            "use_speaker_boost": True,
-        },
+        "text": tts_text,
+        "model_id": model_id,
+        "voice_settings": voice_settings,
     }
 
     try:
@@ -6993,12 +7280,29 @@ async def generate_fergie_text_voice(text: str) -> bytes | None:
             ) as response:
                 if response.status != 200:
                     error_text = await response.text()
+
                     print(
                         f"TEXT VOICE TTS ERROR {response.status}: "
                         f"{error_text[:500]}"
                     )
+
                     return None
 
+                audio = await response.read()
+
+        if not audio:
+            print("TEXT VOICE TTS ERROR: empty audio")
+            return None
+
+        return audio
+
+    except Exception as e:
+        print(
+            f"TEXT VOICE TTS EXCEPTION: "
+            f"{type(e).__name__}: {e}"
+        )
+
+        return None
                 audio = await response.read()
 
         if not audio:
@@ -15229,6 +15533,130 @@ async def seasonreload(ctx):
         mention_author=False,
     )
 
+@bot.command(
+    name="seasonvoice",
+    hidden=True,
+)
+async def seasonvoice(
+    ctx,
+    mode: str = "status",
+    *,
+    text: str = "",
+):
+    """
+    Hidden admin seasonal voice test.
+
+    Usage:
+        !seasonvoice status
+        !seasonvoice normal testing one two three
+        !seasonvoice whisper don't look behind you
+        !seasonvoice scared mom can you hear me
+        !seasonvoice hollow everything is fine
+        !seasonvoice possessed you should not have opened that
+        !seasonvoice unstable I said I'm fine
+
+    Forced test modes do not alter seasonal state.
+    """
+    if not _fergie_seasonal_admin_allowed(ctx):
+        return
+
+    mode = str(
+        mode or "status"
+    ).strip().lower()
+
+    valid_modes = {
+        "normal",
+        "whisper",
+        "scared",
+        "hollow",
+        "possessed",
+        "unstable",
+    }
+
+    if mode == "status":
+        package = _fergie_seasonal_find_package(
+            ""
+        )
+
+        if not package:
+            await ctx.reply(
+                "season package not found.",
+                mention_author=False,
+            )
+            return
+
+        state = await _fergie_seasonal_load_state(
+            package
+        )
+
+        now_dt = _fergie_seasonal_now(
+            package
+        )
+
+        profile = _fergie_seasonal_voice_profile(
+            package,
+            state,
+            now_dt=now_dt,
+        )
+
+        await ctx.reply(
+            "```text\n"
+            f"season_id: {package.get('season_id')}\n"
+            f"story_completed: "
+            f"{bool(state and state.get('story_completed'))}\n"
+            f"eligible: {profile.get('eligible')}\n"
+            f"stage: {profile.get('stage')}\n"
+            f"chance: {profile.get('chance')}\n"
+            f"modes: {profile.get('modes')}\n"
+            "```",
+            mention_author=False,
+        )
+
+        return
+
+    if mode not in valid_modes:
+        await ctx.reply(
+            "voice mode must be: "
+            "`normal`, `whisper`, `scared`, `hollow`, "
+            "`possessed`, or `unstable`.",
+            mention_author=False,
+        )
+        return
+
+    text = str(
+        text or ""
+    ).strip()
+
+    if not text:
+        text = {
+            "normal": "testing one two three. Fergie is normal.",
+            "whisper": "don't look behind you.",
+            "scared": "mom... can you hear me?",
+            "hollow": "everything is fine.",
+            "possessed": "you should not have opened that.",
+            "unstable": "I said I'm fine. Stop asking me.",
+        }[mode]
+
+    audio = await generate_fergie_text_voice(
+        text,
+        voice_mode=mode,
+    )
+
+    if not audio:
+        await ctx.reply(
+            f"season voice test failed for `{mode}`.",
+            mention_author=False,
+        )
+        return
+
+    await ctx.reply(
+        content=f"SEASON VOICE TEST: `{mode}`",
+        file=discord.File(
+            io.BytesIO(audio),
+            filename=f"fergie_season_voice_{mode}.mp3",
+        ),
+        mention_author=False,
+    )
 
 @bot.command(
     name="seasonstatus",
