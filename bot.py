@@ -335,7 +335,24 @@ async def _fergie_random_pinterest_fit():
 # ---------- Bonk Papo schedule (3 times/day random) ----------
 BONK_PAPO_USER_ID = 1028310674318839878
 BONK_PAPO_CHANNEL_ID = 1131644171455844455  # channel for bonk posts
-BONK_PAPO_TEXT = "stop being horny papo! bad papo! <a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788><a:bonk_papo:1216928539413188788>"
+BONK_PAPO_LINES = [
+    "stop being horny papo! bad papo!",
+    "cállate papo. nobody asked. 🙄",
+    "ay papo... behave for literally five minutes.",
+    "papo PLEASE. have some decorum.",
+    "jesucristo papo. straight to bonk jail.",
+    "not today papo. absolutely not.",
+    "cállateeee. i'm telling mom. 🙄",
+    "papo this is why nobody leaves you unsupervised.",
+    "bad papo. zero manners. embarrassing.",
+    "papo por favor. act civilized for once.",
+]
+
+BONK_PAPO_EMOTES = [
+    "<a:bonk_papo:1216928539413188788>",
+    "<:bonk:1427717741481033799>",
+    "<a:bonk:789640613032099840>",
+]
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -4542,7 +4559,90 @@ async def _fergie_save_aux_week(data: dict):
         data,
     )
 
+FERGIE_SONIC_CRIMES_HISTORY_KEY = "fergie_sonic_crimes_history"
 
+
+async def _fergie_load_sonic_crimes_history():
+    data = await _db_get(FERGIE_SONIC_CRIMES_HISTORY_KEY)
+
+    if not isinstance(data, dict):
+        data = {}
+
+    weeks = data.get("weeks")
+
+    if not isinstance(weeks, dict):
+        weeks = {}
+
+    return {
+        "weeks": weeks,
+    }
+
+
+async def _fergie_save_sonic_crimes_history(data: dict):
+    if not isinstance(data, dict):
+        data = {}
+
+    weeks = data.get("weeks")
+
+    if not isinstance(weeks, dict):
+        weeks = {}
+
+    await _db_set(
+        FERGIE_SONIC_CRIMES_HISTORY_KEY,
+        {
+            "weeks": weeks,
+        },
+    )
+
+async def _fergie_archive_sonic_crimes_week(
+    *,
+    week_key: str,
+    standings: list,
+    leaderboard_message_id: int | None = None,
+):
+    if not week_key:
+        return False
+
+    if not isinstance(standings, list) or not standings:
+        return False
+
+    winner = standings[0]
+
+    if not isinstance(winner, dict):
+        return False
+
+    history = await _fergie_load_sonic_crimes_history()
+    weeks = history.get("weeks", {})
+
+    if not isinstance(weeks, dict):
+        weeks = {}
+
+    # Do not overwrite an already archived official result.
+    if week_key in weeks:
+        return False
+
+weeks[week_key] = {
+    "week_key": week_key,
+    "winner_id": str(winner.get("user_id") or ""),
+    "winner_name": str(
+        winner.get("display_name") or "someone"
+    ),
+    "points": int(winner.get("points") or 0),
+    "won_at": datetime.now(timezone.utc).isoformat(),
+}
+
+    history["weeks"] = weeks
+    await _fergie_save_sonic_crimes_history(history)
+
+    print(
+        f"FERGIE SONIC CRIMES ARCHIVED 🧾 "
+        f"week={week_key} "
+        f"winner={winner.get('user_id')} "
+        f"points={winner.get('points')}"
+    )
+
+    return True
+    
 async def _fergie_aux_record_review(
     *,
     user_id: int,
@@ -4747,12 +4847,12 @@ def _fergie_aux_leaderboard_message(data: dict):
 
     if not standings:
         return (
-            "🏆 **FERGIE'S WEEKLY AUX LEADERBOARD**\n"
+            "🏆 **SONIC CRIMES WEEKLY AUX LEADERBOARD**\n"
             "nobody submitted anything scoreable this week. embarrassing. 🙄🎧"
         )
 
     medals = ["🥇", "🥈", "🥉"]
-    lines = ["🏆 **FERGIE'S WEEKLY AUX LEADERBOARD**", ""]
+    lines = ["🏆 **SONIC CRIMES WEEKLY AUX LEADERBOARD**", ""]
 
     for index, row in enumerate(standings[:10]):
         prefix = medals[index] if index < 3 else f"**{index + 1}.**"
@@ -4793,10 +4893,10 @@ def _fergie_aux_leaderboard_message(data: dict):
             "",
             random.choice(
                 [
-                    f"<@{winner['user_id']}> wins the aux this week. don't become unbearable about it. 🙄",
+                    f"<@{winner['user_id']}> wins Sonic Crimes this week. don't become unbearable about it. 🙄",
                     f"fine. <@{winner['user_id']}> had the least embarrassing aux this week. congratulations i guess. 🎧",
                     f"<@{winner['user_id']}> takes the crown. everybody else please reflect on your choices. 💅",
-                    f"aux court has spoken: <@{winner['user_id']}> wins. deeply annoying but legally binding. 👩‍⚖️🎧",
+                    f"the Sonic Crimes tribunal has spoken: <@{winner['user_id']}> wins. deeply annoying but legally binding. 👩‍⚖️🎧",
                 ]
             ),
         ]
@@ -4810,13 +4910,13 @@ def _fergie_aux_midweek_message(data: dict):
 
     if not standings:
         return (
-            "📊 **FERGIE'S MIDWEEK AUX CHECK-IN**\n"
+            "📊 **SONIC CRIMES MIDWEEK AUX CHECK-IN**\n"
             "nobody has scored anything yet this week. wake up. 🙄🎧"
         )
 
     medals = ["🥇", "🥈", "🥉"]
     lines = [
-        "📊 **FERGIE'S MIDWEEK AUX CHECK-IN**",
+        "📊 **SONIC CRIMES MIDWEEK AUX CHECK-IN**",
         "here's where everyone stands right now — Sunday decides the winner. 👀🎧",
         "",
     ]
@@ -4899,6 +4999,15 @@ async def _fergie_post_weekly_aux_leaderboard():
             data["message_id"] = message.id
 
             await _fergie_save_aux_week(data)
+
+            summary = _fergie_aux_week_summary(data)
+            standings = summary.get("standings", [])
+
+            await _fergie_archive_sonic_crimes_week(
+                week_key=week_key,
+                standings=standings,
+                leaderboard_message_id=message.id,
+            )
 
             print(
                 f"FERGIE AUX LEAGUE POSTED 🏆 "
@@ -5948,10 +6057,10 @@ def _fergie_dj_candidate_reward_line(
         ]
     else:
         lines = [
-            f"fine. **{score:.1f}/10** cleared aux court. i'm sending **{label}** to my DJ pipeline. 🙄🎧",
+            f"fine. **{score:.1f}/10** survived the Sonic Crimes tribunal. i'm sending **{label}** to my DJ pipeline. 🙄🎧",
             f"okayyyy you cooked. **{label}** earned DJ consideration at **{score:.1f}/10**. 💅🎧",
             f"ugh, reward unlocked. **{label}** made the DJ cut with **{score:.1f}/10**. don't get smug. 🙄",
-            f"aux privileges granted. **{label}** scored **{score:.1f}/10**, so i'm stealing it for DJ Fergie. 🎧",
+            f"Sonic Crimes clearance granted. **{label}** scored **{score:.1f}/10**, so i'm stealing it for DJ Fergie. 🎧",
         ]
 
     return random.choice(lines)
@@ -6533,7 +6642,7 @@ def _fergie_dj_import_confirmation_line(candidate: dict):
 
     lines = [
         f"ugh fine, {label} is officially in my DJ crate now. you contributed something useful for once. 🙄🎧",
-        f"okayyyy. {label} made it all the way into my crate. aux citizenship granted. 💅🎧",
+        f"okayyyy. {label} made it all the way into my crate. Sonic Crimes clearance granted. 💅🎧",
         f"green light. ✅ {label} is in my crate now. don't let this tiny victory change you.",
         f"fine. i adopted {label}. it's officially playable in my DJ crate now. 🎧🙄",
     ]
@@ -6805,7 +6914,13 @@ async def bonk_papo_scheduler():
         if abs((now_utc - t).total_seconds()) <= 60 and key not in bot._bonked:
             ch = bot.get_channel(BONK_PAPO_CHANNEL_ID) or await bot.fetch_channel(BONK_PAPO_CHANNEL_ID)
             if ch:
-                await ch.send(f"<@{BONK_PAPO_USER_ID}> {BONK_PAPO_TEXT}")
+                phrase = random.choice(BONK_PAPO_LINES)
+                emotes = "".join(random.choices(BONK_PAPO_EMOTES, k=3))
+
+                await ch.send(
+                    f"<@{BONK_PAPO_USER_ID}> {phrase} {emotes}"
+                )
+                
             bot._bonked.add(key)
 
     if _today_key_pt() != bot._bonk_day:
@@ -7142,7 +7257,7 @@ async def resetart(ctx):
 
 
 
-@bot.command(name="auxboardtest")
+@bot.command(name="sonicboardtest")
 async def auxboardtest(ctx):
     """
     J.5 Jonathan-only preview of the current Aux League leaderboard.
@@ -7162,7 +7277,7 @@ async def auxboardtest(ctx):
         data = await _fergie_load_aux_week(week_key)
 
         await ctx.send(
-            "🧪 **AUX LEAGUE TEST — Sunday post is NOT being consumed**\n\n"
+            "🧪 **SONIC CRIMES TEST — Sunday post is NOT being consumed**\n\n"
             + _fergie_aux_leaderboard_message(data)
         )
 
@@ -7179,11 +7294,229 @@ async def auxboardtest(ctx):
             f"{type(e).__name__}: {e}"
         )
         await ctx.reply(
-            "aux board test face-planted. check Railway. 🙄",
+            "Sonic Crimes board test ate shit. check Railway. 🙄",
             mention_author=False,
         )
 
-@bot.command(name="auxmidweektest")
+@bot.command(name="sonicbackfill")
+async def sonicbackfill(ctx, week_key: str = ""):
+    """
+    Jonathan-only: archive an already completed Sonic Crimes week
+    from the existing weekly Postgres ledger.
+    Usage: !sonicbackfill YYYY-MM-DD
+    """
+
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try. historical Sonic Crimes evidence is Jonathan-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    week_key = str(week_key or "").strip()
+
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week_key):
+        await ctx.reply(
+            "use `!sonicbackfill YYYY-MM-DD` with the Monday week date. 🙄",
+            mention_author=False,
+        )
+        return
+
+    try:
+        data = await _fergie_load_aux_week(week_key)
+        summary = _fergie_aux_week_summary(data)
+        standings = summary.get("standings", [])
+
+        if not standings:
+            await ctx.reply(
+                f"❌ i couldn't find any Sonic Crimes standings for `{week_key}`.",
+                mention_author=False,
+            )
+            return
+
+        archived = await _fergie_archive_sonic_crimes_week(
+            week_key=week_key,
+            standings=standings,
+            leaderboard_message_id=data.get("message_id"),
+        )
+
+        if archived:
+            winner = standings[0]
+
+            await ctx.reply(
+                "🧾 **SONIC CRIMES EVIDENCE ARCHIVED**\n"
+                f"Week: `{week_key}`\n"
+                f"Winner: <@{winner['user_id']}> — **{winner['points']} pts**\n"
+                "the receipts are permanent now. 🙄",
+                mention_author=False,
+            )
+        else:
+            await ctx.reply(
+                f"🧾 `{week_key}` is already in the Sonic Crimes archive.",
+                mention_author=False,
+            )
+
+    except Exception as e:
+        print(
+            f"FERGIE SONIC CRIMES BACKFILL ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't backfill that Sonic Crimes week. check Railway. 🙄",
+            mention_author=False,
+        )
+
+@bot.command(name="sonichistory")
+async def sonichistory(ctx, limit: int = 10):
+    """
+    Show recent archived Sonic Crimes weekly winners.
+    """
+
+    limit = max(1, min(int(limit or 10), 25))
+
+    try:
+        history = await _fergie_load_sonic_crimes_history()
+        weeks = history.get("weeks", {})
+
+        if not isinstance(weeks, dict) or not weeks:
+            await ctx.reply(
+                "🧾 no Sonic Crimes history yet. the criminal records office is empty. 🙄",
+                mention_author=False,
+            )
+            return
+
+        ordered = sorted(
+            weeks.items(),
+            key=lambda item: item[0],
+            reverse=True,
+        )[:limit]
+
+        lines = [
+            "🧾 **FERGIE'S SONIC CRIMES RAP SHEET**",
+            "",
+        ]
+
+        for week_key, record in ordered:
+            if not isinstance(record, dict):
+                continue
+
+            winner_id = str(record.get("winner_id") or "")
+            points = int(record.get("points") or 0)
+            submissions = int(record.get("submissions") or 0)
+            crate_adds = int(record.get("crate_adds") or 0)
+
+            winner_text = (
+                f"<@{winner_id}>"
+                if winner_id
+                else str(record.get("winner_name") or "someone")
+            )
+
+            lines.append(
+                f"🏆 `{week_key}` — {winner_text} — "
+                f"**{points} pts** "
+                f"({submissions} submissions, {crate_adds} crate adds)"
+            )
+
+        await ctx.reply(
+            "\n".join(lines)[:1900],
+            mention_author=False,
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE SONIC CRIMES HISTORY ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't pull the Sonic Crimes rap sheet. check Railway. 🙄",
+            mention_author=False,
+        )
+
+@bot.command(name="sonicwins")
+async def sonicwins(ctx):
+    """
+    Show all-time Sonic Crimes win totals.
+    """
+
+    try:
+        history = await _fergie_load_sonic_crimes_history()
+        weeks = history.get("weeks", {})
+
+        if not isinstance(weeks, dict) or not weeks:
+            await ctx.reply(
+                "🏆 nobody has a Sonic Crimes win on record yet. embarrassing. 🙄",
+                mention_author=False,
+            )
+            return
+
+        totals = {}
+
+        for record in weeks.values():
+            if not isinstance(record, dict):
+                continue
+
+            winner_id = str(record.get("winner_id") or "")
+            winner_name = str(
+                record.get("winner_name") or "someone"
+            )
+
+            key = winner_id or winner_name.lower()
+
+            row = totals.setdefault(
+                key,
+                {
+                    "winner_id": winner_id,
+                    "winner_name": winner_name,
+                    "wins": 0,
+                },
+            )
+
+            row["wins"] += 1
+
+        ranking = sorted(
+            totals.values(),
+            key=lambda row: row["wins"],
+            reverse=True,
+        )
+
+        lines = [
+            "🏆 **SONIC CRIMES ALL-TIME**",
+            "",
+        ]
+
+        for index, row in enumerate(ranking, start=1):
+            person = (
+                f"<@{row['winner_id']}>"
+                if row["winner_id"]
+                else row["winner_name"]
+            )
+
+            wins = row["wins"]
+
+            lines.append(
+                f"**{index}.** {person} — **{wins} win"
+                f"{'' if wins == 1 else 's'}**"
+            )
+
+        await ctx.reply(
+            "\n".join(lines)[:1900],
+            mention_author=False,
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE SONIC CRIMES WINS ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't pull the Sonic Crimes win totals. check Railway. 🙄",
+            mention_author=False,
+        )
+        
+@bot.command(name="sonicmidweektest")
 async def auxmidweektest(ctx):
     """
     Jonathan-only preview of Wednesday's Aux League standings.
