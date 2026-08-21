@@ -12386,7 +12386,7 @@ async def halp(ctx, *, command: str | None = None):
         return
 
     e = Embed(
-        title="🙄 Fergie 5.0 Halp Desk",
+        title="🙄 Fergie 5.3 Halp Desk",
         description=(
             "fine. here's the stuff you people keep making me do.\n"
             "Use `!halp <command>` if you need details on a specific `!` command."
