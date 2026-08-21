@@ -1418,8 +1418,85 @@ async def _fergie_movieclub_resolve_winner(force: bool = False):
 
     return True
     
+async def _fergie_movieclub_auto_movietime():
+    """
+    Automatically announce Movie Time 15 minutes after a winner is selected.
+
+    Safe across redeploys because the winner's resolved_at timestamp
+    is stored in Movie Club state.
+    """
+    data = await _fergie_movieclub_load()
+    today = data.get("today", {})
+
+    if today.get("phase") != "winner":
+        return False
+
+    winner = today.get("winner")
+
+    if not isinstance(winner, dict):
+        return False
+
+    resolved_at_raw = str(
+        winner.get("resolved_at") or ""
+    ).strip()
+
+    if not resolved_at_raw:
+        return False
+
+    try:
+        resolved_at = datetime.fromisoformat(resolved_at_raw)
+
+        if resolved_at.tzinfo is None:
+            resolved_at = resolved_at.replace(tzinfo=timezone.utc)
+    except Exception:
+        return False
+
+    now_utc = datetime.now(timezone.utc)
+
+    if (now_utc - resolved_at).total_seconds() < 15 * 60:
+        return False
+
+    winner_title = str(
+        winner.get("title")
+        or "tonight's movie"
+    ).strip()
+
+    channel = bot.get_channel(
+        FERGIE_MOVIECLUB_CHANNEL_ID
+    )
+
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(
+                FERGIE_MOVIECLUB_CHANNEL_ID
+            )
+        except Exception as e:
+            print(
+                f"FERGIE MOVIECLUB AUTO MOVIETIME CHANNEL ERROR ❌ "
+                f"{type(e).__name__}: {e}"
+            )
+            return False
+
+    await channel.send(
+        f"{FERGIE_MOVIECLUB_WATCH_EMOTE}\n"
+        f"🎬 **MOVIE TIME — {winner_title}**\n"
+        "okay freaks, sit down, shut up, snacks ready. we're actually watching now. 🍿"
+    )
+
+    today["phase"] = "watching"
+    today["watch_started_at"] = now_utc.isoformat()
+
+    data["today"] = today
+    await _fergie_movieclub_save(data)
+
+    print(
+        f"FERGIE MOVIECLUB AUTO MOVIETIME ✅ "
+        f"title={winner_title!r}"
+    )
+
+    return True
     
-@tasks.loop(minutes=5)
+@tasks.loop(minutes=1)
 async def fergie_movieclub_watcher():
     """
     Lightweight Movie Club scheduler.
@@ -1438,6 +1515,8 @@ async def fergie_movieclub_watcher():
 
         if now.hour >= FERGIE_MOVIECLUB_VOTING_CLOSE_HOUR:
             await _fergie_movieclub_resolve_winner(force=True)
+        
+        await _fergie_movieclub_auto_movietime()
 
     except Exception as e:
         print(
