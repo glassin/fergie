@@ -77,8 +77,8 @@ DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
 REPLY_CHANCE = 0.10
 
 # Version/info (for !version)
-BOT_VERSION = "Fergie 5.0"
-BUILD_TAG   = "DJ • Taste • Aux League • Eyes • Ears • Mouth"
+BOT_VERSION = "fergie 5.0"
+BUILD_TAG   = "DJ • Sonic Crimes • Movie Club • Eyes • Ears • Mouth • More Attitude"
 
 # Specific member IDs
 USER1_ID = 1028310674318839878
@@ -12540,13 +12540,27 @@ async def version(ctx):
         ("DB", db_status),
         ("VC Brain", "ready ✅" if VC_BRIDGE_SECRET else "not configured ❌"),
         ("DJ API", "configured ✅" if FERGIE_DJ_API_KEY else "not configured ❌"),
-        ("Aux League", f"Sunday {FERGIE_AUX_LEAGUE_SUNDAY_HOUR}:00 PT • <#{FERGIE_AUX_LEAGUE_CHANNEL_ID}>"),
+        (
+            "Sonic Crimes",
+            f"Sunday {FERGIE_AUX_LEAGUE_SUNDAY_HOUR}:00 PT • "
+            f"<#{FERGIE_AUX_LEAGUE_CHANNEL_ID}> • winner archive enabled ✅"
+        ),
+        (
+            "Movie Club",
+            f"<#{FERGIE_MOVIECLUB_CHANNEL_ID}> • "
+            f"9 AM nominations • 12 PM poll • 4 PM winner"
+        ),
         ("Art", f"{FERGIE_IMAGE_DAILY_LIMIT}/day"),
         ("Picture Fetch", "Google Search"),
-        ("Fit Channel", f"<#{FIT_CHANNEL_ID}>"),
-        ("Kewchie Channel", f"<#{KEWCHIE_CHANNEL_ID}>"),
+        ("Pinterest", f"daily 10:00 AM PT • <#{FIT_CHANNEL_ID}>"),
+        ("Kewchie", f"<#{KEWCHIE_CHANNEL_ID}>"),
+        ("Diagnostics", "`!selftest` / `!selftest full` ✅"),
     ]
-    e = Embed(title="Fergie Status", colour=Colour.blurple())
+    e = Embed(
+    title="🤭 Fergie Status",
+    description="still alive. unfortunately for everyone else.",
+    colour=Colour.blurple(),
+    )
     for n, v in fields:
         e.add_field(name=n, value=v, inline=False)
     await ctx.send(embed=e)
