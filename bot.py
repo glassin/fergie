@@ -4621,15 +4621,15 @@ async def _fergie_archive_sonic_crimes_week(
     if week_key in weeks:
         return False
 
-weeks[week_key] = {
-    "week_key": week_key,
-    "winner_id": str(winner.get("user_id") or ""),
-    "winner_name": str(
-        winner.get("display_name") or "someone"
-    ),
-    "points": int(winner.get("points") or 0),
-    "won_at": datetime.now(timezone.utc).isoformat(),
-}
+    weeks[week_key] = {
+        "week_key": week_key,
+        "winner_id": str(winner.get("user_id") or ""),
+        "winner_name": str(
+            winner.get("display_name") or "someone"
+        ),
+        "points": int(winner.get("points") or 0),
+        "won_at": datetime.now(timezone.utc).isoformat(),
+    }
 
     history["weeks"] = weeks
     await _fergie_save_sonic_crimes_history(history)
