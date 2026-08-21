@@ -12693,7 +12693,41 @@ async def _fergie_selftest_aux_league_readonly():
     except Exception as e:
         return False, f"{type(e).__name__}: {e}"
 
+async def _fergie_selftest_sonic_crimes_history():
+    """Read-only Sonic Crimes winner archive diagnostic."""
+    try:
+        history = await _fergie_load_sonic_crimes_history()
 
+        if not isinstance(history, dict):
+            return False, "history payload is not a dict"
+
+        weeks = history.get("weeks", {})
+
+        if not isinstance(weeks, dict):
+            return False, "weeks payload is not a dict"
+
+        valid_records = 0
+
+        for week_key, record in weeks.items():
+            if not isinstance(record, dict):
+                return False, f"invalid record for {week_key}"
+
+            winner_id = str(record.get("winner_id") or "").strip()
+
+            if not winner_id:
+                return False, f"missing winner for {week_key}"
+
+            valid_records += 1
+
+        return (
+            True,
+            f"{valid_records} archived winner"
+            f"{'' if valid_records == 1 else 's'}",
+        )
+
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+        
 async def _fergie_selftest_gemini():
     """Tiny live Gemini text test. Used only by !selftest full."""
     if not GEMINI_KEY:
@@ -12755,7 +12789,24 @@ def _fergie_selftest_command(name):
 
     return True, "registered"
 
+def _fergie_selftest_subcommand(group_name, subcommand_name):
+    group = bot.get_command(group_name)
 
+    if group is None:
+        return False, f"{group_name} group not registered"
+
+    get_subcommand = getattr(group, "get_command", None)
+
+    if not callable(get_subcommand):
+        return False, f"{group_name} is not a command group"
+
+    cmd = get_subcommand(subcommand_name)
+
+    if cmd is None:
+        return False, "not registered"
+
+    return True, "registered"
+    
 def _fergie_selftest_task(name):
     task = globals().get(name)
 
@@ -12870,11 +12921,18 @@ async def selftest(ctx, mode: str = "fast"):
 
     record(
         "Core",
-        "Aux League channel",
+        "Sonic Crimes channel",
         bool(FERGIE_AUX_LEAGUE_CHANNEL_ID),
         f"<#{FERGIE_AUX_LEAGUE_CHANNEL_ID}>" if FERGIE_AUX_LEAGUE_CHANNEL_ID else "missing",
     )
 
+    record(
+        "Core",
+        "Movie Club channel",
+        bool(FERGIE_MOVIECLUB_CHANNEL_ID),
+        f"<#{FERGIE_MOVIECLUB_CHANNEL_ID}>" if FERGIE_MOVIECLUB_CHANNEL_ID else "missing",
+    )
+    
     record(
         "Core",
         "ElevenLabs",
@@ -12992,6 +13050,22 @@ async def selftest(ctx, mode: str = "fast"):
         "_fergie_aux_leaderboard_message",
         "_fergie_post_weekly_aux_leaderboard",
 
+        # Sonic Crimes history / winner archive
+        "_fergie_load_sonic_crimes_history",
+        "_fergie_save_sonic_crimes_history",
+        "_fergie_archive_sonic_crimes_week",
+
+        # Movie Club
+        "_fergie_movieclub_default_state",
+        "_fergie_movieclub_load",
+        "_fergie_movieclub_save",
+        "_fergie_movieclub_normalize_title",
+        "_fergie_movieclub_required_voters_today",
+        "_fergie_movieclub_voting_complete",
+        "_fergie_movieclub_open_morning_nominations",
+        "_fergie_movieclub_open_poll",
+        "_fergie_movieclub_resolve_winner",
+
         # GIF helper
         "fetch_gif",
     ]
@@ -13016,6 +13090,8 @@ async def selftest(ctx, mode: str = "fast"):
         "cafe",
         "scam",
         "bbl",
+
+        # DJ / Soulseek
         "djwanted",
         "djdownload",
         "djapprove",
@@ -13024,13 +13100,57 @@ async def selftest(ctx, mode: str = "fast"):
         "djcredit",
         "djcrate",
         "djrank",
+
+        # Sonic Crimes
+        "sonicboardtest",
+        "sonicmidweektest",
+        "sonicbackfill",
+        "sonicdeleteweek",
+        "sonichistory",
+        "sonicwins",
+
+        # Movie Club command group
+        "movieclub",
+
+        # Diagnostics
         "selftest",
-        "auxboardtest",
     ]
 
     for name in command_checks:
         passed, detail = _fergie_selftest_command(name)
         record("Commands", f"!{name}", passed, detail)
+    movieclub_subcommands = [
+        "start",
+        "stop",
+        "nominate",
+        "absent",
+        "present",
+        "watched",
+        "unwatched",
+        "movietime",
+        "forcepoll",
+        "forcewinner",
+        "resetday",
+        "add",
+        "cleardb",
+        "rescan",
+        "status",
+        "progress",
+        "list",
+        "history",
+    ]
+
+    for name in movieclub_subcommands:
+        passed, detail = _fergie_selftest_subcommand(
+            "movieclub",
+            name,
+        )
+        record(
+            "Movie Club Commands",
+            f"!movieclub {name}",
+            passed,
+            detail,
+        )
 
     # ==========================================================
     # VERIFY DEAD ECONOMY/CASINO COMMANDS STAY DEAD
@@ -13080,6 +13200,7 @@ async def selftest(ctx, mode: str = "fast"):
         "daily_gym_reminder",
         "fergie_dj_import_notifier",
         "fergie_aux_league_watcher",
+        "fergie_movieclub_watcher,
     ]
 
     for name in scheduler_checks:
@@ -13257,8 +13378,71 @@ async def selftest(ctx, mode: str = "fast"):
         record("Live", "Soulseek bridge", soulseek_ok, soulseek_detail)
 
         aux_ok, aux_detail = await _fergie_selftest_aux_league_readonly()
-        record("Live", "Aux League read-only", aux_ok, aux_detail)
+        record("Live", "Sonic Crimes weekly ledger", aux_ok, aux_detail)
 
+        sonic_history_ok, sonic_history_detail = await _fergie_selftest_sonic_crimes_history()
+        record(
+            "Live",
+            "Sonic Crimes winner archive",
+            sonic_history_ok,
+            sonic_history_detail,
+        )
+
+        movieclub_ok, movieclub_detail = await _fergie_selftest_movieclub_state()
+        record(
+            "Live",
+            "Movie Club state",
+            movieclub_ok,
+            movieclub_detail,
+        )
+        
+    async def _fergie_selftest_movieclub_state():
+        """Read-only Movie Club persistent-state diagnostic."""
+        try:
+            data = await _fergie_movieclub_load()
+
+            if not isinstance(data, dict):
+                return False, "Movie Club payload is not a dict"
+
+            settings = data.get("settings", {})
+            movies = data.get("movies", {})
+            history = data.get("history", [])
+            today = data.get("today", {})
+
+            if not isinstance(settings, dict):
+                return False, "settings payload is invalid"
+
+            if not isinstance(movies, dict):
+                return False, "movies payload is invalid"
+
+            if not isinstance(history, list):
+                return False, "history payload is invalid"
+
+            if not isinstance(today, dict):
+                return False, "today payload is invalid"
+
+            phase = str(today.get("phase") or "idle")
+
+            valid_phases = {
+                "idle",
+                "nominations",
+                "voting",
+                "winner",
+            }
+
+            if phase not in valid_phases:
+                return False, f"invalid today phase: {phase}"
+
+            return (
+                True,
+                f"{len(movies)} movie(s) • "
+                f"{len(history)} watched record(s) • "
+                f"phase={phase}",
+            )
+
+        except Exception as e:
+            return False, f"{type(e).__name__}: {e}"
+        
         gemini_ok, gemini_detail = await _fergie_selftest_gemini()
         record("Live", "Gemini text", gemini_ok, gemini_detail)
 
