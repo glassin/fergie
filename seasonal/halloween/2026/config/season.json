@@ -1,1 +1,48 @@
+{
+  "schema_version": 1,
+  "season_id": "halloween_2026",
+  "enabled": true,
 
+  "timezone": "America/New_York",
+
+  "september_arg": {
+    "enabled": true,
+    "start_date": "2026-09-01",
+    "end_date": "2026-09-30",
+    "story_id": "tor_incident",
+    "allow_conversation_events": true,
+    "allow_scheduled_jumpscares": false,
+    "preserve_normal_gemini": true
+  },
+
+  "october_halloween": {
+    "enabled": true,
+    "start_date": "2026-10-01",
+    "end_date": "2026-10-31",
+    "allow_conversation_jumpscares": true,
+    "allow_scheduled_jumpscares": false,
+    "preserve_normal_gemini": true
+  },
+
+  "media_root": "seasonal/halloween/2026/media",
+
+  "persistence": {
+    "enabled": true,
+    "persist_story_progress": true,
+    "persist_discovered_clues": true,
+    "persist_rescue_event": true,
+    "persist_rescuer": true
+  },
+
+  "secrecy": {
+    "include_in_halp": false,
+    "include_in_version": false,
+    "include_in_selftest": false
+  },
+
+  "safety": {
+    "never_replace_normal_response": true,
+    "never_interrupt_command_execution": true,
+    "require_conversational_context_for_jumpscare": true
+  }
+}
