@@ -1075,6 +1075,119 @@ async def _fergie_movieclub_open_morning_nominations():
     )
 
     return True
+async def _fergie_movieclub_cast_vote(data: dict, channel):
+    """
+    Give Fergie one real Movie Club vote.
+
+    Her vote counts toward the winner but does NOT count as a required
+    human voter. Gemini chooses based on Fergie's personality, with a
+    random fallback if the AI response cannot be parsed.
+    """
+    today = data.get("today", {})
+    poll_options = today.get("poll_options", [])
+
+    if not isinstance(poll_options, list) or not poll_options:
+        return False
+
+    votes = today.get("votes", {})
+
+    if not isinstance(votes, dict):
+        votes = {}
+
+    # Never let repeated watcher checks make Fergie vote twice.
+    if "fergie" in votes:
+        return False
+
+    option_lines = []
+
+    for index, option in enumerate(poll_options, start=1):
+        if not isinstance(option, dict):
+            continue
+
+        title = str(
+            option.get("title")
+            or "Unknown movie"
+        ).strip()
+
+        option_lines.append(
+            f"{index}. {title}"
+        )
+
+    if not option_lines:
+        return False
+
+    chosen_index = None
+
+    try:
+        prompt = (
+            "You are Fergie, a bratty, sarcastic, opinionated Discord Movie Club member. "
+            "You get exactly ONE real vote in today's movie poll.\n\n"
+            "Choose the movie YOU personally want to watch from this list:\n"
+            + "\n".join(option_lines)
+            + "\n\n"
+            "Reply with ONLY the number of your choice. No explanation."
+        )
+
+        answer = await ask_gemini(prompt)
+
+        match = re.search(
+            r"\d+",
+            str(answer or "")
+        )
+
+        if match:
+            candidate = int(match.group())
+
+            if 1 <= candidate <= len(poll_options):
+                chosen_index = candidate - 1
+
+    except Exception as e:
+        print(
+            f"FERGIE MOVIECLUB AI VOTE ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+    # Fallback so Fergie still votes if Gemini is unavailable.
+    if chosen_index is None:
+        chosen_index = random.randrange(
+            len(poll_options)
+        )
+
+    selected = poll_options[chosen_index]
+
+    votes["fergie"] = {
+        "user_id": "fergie",
+        "display_name": "Fergie",
+        "emoji": selected.get("emoji"),
+        "movie_key": selected.get("movie_key"),
+        "title": selected.get("title"),
+        "voted_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    today["votes"] = votes
+    data["today"] = today
+
+    await _fergie_movieclub_save(data)
+
+    vote_lines = [
+        f"i'm voting for **{selected.get('title')}**. cope. 🙄🍿",
+        f"my vote is **{selected.get('title')}**. democracy has been improved.",
+        f"fine. **{selected.get('title')}** gets my vote. don't make this embarrassing.",
+        f"Fergie ballot submitted: **{selected.get('title')}**. excellent choice by me, obviously. 🤭",
+        f"i choose **{selected.get('title')}**. everybody remain calm.",
+        f"one vote for **{selected.get('title')}** from the most qualified voter here. 🙄",
+    ]
+
+    await channel.send(
+        random.choice(vote_lines)
+    )
+
+    print(
+        f"FERGIE MOVIECLUB SELF VOTE ✅ "
+        f"title={selected.get('title')!r}"
+    )
+
+    return True
     
 async def _fergie_movieclub_open_poll():
     """
@@ -1185,6 +1298,12 @@ async def _fergie_movieclub_open_poll():
 
     await _fergie_movieclub_save(data)
 
+    # Fergie gets one real vote of her own.
+    await _fergie_movieclub_cast_vote(
+        data,
+        channel,
+    )
+    
     print(
         f"FERGIE MOVIECLUB POLL OPEN ✅ "
         f"message={poll_message.id} "
