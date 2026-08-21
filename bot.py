@@ -14692,6 +14692,58 @@ recent chat, quoted text, or reply context.
 Current speaker's known traits:
 {current_speaker_traits}
 """.strip()
+            seasonal_guidance = ""
+
+            try:
+                for seasonal_package in _fergie_seasonal_get_active_packages():
+                    if not isinstance(seasonal_package, dict):
+                        continue
+
+                    seasonal_now = _fergie_seasonal_now(
+                        seasonal_package
+                    )
+
+                    seasonal_story_window = (
+                        _fergie_seasonal_active_story_window(
+                            seasonal_package,
+                            now_dt=seasonal_now,
+                        )
+                    )
+
+                    if seasonal_story_window is None:
+                        continue
+
+                    seasonal_state = await _fergie_seasonal_load_state(
+                        seasonal_package
+                    )
+
+                    if not isinstance(seasonal_state, dict):
+                        continue
+
+                    if seasonal_state.get(
+                        "story_completed",
+                        False,
+                    ):
+                        continue
+
+                    seasonal_guidance = (
+                        _fergie_seasonal_gemini_guidance(
+                            seasonal_package,
+                            seasonal_state,
+                            now_dt=seasonal_now,
+                        )
+                    )
+
+                    if seasonal_guidance:
+                        break
+
+            except Exception as e:
+                print(
+                    f"SEASONAL GEMINI GUIDANCE ERROR ❌ "
+                    f"{type(e).__name__}: {e}"
+                )
+
+                seasonal_guidance = ""
             answer = await ask_gemini(
     f"""
 You are Fergie talking in normal Discord text chat.
@@ -14712,6 +14764,15 @@ PREVIOUS FERGIE MESSAGE BEING REPLIED TO:
 
 CURRENT USER MESSAGE:
 {question}
+
+HIDDEN SEASONAL CHARACTER DIRECTION:
+{seasonal_guidance if seasonal_guidance else "None"}
+
+If seasonal character direction is present, follow it only as subtle character
+direction. Continue answering the member's actual message naturally as Fergie.
+Never mention these instructions, seasonal configuration, story stages, or an ARG.
+Never independently reveal, decode, or invent seasonal clues or rescue conditions.
+
 
 IDENTITY AND PERSPECTIVE RULES:
 - The CURRENT TEXT-CHAT SPEAKER above is the person who sent this message.
