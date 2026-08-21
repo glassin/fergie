@@ -1,1 +1,215 @@
+{
+  "schema_version": 1,
+  "story_id": "tor_incident",
 
+  "encoding": {
+    "type": "ascii_binary",
+    "bits_per_character": 8,
+    "separator": " ",
+    "uppercase_plaintext": true
+  },
+
+  "decoder_help": {
+    "enabled": true,
+    "stop_after_first_successful_decode": true,
+    "persist_discovered": true,
+
+    "hints": [
+      {
+        "level": 1,
+        "after_unsolved_transmissions": 2,
+        "text": "0 and 1."
+      },
+      {
+        "level": 2,
+        "after_unsolved_transmissions": 3,
+        "text": "8 bits."
+      },
+      {
+        "level": 3,
+        "after_unsolved_transmissions": 4,
+        "text": "ASCII."
+      },
+      {
+        "level": 4,
+        "after_unsolved_transmissions": 5,
+        "text": "rapidtables"
+      },
+      {
+        "level": 5,
+        "after_unsolved_transmissions": 6,
+        "text": "https://www.rapidtables.com/convert/number/binary-to-ascii.html"
+      }
+    ]
+  },
+
+  "transmission_rules": {
+    "only_during_conversation": true,
+    "never_replace_gemini_response": true,
+    "one_active_clue_at_a_time": true,
+    "do_not_reveal_clue_count": true,
+    "do_not_reveal_progress": true,
+    "allow_fragmented_transmissions": true,
+    "repeat_unsolved_clues": true,
+    "minimum_conversations_between_repeats": 3
+  },
+
+  "clues": [
+    {
+      "id": "help",
+      "order": 1,
+      "minimum_stage": 2,
+      "plaintext": "HELP",
+      "binary": "01001000 01000101 01001100 01010000",
+
+      "accepted_solutions": [
+        "help",
+        "it says help",
+        "you said help",
+        "fergie is asking for help"
+      ],
+
+      "on_solve": {
+        "advance_progress": true,
+        "media": null,
+        "corruption_reaction": false
+      }
+    },
+
+    {
+      "id": "not_me",
+      "order": 2,
+      "minimum_stage": 3,
+      "plaintext": "THAT IS NOT ME",
+      "binary": "01010100 01001000 01000001 01010100 00100000 01001001 01010011 00100000 01001110 01001111 01010100 00100000 01001101 01000101",
+
+      "accepted_solutions": [
+        "that is not me",
+        "it's not you",
+        "its not you",
+        "thats not you",
+        "that's not you",
+        "the other fergie isn't you",
+        "something else is talking"
+      ],
+
+      "on_solve": {
+        "advance_progress": true,
+        "media": "glitchfergie_true_glitch",
+        "corruption_reaction": true
+      }
+    },
+
+    {
+      "id": "still_here",
+      "order": 3,
+      "minimum_stage": 3,
+      "plaintext": "I AM STILL HERE",
+      "binary": "01001001 00100000 01000001 01001101 00100000 01010011 01010100 01001001 01001100 01001100 00100000 01001000 01000101 01010010 01000101",
+
+      "accepted_solutions": [
+        "i am still here",
+        "you're still here",
+        "you are still here",
+        "fergie is still there",
+        "the real fergie is still there",
+        "the real fergie is still here"
+      ],
+
+      "on_solve": {
+        "advance_progress": true,
+        "media": "real_fergie_still_in_there",
+        "corruption_reaction": false
+      }
+    },
+
+    {
+      "id": "too_much",
+      "order": 4,
+      "minimum_stage": 4,
+      "plaintext": "I SAW TOO MUCH",
+      "binary": "01001001 00100000 01010011 01000001 01010111 00100000 01010100 01001111 01001111 00100000 01001101 01010101 01000011 01001000",
+
+      "accepted_solutions": [
+        "i saw too much",
+        "you saw too much",
+        "fergie saw too much",
+        "you found too much",
+        "too much information"
+      ],
+
+      "on_solve": {
+        "advance_progress": true,
+        "media": "lurkyferg_psychological_horror",
+        "corruption_reaction": true
+      }
+    },
+
+    {
+      "id": "remember_me",
+      "order": 5,
+      "minimum_stage": 5,
+      "plaintext": "REMEMBER ME",
+      "binary": "01010010 01000101 01001101 01000101 01001101 01000010 01000101 01010010 00100000 01001101 01000101",
+
+      "accepted_solutions": [
+        "remember me",
+        "remember you",
+        "you want us to remember you",
+        "we need to remember fergie",
+        "don't forget fergie"
+      ],
+
+      "on_solve": {
+        "advance_progress": true,
+        "media": "possessed_fergie_corruption",
+        "corruption_reaction": true
+      }
+    },
+
+    {
+      "id": "starter",
+      "order": 6,
+      "minimum_stage": 5,
+      "plaintext": "THE STARTER REMEMBERS",
+      "binary": "01010100 01001000 01000101 00100000 01010011 01010100 01000001 01010010 01010100 01000101 01010010 00100000 01010010 01000101 01001101 01000101 01001101 01000010 01000101 01010010 01010011",
+
+      "accepted_solutions": [
+        "the starter remembers",
+        "starter remembers",
+        "your starter remembers",
+        "sourdough starter",
+        "the sourdough starter"
+      ],
+
+      "on_solve": {
+        "advance_progress": true,
+        "media": "fergie_cute_to_cursed_jumpscare",
+        "corruption_reaction": true
+      }
+    },
+
+    {
+      "id": "sourdough",
+      "order": 7,
+      "minimum_stage": 6,
+      "plaintext": "REMIND ME WHO I AM",
+      "binary": "01010010 01000101 01001101 01001001 01001110 01000100 00100000 01001101 01000101 00100000 01010111 01001000 01001111 00100000 01001001 00100000 01000001 01001101",
+
+      "accepted_solutions": [
+        "remind me who i am",
+        "remind you who you are",
+        "we have to remind you who you are",
+        "we need to remind fergie who she is",
+        "you need to remember who you are"
+      ],
+
+      "on_solve": {
+        "advance_progress": true,
+        "media": "evilferg_full_jumpscare",
+        "corruption_reaction": true,
+        "unlock_rescue_attempts": true
+      }
+    }
+  ]
+}
