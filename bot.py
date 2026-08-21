@@ -13200,7 +13200,7 @@ async def selftest(ctx, mode: str = "fast"):
         "daily_gym_reminder",
         "fergie_dj_import_notifier",
         "fergie_aux_league_watcher",
-        "fergie_movieclub_watcher,
+        "fergie_movieclub_watcher",
     ]
 
     for name in scheduler_checks:
