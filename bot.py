@@ -77,7 +77,7 @@ DB_SSL = os.getenv("DB_SSL", "require").strip().lower()
 REPLY_CHANCE = 0.10
 
 # Version/info (for !version)
-BOT_VERSION = "fergie 5.0"
+BOT_VERSION = "fergie 5.3"
 BUILD_TAG   = "DJ • Sonic Crimes • Movie Club • Eyes • Ears • Mouth • More Attitude"
 
 # Specific member IDs
