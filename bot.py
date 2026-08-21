@@ -13084,7 +13084,7 @@ async def selftest(ctx, mode: str = "fast"):
         "art",
         "resetart",
         "hawaii",
-        "fit",
+        "hongree",
         "kewchie",
         "kewchie-debug",
         "cafe",
