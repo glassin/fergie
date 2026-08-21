@@ -7322,6 +7322,16 @@ async def sonicbackfill(ctx, week_key: str = ""):
         )
         return
 
+    current_week_key = _fergie_aux_week_key()
+
+    if week_key >= current_week_key:
+        await ctx.reply(
+            "❌ i only backfill completed Sonic Crimes weeks. "
+            "this week is still committing crimes. 🙄",
+            mention_author=False,
+        )
+        return
+
     try:
         data = await _fergie_load_aux_week(week_key)
         summary = _fergie_aux_week_summary(data)
@@ -7367,6 +7377,61 @@ async def sonicbackfill(ctx, week_key: str = ""):
             mention_author=False,
         )
 
+@bot.command(name="sonicdeleteweek")
+async def sonicdeleteweek(ctx, week_key: str = ""):
+    """
+    Jonathan-only: remove one archived Sonic Crimes week.
+    Usage: !sonicdeleteweek YYYY-MM-DD
+    """
+
+    if ctx.author.id != FERGIE_ADMIN_USER_ID:
+        await ctx.reply(
+            "nice try. Sonic Crimes evidence tampering is Jonathan-only. 🙄",
+            mention_author=False,
+        )
+        return
+
+    week_key = str(week_key or "").strip()
+
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", week_key):
+        await ctx.reply(
+            "use `!sonicdeleteweek YYYY-MM-DD`.",
+            mention_author=False,
+        )
+        return
+
+    try:
+        history = await _fergie_load_sonic_crimes_history()
+        weeks = history.get("weeks", {})
+
+        if not isinstance(weeks, dict) or week_key not in weeks:
+            await ctx.reply(
+                f"🧾 `{week_key}` isn't in the Sonic Crimes archive.",
+                mention_author=False,
+            )
+            return
+
+        del weeks[week_key]
+
+        history["weeks"] = weeks
+        await _fergie_save_sonic_crimes_history(history)
+
+        await ctx.reply(
+            f"🧹 removed Sonic Crimes archive record `{week_key}`.",
+            mention_author=False,
+        )
+
+    except Exception as e:
+        print(
+            f"FERGIE SONIC CRIMES DELETE ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        await ctx.reply(
+            "couldn't remove that Sonic Crimes record. check Railway. 🙄",
+            mention_author=False,
+        )
+        
 @bot.command(name="sonichistory")
 async def sonichistory(ctx, limit: int = 10):
     """
