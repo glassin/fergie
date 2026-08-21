@@ -1,1 +1,155 @@
+{
+  "schema_version": 1,
+  "season_id": "halloween_2026",
 
+  "global_rules": {
+    "conversation_only": true,
+    "scheduled_media_events": false,
+    "never_replace_gemini_response": true,
+    "allow_same_asset_twice_in_a_row": false,
+    "maximum_media_events_per_conversation": 1,
+    "global_cooldown_minutes": 45
+  },
+
+  "assets": {
+    "ghost_fergie_hover": {
+      "file": "costume/ghost_fergie_hover.gif",
+      "category": "costume",
+      "role": "halloween_costume_teaser",
+      "months": ["september", "october"],
+      "minimum_stage": 0,
+      "maximum_stage": 1,
+      "story_progression": false,
+      "jumpscare": false,
+      "cooldown_minutes": 720,
+      "contexts": [
+        "halloween_conversation",
+        "costume_conversation"
+      ],
+      "captions": [
+        "GUYS 👻 Halloween is coming and I'm trying on costumes early because obviously I need time to serve. Look at meeee 😭",
+        "I'm testing Halloween costumes 👻 be honest. Am I spooky or am I just a cute bitch under a sheet?",
+        "LOOK 😭👻 I'm a ghost. This took me approximately 14 seconds to make and I think I ate.",
+        "Halloween costume previewwww 👻✨ I call this one: deceased but still cute."
+      ]
+    },
+
+    "glitchfergie_true_glitch": {
+      "file": "corruption/glitchfergie_true_glitch.gif",
+      "category": "corruption",
+      "role": "early_corruption",
+      "months": ["september"],
+      "minimum_stage": 1,
+      "maximum_stage": 4,
+      "story_progression": true,
+      "jumpscare": false,
+      "cooldown_minutes": 120,
+      "contexts": [
+        "conversation_corruption",
+        "binary_interference",
+        "clue_solved_not_me"
+      ]
+    },
+
+    "lurkyferg_psychological_horror": {
+      "file": "corruption/lurkyferg_psychological_horror.gif",
+      "category": "corruption",
+      "role": "psychological_horror",
+      "months": ["september"],
+      "minimum_stage": 2,
+      "maximum_stage": 5,
+      "story_progression": true,
+      "jumpscare": false,
+      "cooldown_minutes": 180,
+      "contexts": [
+        "conversation_corruption",
+        "binary_interference",
+        "clue_solved_too_much"
+      ]
+    },
+
+    "real_fergie_still_in_there": {
+      "file": "corruption/real_fergie_still_in_there.gif",
+      "category": "signal",
+      "role": "real_fergie_signal",
+      "months": ["september"],
+      "minimum_stage": 3,
+      "maximum_stage": 6,
+      "story_progression": true,
+      "jumpscare": false,
+      "cooldown_minutes": 150,
+      "contexts": [
+        "binary_transmission",
+        "binary_solved",
+        "identity_memory",
+        "clue_solved_still_here",
+        "near_rescue"
+      ]
+    },
+
+    "possessed_fergie_corruption": {
+      "file": "corruption/possessed_fergie_corruption.gif",
+      "category": "corruption",
+      "role": "corruption_retaliation",
+      "months": ["september"],
+      "minimum_stage": 4,
+      "maximum_stage": 6,
+      "story_progression": true,
+      "jumpscare": true,
+      "cooldown_minutes": 240,
+      "contexts": [
+        "major_clue_solved",
+        "corruption_retaliation",
+        "clue_solved_remember_me"
+      ]
+    },
+
+    "fergie_cute_to_cursed_jumpscare": {
+      "file": "jumpscares/fergie_cute_to_cursed_jumpscare.gif",
+      "category": "jumpscare",
+      "role": "identity_corruption",
+      "months": ["september", "october"],
+      "minimum_stage": 4,
+      "maximum_stage": 6,
+      "story_progression": true,
+      "jumpscare": true,
+      "cooldown_minutes": 300,
+      "contexts": [
+        "major_clue_solved",
+        "identity_interference",
+        "clue_solved_starter",
+        "october_conversation_jumpscare"
+      ]
+    },
+
+    "evilferg_full_jumpscare": {
+      "file": "jumpscares/evilferg_full_jumpscare.gif",
+      "category": "jumpscare",
+      "role": "maximum_corruption",
+      "months": ["september", "october"],
+      "minimum_stage": 5,
+      "maximum_stage": 6,
+      "story_progression": true,
+      "jumpscare": true,
+      "cooldown_minutes": 360,
+      "contexts": [
+        "final_clue_solved",
+        "near_rescue",
+        "clue_solved_sourdough",
+        "october_conversation_jumpscare"
+      ]
+    }
+  },
+
+  "october": {
+    "enabled": true,
+    "story_progression": false,
+    "conversation_only": true,
+    "eligible_jumpscares": [
+      "fergie_cute_to_cursed_jumpscare",
+      "evilferg_full_jumpscare"
+    ],
+    "minimum_conversations_between_jumpscares": 12,
+    "chance_per_eligible_conversation": 0.06
+  }
+}
