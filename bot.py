@@ -12485,7 +12485,7 @@ async def halp(ctx, *, command: str | None = None):
     )
 
     e.add_field(
-        name="🔐 Jonathan-only",
+        name="🔐 Jonathan-only — DJ & Sonic Crimes",
         value=(
             "`!resetart` — Reset today's Art count back to 0 and restore the full daily allowance\n"
             "`!fergieget <artist> <song>` — Download a song through Soulseek into Fergie's DJ crate\n"
@@ -12493,19 +12493,26 @@ async def halp(ctx, *, command: str | None = None):
             "`!djcredit <#>` — Credit a pending wanted song already present in the DJ crate\n"
             "`!djcrate [page]` — Show Fergie's full DJ crate with pagination\n"
             "`!djrank [limit]` — Rank songs by server-wide DJ retention/popularity\n"
-            "`!sonicboardtest` — Preview the current Sonic Crimes Sunday board without consuming the real post\n"
+            "`!sonicboardtest` — Preview the Sunday Sonic Crimes board without consuming the real post\n"
             "`!sonicmidweektest` — Preview the current Sonic Crimes midweek standings\n"
-            "`!sonicbackfill YYYY-MM-DD` — Archive a completed historical Sonic Crimes winner\n"
-            "`!movieclub start` / `!movieclub stop` — Enable or pause the automatic Movie Club cycle\n"
-            "`!movieclub absent @member` / `!movieclub present @member` — Manage today's required voters\n"
-            "`!movieclub watched <movie>` / `!movieclub unwatched <movie>` — Mark or reverse watched status\n"
-            "`!movieclub add <movie>` — Add a movie manually to the permanent Movie Club databank\n"
-            "`!movieclub movietime` — Announce that it is actually time to watch today's winner\n"
-            "`!movieclub forcepoll` — Manually close nominations and open today's poll\n"
-            "`!movieclub forcewinner` — Resolve today's current votes early\n"
-            "`!movieclub resetday` — Reset today's Movie Club session without deleting the permanent catalog\n"
-            "`!movieclub rescan` — Re-scan the Movie Club channel into the permanent databank\n"
-            f"`!selftest` / `!selftest full` — Fergie diagnostics (only in <#{FERGIE_TEST_CHANNEL_ID}>)"
+            "`!sonicbackfill YYYY-MM-DD` — Archive a completed historical Sonic Crimes winner"
+        ),
+        inline=False
+    )
+
+    e.add_field(
+        name="🎬 Jonathan-only — Movie Club",
+        value=(
+            "`!movieclub start` / `!movieclub stop` — Enable or pause daily Movie Club\n"
+            "`!movieclub absent @member` / `!movieclub present @member` — Manage required voters\n"
+            "`!movieclub watched <movie>` / `!movieclub unwatched <movie>` — Change watched status\n"
+            "`!movieclub add <movie>` — Add a movie to the permanent databank\n"
+            "`!movieclub movietime` — Announce that it's actually time to watch\n"
+            "`!movieclub forcepoll` — Close nominations and open the poll early\n"
+            "`!movieclub forcewinner` — Resolve the current votes early\n"
+            "`!movieclub resetday` — Reset today's session without deleting the catalog\n"
+            "`!movieclub rescan` — Re-scan the Movie Club channel\n"
+            f"`!selftest` / `!selftest full` — Diagnostics in <#{FERGIE_TEST_CHANNEL_ID}>"
         ),
         inline=False
     )
