@@ -86,6 +86,50 @@ USER2_ID = 534227493360762891
 USER3_ID = 661077262468382761
 LOBO_ID  = 919405253470871562
 
+# ================== Seasonal Engine ==================
+# Generic, reusable seasonal-content root.
+#
+# Event-specific stories, media, clues, dates, and reactions live under:
+#
+# seasonal/<season>/<year>/
+#
+# Examples:
+# seasonal/halloween/2026/
+# seasonal/christmas/2026/
+# seasonal/halloween/2027/
+#
+# The Python engine must remain generic. Do not hard-code individual
+# Halloween stories, clues, rescue answers, or media filenames here.
+
+FERGIE_SEASONAL_ROOT = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)),
+    "seasonal",
+)
+
+FERGIE_SEASONAL_REQUIRED_CONFIG_FILES = (
+    "season.json",
+)
+
+FERGIE_SEASONAL_OPTIONAL_CONFIG_FILES = (
+    "september_story.json",
+    "binary_clues.json",
+    "media_events.json",
+    "rescue_reactions.json",
+)
+
+# Loaded seasonal packages will eventually live here in RAM.
+# Key format will come from each package's season.json "state_key",
+# for example: "seasonal:halloween:2026".
+fergie_seasonal_packages = {}
+
+# Runtime-only engine bookkeeping.
+# Persistent story/player state will use the existing Postgres KV helpers later.
+fergie_seasonal_runtime = {
+    "loaded": False,
+    "load_errors": [],
+}
+# =====================================================
+
 # ---------- Local reaction GIFs ----------
 REACTION_GIF_DIR = os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
@@ -610,7 +654,253 @@ FERGIE_BORED_LINES = [
 # ================== Shared runtime helpers ==================
 def _now() -> float: return time.time()
 def _today_key() -> str: return date.today().isoformat()
+def _fergie_seasonal_load_json(path: str):
+    """
+    Load one seasonal JSON file.
 
+    Returns:
+        dict/list on success
+        None on missing/invalid files
+
+    Seasonal content must fail safely so a broken optional season package
+    never prevents normal Fergie from starting.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    except FileNotFoundError:
+        return None
+
+    except Exception as e:
+        error = (
+            f"SEASONAL JSON ERROR ❌ "
+            f"{path}: {type(e).__name__}: {e}"
+        )
+
+        print(error)
+
+        errors = fergie_seasonal_runtime.setdefault(
+            "load_errors",
+            [],
+        )
+
+        errors.append(error)
+
+        return None
+
+
+def _fergie_seasonal_discover_packages():
+    """
+    Discover reusable seasonal packages under:
+
+        seasonal/<season>/<year>/
+
+    A directory becomes a valid package only when:
+    - it contains config/season.json
+    - season.json is valid JSON
+    - season.json has enabled=true
+    - season.json contains a non-empty season_id
+    - season.json contains a non-empty state_key
+
+    Event-specific logic is deliberately NOT hard-coded here.
+    """
+    packages = {}
+
+    fergie_seasonal_runtime["load_errors"] = []
+
+    if not os.path.isdir(FERGIE_SEASONAL_ROOT):
+        print(
+            f"SEASONAL ROOT NOT FOUND ⚠️ "
+            f"{FERGIE_SEASONAL_ROOT}"
+        )
+
+        fergie_seasonal_runtime["loaded"] = True
+        return packages
+
+    try:
+        season_names = sorted(
+            name
+            for name in os.listdir(FERGIE_SEASONAL_ROOT)
+            if os.path.isdir(
+                os.path.join(
+                    FERGIE_SEASONAL_ROOT,
+                    name,
+                )
+            )
+        )
+
+    except Exception as e:
+        error = (
+            f"SEASONAL DISCOVERY ERROR ❌ "
+            f"{type(e).__name__}: {e}"
+        )
+
+        print(error)
+        fergie_seasonal_runtime["load_errors"].append(error)
+        fergie_seasonal_runtime["loaded"] = True
+        return packages
+
+    for season_name in season_names:
+        season_dir = os.path.join(
+            FERGIE_SEASONAL_ROOT,
+            season_name,
+        )
+
+        try:
+            year_names = sorted(
+                name
+                for name in os.listdir(season_dir)
+                if os.path.isdir(
+                    os.path.join(
+                        season_dir,
+                        name,
+                    )
+                )
+            )
+
+        except Exception as e:
+            error = (
+                f"SEASONAL YEAR DISCOVERY ERROR ❌ "
+                f"{season_dir}: {type(e).__name__}: {e}"
+            )
+
+            print(error)
+            fergie_seasonal_runtime["load_errors"].append(error)
+            continue
+
+        for year_name in year_names:
+            package_root = os.path.join(
+                season_dir,
+                year_name,
+            )
+
+            config_dir = os.path.join(
+                package_root,
+                "config",
+            )
+
+            season_config_path = os.path.join(
+                config_dir,
+                "season.json",
+            )
+
+            if not os.path.isfile(season_config_path):
+                continue
+
+            season_config = _fergie_seasonal_load_json(
+                season_config_path
+            )
+
+            if not isinstance(season_config, dict):
+                continue
+
+            if not season_config.get("enabled", False):
+                continue
+
+            season_id = str(
+                season_config.get("season_id")
+                or ""
+            ).strip()
+
+            state_key = str(
+                season_config.get("state_key")
+                or ""
+            ).strip()
+
+            if not season_id:
+                error = (
+                    f"SEASONAL PACKAGE INVALID ❌ "
+                    f"{package_root}: missing season_id"
+                )
+
+                print(error)
+                fergie_seasonal_runtime["load_errors"].append(error)
+                continue
+
+            if not state_key:
+                error = (
+                    f"SEASONAL PACKAGE INVALID ❌ "
+                    f"{package_root}: missing state_key"
+                )
+
+                print(error)
+                fergie_seasonal_runtime["load_errors"].append(error)
+                continue
+
+            if state_key in packages:
+                error = (
+                    f"SEASONAL DUPLICATE STATE KEY ❌ "
+                    f"{state_key}"
+                )
+
+                print(error)
+                fergie_seasonal_runtime["load_errors"].append(error)
+                continue
+
+            package = {
+                "season_id": season_id,
+                "state_key": state_key,
+                "season_name": season_name,
+                "year": year_name,
+                "root": package_root,
+                "config_dir": config_dir,
+                "media_dir": os.path.join(
+                    package_root,
+                    "media",
+                ),
+                "season": season_config,
+                "configs": {},
+            }
+
+            for filename in FERGIE_SEASONAL_OPTIONAL_CONFIG_FILES:
+                config_path = os.path.join(
+                    config_dir,
+                    filename,
+                )
+
+                config_key = os.path.splitext(filename)[0]
+
+                loaded_config = _fergie_seasonal_load_json(
+                    config_path
+                )
+
+                if loaded_config is not None:
+                    package["configs"][config_key] = loaded_config
+
+            packages[state_key] = package
+
+            print(
+                f"SEASONAL PACKAGE FOUND ✅ "
+                f"{season_id} "
+                f"state={state_key}"
+            )
+
+    fergie_seasonal_runtime["loaded"] = True
+
+    print(
+        f"SEASONAL DISCOVERY COMPLETE ✅ "
+        f"packages={len(packages)} "
+        f"errors={len(fergie_seasonal_runtime.get('load_errors', []))}"
+    )
+
+    return packages
+
+
+def _fergie_seasonal_reload_packages():
+    """
+    Reload all enabled seasonal packages from disk.
+
+    This function only updates RAM configuration.
+    It does not send messages or modify persistent story state.
+    """
+    global fergie_seasonal_packages
+
+    fergie_seasonal_packages = (
+        _fergie_seasonal_discover_packages()
+    )
+
+    return fergie_seasonal_packages
 def _fergie_reaction_gif_path(filename: str) -> str:
     return os.path.join(REACTION_GIF_DIR, filename)
 
@@ -830,6 +1120,3538 @@ async def _db_set(key: str, value: dict):
             VALUES ($1, $2::jsonb)
             ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
         """, key, json.dumps(value))
+
+# ================== Seasonal Persistent State ==================
+
+def _fergie_seasonal_default_state(package: dict):
+    """
+    Return a fresh persistent state document for one seasonal package.
+
+    This structure is intentionally generic so future packages such as
+    christmas/2026 or halloween/2027 can use the same engine.
+    """
+    package = package if isinstance(package, dict) else {}
+
+    return {
+        "version": 1,
+        "season_id": str(
+            package.get("season_id")
+            or ""
+        ),
+        "state_key": str(
+            package.get("state_key")
+            or ""
+        ),
+
+        # Generic event completion / rescue state.
+        "story_completed": False,
+        "completed_at": None,
+        "rescuer": None,
+        "triggering_message": None,
+
+        # Puzzle / clue progress.
+        "completed_clues": [],
+        "active_clue_id": None,
+        "clue_transmissions": {},
+        "decoder_discovered": False,
+        "decoder_hint_level": 0,
+
+        # Conversation/event bookkeeping.
+        "conversation_counter": 0,
+        "last_story_event_at": None,
+
+        # Media bookkeeping.
+        "last_media_asset": None,
+        "media_last_used": {},
+
+        # Reserved generic fields future seasonal packages may use.
+        "flags": {},
+        "stats": {},
+    }
+
+
+async def _fergie_seasonal_load_state(package: dict):
+    """
+    Load one seasonal package's persistent state from Postgres.
+
+    Missing state safely returns a fresh default without writing anything.
+    Stored state is merged with current defaults so future engine upgrades
+    can add fields without destroying older seasonal progress.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    state_key = str(
+        package.get("state_key")
+        or ""
+    ).strip()
+
+    if not state_key:
+        return None
+
+    default = _fergie_seasonal_default_state(
+        package
+    )
+
+    try:
+        stored = await _db_get(state_key)
+
+    except Exception as e:
+        print(
+            f"SEASONAL STATE LOAD ERROR ❌ "
+            f"{state_key}: {type(e).__name__}: {e}"
+        )
+        return default
+
+    if not isinstance(stored, dict):
+        return default
+
+    # Preserve all existing stored values while filling newly-added fields.
+    for key, value in default.items():
+        if key not in stored:
+            if isinstance(value, dict):
+                stored[key] = value.copy()
+            elif isinstance(value, list):
+                stored[key] = list(value)
+            else:
+                stored[key] = value
+
+    # Defensive type repair for fields the engine relies on.
+    if not isinstance(stored.get("completed_clues"), list):
+        stored["completed_clues"] = []
+
+    if not isinstance(stored.get("clue_transmissions"), dict):
+        stored["clue_transmissions"] = {}
+
+    if not isinstance(stored.get("media_last_used"), dict):
+        stored["media_last_used"] = {}
+
+    if not isinstance(stored.get("flags"), dict):
+        stored["flags"] = {}
+
+    if not isinstance(stored.get("stats"), dict):
+        stored["stats"] = {}
+
+    # Package identity always comes from the currently-loaded package.
+    stored["season_id"] = str(
+        package.get("season_id")
+        or ""
+    )
+
+    stored["state_key"] = state_key
+
+    return stored
+
+
+async def _fergie_seasonal_save_state(
+    package: dict,
+    state: dict,
+):
+    """
+    Persist one seasonal package's complete state using Fergie's existing
+    Postgres JSON KV storage.
+    """
+    if not isinstance(package, dict):
+        return False
+
+    if not isinstance(state, dict):
+        return False
+
+    state_key = str(
+        package.get("state_key")
+        or ""
+    ).strip()
+
+    if not state_key:
+        return False
+
+    state["season_id"] = str(
+        package.get("season_id")
+        or ""
+    )
+
+    state["state_key"] = state_key
+
+    try:
+        await _db_set(
+            state_key,
+            state,
+        )
+
+        return True
+
+    except Exception as e:
+        print(
+            f"SEASONAL STATE SAVE ERROR ❌ "
+            f"{state_key}: {type(e).__name__}: {e}"
+        )
+
+        return False
+
+# ==============================================================
+# ================== Seasonal Date / Stage Resolution ==================
+
+def _fergie_seasonal_timezone(package: dict):
+    """
+    Return the ZoneInfo timezone configured by this seasonal package.
+
+    Falls back to UTC if the package timezone is missing or invalid.
+    """
+    package = package if isinstance(package, dict) else {}
+
+    season_config = package.get("season", {})
+
+    if not isinstance(season_config, dict):
+        season_config = {}
+
+    timezone_name = str(
+        season_config.get("timezone")
+        or "UTC"
+    ).strip()
+
+    try:
+        return ZoneInfo(timezone_name)
+
+    except Exception as e:
+        print(
+            f"SEASONAL TIMEZONE ERROR ❌ "
+            f"{timezone_name!r}: {type(e).__name__}: {e}"
+        )
+
+        return ZoneInfo("UTC")
+
+
+def _fergie_seasonal_now(package: dict):
+    """
+    Current timezone-aware datetime for one seasonal package.
+    """
+    return datetime.now(
+        _fergie_seasonal_timezone(package)
+    )
+
+
+def _fergie_seasonal_parse_date(value):
+    """
+    Parse YYYY-MM-DD seasonal config dates safely.
+
+    Returns a date object or None.
+    """
+    value = str(value or "").strip()
+
+    if not value:
+        return None
+
+    try:
+        return date.fromisoformat(value)
+
+    except Exception:
+        return None
+
+
+def _fergie_seasonal_active_window(
+    package: dict,
+    now_dt=None,
+):
+    """
+    Return the currently-active date window inside season.json.
+
+    The engine does not know names such as 'September ARG' or 'Christmas'.
+    It simply looks for enabled config sections containing start_date and
+    end_date.
+
+    Example season.json sections:
+
+        "september_arg": {
+            "enabled": true,
+            "start_date": "2026-09-01",
+            "end_date": "2026-09-30"
+        }
+
+        "october_halloween": {
+            "enabled": true,
+            "start_date": "2026-10-01",
+            "end_date": "2026-10-31"
+        }
+    """
+    if not isinstance(package, dict):
+        return None
+
+    season_config = package.get("season", {})
+
+    if not isinstance(season_config, dict):
+        return None
+
+    if not season_config.get("enabled", False):
+        return None
+
+    if now_dt is None:
+        now_dt = _fergie_seasonal_now(package)
+
+    today = now_dt.date()
+
+    eligible_windows = []
+
+    for key, value in season_config.items():
+        if not isinstance(value, dict):
+            continue
+
+        if not value.get("enabled", False):
+            continue
+
+        start_date = _fergie_seasonal_parse_date(
+            value.get("start_date")
+        )
+
+        end_date = _fergie_seasonal_parse_date(
+            value.get("end_date")
+        )
+
+        if start_date is None or end_date is None:
+            continue
+
+        if start_date <= today <= end_date:
+            eligible_windows.append(
+                {
+                    "id": str(key),
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "config": value,
+                }
+            )
+
+    if not eligible_windows:
+        return None
+
+    # If a future package accidentally has overlapping windows,
+    # prefer the one with the most recent start date.
+    eligible_windows.sort(
+        key=lambda item: item["start_date"],
+        reverse=True,
+    )
+
+    return eligible_windows[0]
+
+
+def _fergie_seasonal_package_is_active(
+    package: dict,
+    now_dt=None,
+):
+    """
+    True when this package currently has an active date window.
+    """
+    return (
+        _fergie_seasonal_active_window(
+            package,
+            now_dt=now_dt,
+        )
+        is not None
+    )
+
+
+def _fergie_seasonal_get_active_packages():
+    """
+    Return every currently-active loaded seasonal package.
+
+    Multiple packages are technically supported, although normally only
+    one event should occupy a given date range.
+    """
+    active = []
+
+    for package in fergie_seasonal_packages.values():
+        if not isinstance(package, dict):
+            continue
+
+        if _fergie_seasonal_package_is_active(package):
+            active.append(package)
+
+    return active
+
+
+def _fergie_seasonal_story_config(package: dict):
+    """
+    Find this package's story configuration generically.
+
+    Any optional seasonal config containing a non-empty 'stages' list can
+    act as a story definition. The Python engine does not depend on a
+    filename such as september_story.json.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    configs = package.get("configs", {})
+
+    if not isinstance(configs, dict):
+        return None
+
+    for config in configs.values():
+        if not isinstance(config, dict):
+            continue
+
+        stages = config.get("stages")
+
+        if isinstance(stages, list) and stages:
+            return config
+
+    return None
+
+
+def _fergie_seasonal_date_eligible_stage(
+    package: dict,
+    now_dt=None,
+):
+    """
+    Return the highest story stage whose start_date has arrived.
+
+    IMPORTANT:
+    This only answers which stage is DATE-ELIGIBLE.
+
+    Player/clue progression will be applied separately later, so reaching
+    a calendar date does not automatically solve or advance the ARG.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    active_window = _fergie_seasonal_active_window(
+        package,
+        now_dt=now_dt,
+    )
+
+    if active_window is None:
+        return None
+
+    story_config = _fergie_seasonal_story_config(
+        package
+    )
+
+    if not isinstance(story_config, dict):
+        return None
+
+    stages = story_config.get("stages", [])
+
+    if not isinstance(stages, list):
+        return None
+
+    if now_dt is None:
+        now_dt = _fergie_seasonal_now(package)
+
+    today = now_dt.date()
+
+    eligible = []
+
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+
+        start_date = _fergie_seasonal_parse_date(
+            stage.get("start_date")
+        )
+
+        if start_date is None:
+            continue
+
+        if start_date <= today:
+            eligible.append(
+                (
+                    int(stage.get("stage", 0) or 0),
+                    start_date,
+                    stage,
+                )
+            )
+
+    if not eligible:
+        return None
+
+    eligible.sort(
+        key=lambda item: (
+            item[0],
+            item[1],
+        ),
+        reverse=True,
+    )
+
+    return eligible[0][2]
+
+
+# ======================================================================
+
+# ================== Seasonal Media Engine ==================
+
+def _fergie_seasonal_media_config(package: dict):
+    """
+    Return the media configuration for a seasonal package.
+
+    The engine searches loaded configs for one containing an 'assets'
+    dictionary instead of depending on a specific filename.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    configs = package.get("configs", {})
+
+    if not isinstance(configs, dict):
+        return None
+
+    for config in configs.values():
+        if not isinstance(config, dict):
+            continue
+
+        assets = config.get("assets")
+
+        if isinstance(assets, dict):
+            return config
+
+    return None
+
+
+def _fergie_seasonal_media_asset(
+    package: dict,
+    asset_id: str,
+):
+    """
+    Return one registered seasonal media asset definition.
+    """
+    asset_id = str(asset_id or "").strip()
+
+    if not asset_id:
+        return None
+
+    media_config = _fergie_seasonal_media_config(
+        package
+    )
+
+    if not isinstance(media_config, dict):
+        return None
+
+    assets = media_config.get("assets", {})
+
+    if not isinstance(assets, dict):
+        return None
+
+    asset = assets.get(asset_id)
+
+    if not isinstance(asset, dict):
+        return None
+
+    return asset
+
+
+def _fergie_seasonal_media_path(
+    package: dict,
+    asset_id: str,
+):
+    """
+    Resolve one registered media asset to an absolute local path.
+
+    Security:
+    The final path must remain inside this package's media directory.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    asset = _fergie_seasonal_media_asset(
+        package,
+        asset_id,
+    )
+
+    if not isinstance(asset, dict):
+        return None
+
+    relative_file = str(
+        asset.get("file")
+        or ""
+    ).strip()
+
+    if not relative_file:
+        return None
+
+    media_root = os.path.abspath(
+        str(package.get("media_dir") or "")
+    )
+
+    if not media_root:
+        return None
+
+    candidate = os.path.abspath(
+        os.path.join(
+            media_root,
+            relative_file,
+        )
+    )
+
+    try:
+        if os.path.commonpath(
+            [media_root, candidate]
+        ) != media_root:
+            print(
+                f"SEASONAL MEDIA PATH BLOCKED ❌ "
+                f"{asset_id}: {candidate}"
+            )
+            return None
+
+    except Exception:
+        return None
+
+    if not os.path.isfile(candidate):
+        print(
+            f"SEASONAL MEDIA MISSING ⚠️ "
+            f"{asset_id}: {candidate}"
+        )
+        return None
+
+    return candidate
+
+
+def _fergie_seasonal_media_global_rules(
+    package: dict,
+):
+    """
+    Return media_events global rules safely.
+    """
+    media_config = _fergie_seasonal_media_config(
+        package
+    )
+
+    if not isinstance(media_config, dict):
+        return {}
+
+    rules = media_config.get(
+        "global_rules",
+        {},
+    )
+
+    return rules if isinstance(rules, dict) else {}
+
+
+def _fergie_seasonal_media_last_used(
+    state: dict,
+    asset_id: str,
+):
+    """
+    Return the last-use Unix timestamp for one asset.
+    """
+    if not isinstance(state, dict):
+        return 0.0
+
+    media_last_used = state.get(
+        "media_last_used",
+        {},
+    )
+
+    if not isinstance(media_last_used, dict):
+        return 0.0
+
+    try:
+        return float(
+            media_last_used.get(asset_id)
+            or 0.0
+        )
+
+    except Exception:
+        return 0.0
+
+
+def _fergie_seasonal_media_can_send(
+    package: dict,
+    state: dict,
+    asset_id: str,
+    *,
+    now_ts=None,
+    ignore_cooldown=False,
+):
+    """
+    Check whether a seasonal media asset may be sent.
+
+    Returns:
+        (True, "ok")
+        (False, reason)
+
+    This enforces:
+    - registered asset
+    - existing file
+    - asset cooldown
+    - global media cooldown
+    - no immediate same-asset repeat
+    """
+    asset = _fergie_seasonal_media_asset(
+        package,
+        asset_id,
+    )
+
+    if not isinstance(asset, dict):
+        return False, "unknown_asset"
+
+    path = _fergie_seasonal_media_path(
+        package,
+        asset_id,
+    )
+
+    if not path:
+        return False, "missing_file"
+
+    if not isinstance(state, dict):
+        return False, "missing_state"
+
+    if now_ts is None:
+        now_ts = time.time()
+
+    try:
+        now_ts = float(now_ts)
+    except Exception:
+        now_ts = time.time()
+
+    global_rules = (
+        _fergie_seasonal_media_global_rules(
+            package
+        )
+    )
+
+    allow_same_twice = bool(
+        global_rules.get(
+            "allow_same_asset_twice_in_a_row",
+            False,
+        )
+    )
+
+    if (
+        not allow_same_twice
+        and str(state.get("last_media_asset") or "")
+        == str(asset_id)
+    ):
+        return False, "same_asset_twice"
+
+    if ignore_cooldown:
+        return True, "ok"
+
+    try:
+        asset_cooldown_minutes = float(
+            asset.get("cooldown_minutes")
+            or 0
+        )
+    except Exception:
+        asset_cooldown_minutes = 0.0
+
+    last_asset_use = (
+        _fergie_seasonal_media_last_used(
+            state,
+            asset_id,
+        )
+    )
+
+    if asset_cooldown_minutes > 0:
+        required_seconds = (
+            asset_cooldown_minutes * 60.0
+        )
+
+        if (
+            last_asset_use > 0
+            and now_ts - last_asset_use
+            < required_seconds
+        ):
+            return False, "asset_cooldown"
+
+    try:
+        global_cooldown_minutes = float(
+            global_rules.get(
+                "global_cooldown_minutes",
+                0,
+            )
+            or 0
+        )
+    except Exception:
+        global_cooldown_minutes = 0.0
+
+    try:
+        last_story_event = float(
+            state.get("last_story_event_at")
+            or 0.0
+        )
+    except Exception:
+        last_story_event = 0.0
+
+    if global_cooldown_minutes > 0:
+        required_seconds = (
+            global_cooldown_minutes * 60.0
+        )
+
+        if (
+            last_story_event > 0
+            and now_ts - last_story_event
+            < required_seconds
+        ):
+            return False, "global_cooldown"
+
+    return True, "ok"
+
+
+async def _fergie_seasonal_send_media(
+    destination,
+    package: dict,
+    state: dict,
+    asset_id: str,
+    *,
+    caption=None,
+    ignore_cooldown=False,
+    persist=True,
+):
+    """
+    Safely send one seasonal media asset.
+
+    destination may be a Discord channel or another discord.py object
+    exposing an async .send() method.
+
+    IMPORTANT:
+    This helper does not decide WHEN a scare should occur.
+    Story/conversation logic will make that decision later.
+    """
+    if destination is None:
+        return False
+
+    if not hasattr(destination, "send"):
+        return False
+
+    can_send, reason = (
+        _fergie_seasonal_media_can_send(
+            package,
+            state,
+            asset_id,
+            ignore_cooldown=ignore_cooldown,
+        )
+    )
+
+    if not can_send:
+        return False
+
+    path = _fergie_seasonal_media_path(
+        package,
+        asset_id,
+    )
+
+    if not path:
+        return False
+
+    try:
+        kwargs = {
+            "file": discord.File(path),
+        }
+
+        if caption is not None:
+            caption = str(caption).strip()
+
+            if caption:
+                kwargs["content"] = caption
+
+        await destination.send(**kwargs)
+
+    except Exception as e:
+        print(
+            f"SEASONAL MEDIA SEND ERROR ❌ "
+            f"{asset_id}: {type(e).__name__}: {e}"
+        )
+        return False
+
+    now_ts = time.time()
+
+    media_last_used = state.setdefault(
+        "media_last_used",
+        {},
+    )
+
+    if not isinstance(media_last_used, dict):
+        media_last_used = {}
+        state["media_last_used"] = media_last_used
+
+    media_last_used[str(asset_id)] = now_ts
+
+    state["last_media_asset"] = str(
+        asset_id
+    )
+
+    state["last_story_event_at"] = now_ts
+
+    if persist:
+        await _fergie_seasonal_save_state(
+            package,
+            state,
+        )
+
+    print(
+        f"SEASONAL MEDIA SENT ✅ "
+        f"{package.get('season_id')} "
+        f"asset={asset_id}"
+    )
+
+    return True
+
+
+def _fergie_seasonal_media_for_context(
+    package: dict,
+    context: str,
+):
+    """
+    Return asset IDs registered for a generic context.
+
+    Examples from a seasonal package:
+        binary_transmission
+        corruption_retaliation
+        halloween_conversation
+        october_conversation_jumpscare
+
+    The engine remains unaware of the actual filenames.
+    """
+    context = str(context or "").strip()
+
+    if not context:
+        return []
+
+    media_config = _fergie_seasonal_media_config(
+        package
+    )
+
+    if not isinstance(media_config, dict):
+        return []
+
+    assets = media_config.get("assets", {})
+
+    if not isinstance(assets, dict):
+        return []
+
+    matches = []
+
+    for asset_id, asset in assets.items():
+        if not isinstance(asset, dict):
+            continue
+
+        contexts = asset.get(
+            "contexts",
+            [],
+        )
+
+        if not isinstance(contexts, list):
+            continue
+
+        if context in {
+            str(item).strip()
+            for item in contexts
+        }:
+            matches.append(
+                str(asset_id)
+            )
+
+    return matches
+
+
+# ============================================================
+
+# ================== Seasonal Clue / Puzzle Engine ==================
+
+def _fergie_seasonal_clue_config(package: dict):
+    """
+    Find this package's clue/puzzle configuration generically.
+
+    Any loaded config containing a non-empty 'clues' list can act as the
+    puzzle definition. The Python engine does not depend on a filename.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    configs = package.get("configs", {})
+
+    if not isinstance(configs, dict):
+        return None
+
+    for config in configs.values():
+        if not isinstance(config, dict):
+            continue
+
+        clues = config.get("clues")
+
+        if isinstance(clues, list) and clues:
+            return config
+
+    return None
+
+
+def _fergie_seasonal_clues(package: dict):
+    """
+    Return clue definitions sorted by their configured order.
+    """
+    clue_config = _fergie_seasonal_clue_config(
+        package
+    )
+
+    if not isinstance(clue_config, dict):
+        return []
+
+    clues = clue_config.get("clues", [])
+
+    if not isinstance(clues, list):
+        return []
+
+    valid = [
+        clue
+        for clue in clues
+        if isinstance(clue, dict)
+        and str(clue.get("id") or "").strip()
+    ]
+
+    valid.sort(
+        key=lambda clue: int(
+            clue.get("order", 0)
+            or 0
+        )
+    )
+
+    return valid
+
+
+def _fergie_seasonal_clue_by_id(
+    package: dict,
+    clue_id: str,
+):
+    clue_id = str(clue_id or "").strip()
+
+    if not clue_id:
+        return None
+
+    for clue in _fergie_seasonal_clues(package):
+        if str(clue.get("id") or "").strip() == clue_id:
+            return clue
+
+    return None
+
+
+def _fergie_seasonal_date_stage_number(
+    package: dict,
+    now_dt=None,
+):
+    """
+    Return the currently date-eligible numeric story stage.
+    """
+    stage = _fergie_seasonal_date_eligible_stage(
+        package,
+        now_dt=now_dt,
+    )
+
+    if not isinstance(stage, dict):
+        return 0
+
+    try:
+        return int(
+            stage.get("stage", 0)
+            or 0
+        )
+
+    except Exception:
+        return 0
+
+
+def _fergie_seasonal_completed_clue_ids(
+    state: dict,
+):
+    """
+    Return normalized completed clue IDs while preserving stored order.
+    """
+    if not isinstance(state, dict):
+        return []
+
+    completed = state.get(
+        "completed_clues",
+        [],
+    )
+
+    if not isinstance(completed, list):
+        return []
+
+    result = []
+
+    for clue_id in completed:
+        clue_id = str(clue_id or "").strip()
+
+        if clue_id and clue_id not in result:
+            result.append(clue_id)
+
+    return result
+
+
+def _fergie_seasonal_clue_transmission_record(
+    state: dict,
+    clue_id: str,
+):
+    """
+    Return a normalized transmission record for one clue.
+
+    Stored format:
+
+        {
+            "count": 2,
+            "last_conversation": 14,
+            "last_transmitted_at": 1234567890.0
+        }
+    """
+    if not isinstance(state, dict):
+        return {
+            "count": 0,
+            "last_conversation": None,
+            "last_transmitted_at": None,
+        }
+
+    transmissions = state.setdefault(
+        "clue_transmissions",
+        {},
+    )
+
+    if not isinstance(transmissions, dict):
+        transmissions = {}
+        state["clue_transmissions"] = transmissions
+
+    existing = transmissions.get(clue_id)
+
+    if isinstance(existing, dict):
+        existing.setdefault("count", 0)
+        existing.setdefault(
+            "last_conversation",
+            None,
+        )
+        existing.setdefault(
+            "last_transmitted_at",
+            None,
+        )
+
+        return existing
+
+    # Compatibility if an older state ever stored just an integer.
+    try:
+        old_count = int(existing or 0)
+    except Exception:
+        old_count = 0
+
+    record = {
+        "count": old_count,
+        "last_conversation": None,
+        "last_transmitted_at": None,
+    }
+
+    transmissions[clue_id] = record
+
+    return record
+
+
+def _fergie_seasonal_next_clue(
+    package: dict,
+    state: dict,
+    now_dt=None,
+):
+    """
+    Return the first unsolved clue that is currently date-eligible.
+
+    Clues remain sequential:
+    later clues cannot jump ahead of earlier unsolved clues.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    if not isinstance(state, dict):
+        return None
+
+    completed = set(
+        _fergie_seasonal_completed_clue_ids(
+            state
+        )
+    )
+
+    date_stage = (
+        _fergie_seasonal_date_stage_number(
+            package,
+            now_dt=now_dt,
+        )
+    )
+
+    for clue in _fergie_seasonal_clues(package):
+        clue_id = str(
+            clue.get("id")
+            or ""
+        ).strip()
+
+        if not clue_id:
+            continue
+
+        if clue_id in completed:
+            continue
+
+        try:
+            minimum_stage = int(
+                clue.get("minimum_stage", 0)
+                or 0
+            )
+        except Exception:
+            minimum_stage = 0
+
+        # Because clues are sequential, if the next unsolved clue
+        # has not reached its date gate, nothing later may bypass it.
+        if minimum_stage > date_stage:
+            return None
+
+        return clue
+
+    return None
+
+
+def _fergie_seasonal_normalize_solution_text(
+    text: str,
+):
+    """
+    Normalize conversational text for hidden clue-solution matching.
+
+    Punctuation and formatting are ignored while words and numbers remain.
+    """
+    text = str(text or "").casefold()
+
+    text = text.replace("’", "'")
+    text = text.replace("`", " ")
+
+    text = re.sub(
+        r"[^a-z0-9'\s]+",
+        " ",
+        text,
+    )
+
+    text = re.sub(
+        r"\s+",
+        " ",
+        text,
+    ).strip()
+
+    return text
+
+
+def _fergie_seasonal_clue_has_been_transmitted(
+    state: dict,
+    clue_id: str,
+):
+    """
+    Never allow a clue to be solved before members have actually seen it.
+    """
+    record = (
+        _fergie_seasonal_clue_transmission_record(
+            state,
+            clue_id,
+        )
+    )
+
+    try:
+        return int(
+            record.get("count", 0)
+            or 0
+        ) > 0
+
+    except Exception:
+        return False
+
+
+def _fergie_seasonal_message_solves_clue(
+    package: dict,
+    state: dict,
+    clue: dict,
+    user_text: str,
+):
+    """
+    Detect a natural conversational solution.
+
+    This intentionally does NOT require a !decode command.
+
+    Short answers such as HELP must be exact or represented by one of the
+    longer accepted phrases, reducing accidental solves during normal chat.
+    """
+    if not isinstance(clue, dict):
+        return False
+
+    clue_id = str(
+        clue.get("id")
+        or ""
+    ).strip()
+
+    if not clue_id:
+        return False
+
+    # Critical anti-cheat / anti-accidental rule:
+    # a clue must actually have appeared first.
+    if not _fergie_seasonal_clue_has_been_transmitted(
+        state,
+        clue_id,
+    ):
+        return False
+
+    normalized_message = (
+        _fergie_seasonal_normalize_solution_text(
+            user_text
+        )
+    )
+
+    if not normalized_message:
+        return False
+
+    accepted = clue.get(
+        "accepted_solutions",
+        [],
+    )
+
+    if not isinstance(accepted, list):
+        accepted = []
+
+    plaintext = str(
+        clue.get("plaintext")
+        or ""
+    ).strip()
+
+    candidates = list(accepted)
+
+    if plaintext:
+        candidates.append(plaintext)
+
+    for candidate in candidates:
+        normalized_candidate = (
+            _fergie_seasonal_normalize_solution_text(
+                candidate
+            )
+        )
+
+        if not normalized_candidate:
+            continue
+
+        # Tiny solutions such as "HELP" should not match random sentences
+        # merely containing that ordinary word.
+        if len(normalized_candidate) <= 4:
+            if normalized_message == normalized_candidate:
+                return True
+
+            continue
+
+        if normalized_candidate in normalized_message:
+            return True
+
+    return False
+
+
+def _fergie_seasonal_detect_clue_solution(
+    package: dict,
+    state: dict,
+    user_text: str,
+    now_dt=None,
+):
+    """
+    Return the active clue when the user's conversational message solves it.
+
+    Nothing is persisted here.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    if not isinstance(state, dict):
+        return None
+
+    clue = _fergie_seasonal_next_clue(
+        package,
+        state,
+        now_dt=now_dt,
+    )
+
+    if not isinstance(clue, dict):
+        return None
+
+    if _fergie_seasonal_message_solves_clue(
+        package,
+        state,
+        clue,
+        user_text,
+    ):
+        return clue
+
+    return None
+
+
+async def _fergie_seasonal_complete_clue(
+    package: dict,
+    state: dict,
+    clue: dict,
+):
+    """
+    Persist one solved clue and return its configured reaction information.
+
+    This function does NOT send the reaction itself.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    if not isinstance(state, dict):
+        return None
+
+    if not isinstance(clue, dict):
+        return None
+
+    clue_id = str(
+        clue.get("id")
+        or ""
+    ).strip()
+
+    if not clue_id:
+        return None
+
+    completed = (
+        _fergie_seasonal_completed_clue_ids(
+            state
+        )
+    )
+
+    if clue_id not in completed:
+        completed.append(clue_id)
+
+    state["completed_clues"] = completed
+    state["active_clue_id"] = None
+
+    # Once the crew successfully decodes anything, they understand the
+    # decoding method and no longer need the escalating decoder tutorial.
+    clue_config = _fergie_seasonal_clue_config(
+        package
+    )
+
+    decoder_help = {}
+
+    if isinstance(clue_config, dict):
+        candidate = clue_config.get(
+            "decoder_help",
+            {},
+        )
+
+        if isinstance(candidate, dict):
+            decoder_help = candidate
+
+    if decoder_help.get(
+        "stop_after_first_successful_decode",
+        False,
+    ):
+        state["decoder_discovered"] = True
+
+    on_solve = clue.get(
+        "on_solve",
+        {},
+    )
+
+    if not isinstance(on_solve, dict):
+        on_solve = {}
+
+    if on_solve.get(
+        "unlock_rescue_attempts",
+        False,
+    ):
+        flags = state.setdefault(
+            "flags",
+            {},
+        )
+
+        if not isinstance(flags, dict):
+            flags = {}
+            state["flags"] = flags
+
+        flags["rescue_attempts_unlocked"] = True
+
+    await _fergie_seasonal_save_state(
+        package,
+        state,
+    )
+
+    print(
+        f"SEASONAL CLUE SOLVED ✅ "
+        f"{package.get('season_id')} "
+        f"clue={clue_id}"
+    )
+
+    return {
+        "clue_id": clue_id,
+        "plaintext": str(
+            clue.get("plaintext")
+            or ""
+        ),
+        "on_solve": on_solve,
+    }
+
+
+def _fergie_seasonal_can_transmit_clue(
+    package: dict,
+    state: dict,
+    clue: dict,
+):
+    """
+    Enforce spacing between repeated transmissions of the same unsolved clue.
+    """
+    if not isinstance(clue, dict):
+        return False
+
+    clue_id = str(
+        clue.get("id")
+        or ""
+    ).strip()
+
+    if not clue_id:
+        return False
+
+    record = (
+        _fergie_seasonal_clue_transmission_record(
+            state,
+            clue_id,
+        )
+    )
+
+    try:
+        count = int(
+            record.get("count", 0)
+            or 0
+        )
+    except Exception:
+        count = 0
+
+    # First appearance is always eligible when the story layer chooses it.
+    if count <= 0:
+        return True
+
+    clue_config = _fergie_seasonal_clue_config(
+        package
+    )
+
+    rules = {}
+
+    if isinstance(clue_config, dict):
+        candidate = clue_config.get(
+            "transmission_rules",
+            {},
+        )
+
+        if isinstance(candidate, dict):
+            rules = candidate
+
+    try:
+        minimum_gap = int(
+            rules.get(
+                "minimum_conversations_between_repeats",
+                0,
+            )
+            or 0
+        )
+    except Exception:
+        minimum_gap = 0
+
+    try:
+        conversation_counter = int(
+            state.get("conversation_counter", 0)
+            or 0
+        )
+    except Exception:
+        conversation_counter = 0
+
+    last_conversation = record.get(
+        "last_conversation"
+    )
+
+    if last_conversation is None:
+        return True
+
+    try:
+        last_conversation = int(
+            last_conversation
+        )
+    except Exception:
+        return True
+
+    return (
+        conversation_counter - last_conversation
+        >= minimum_gap
+    )
+
+
+def _fergie_seasonal_decoder_hint_due(
+    package: dict,
+    state: dict,
+    transmission_count: int,
+):
+    """
+    Return the next adaptive decoder hint, or None.
+
+    Progression from your current package is:
+
+        0 and 1.
+        8 bits.
+        ASCII.
+        rapidtables
+        full RapidTables URL
+
+    Once the first clue is successfully decoded, hints stop permanently.
+    """
+    if not isinstance(state, dict):
+        return None
+
+    if state.get(
+        "decoder_discovered",
+        False,
+    ):
+        return None
+
+    clue_config = _fergie_seasonal_clue_config(
+        package
+    )
+
+    if not isinstance(clue_config, dict):
+        return None
+
+    decoder_help = clue_config.get(
+        "decoder_help",
+        {},
+    )
+
+    if not isinstance(decoder_help, dict):
+        return None
+
+    if not decoder_help.get(
+        "enabled",
+        False,
+    ):
+        return None
+
+    hints = decoder_help.get(
+        "hints",
+        [],
+    )
+
+    if not isinstance(hints, list):
+        return None
+
+    try:
+        current_level = int(
+            state.get(
+                "decoder_hint_level",
+                0,
+            )
+            or 0
+        )
+    except Exception:
+        current_level = 0
+
+    eligible = []
+
+    for hint in hints:
+        if not isinstance(hint, dict):
+            continue
+
+        try:
+            level = int(
+                hint.get("level", 0)
+                or 0
+            )
+
+            threshold = int(
+                hint.get(
+                    "after_unsolved_transmissions",
+                    0,
+                )
+                or 0
+            )
+
+        except Exception:
+            continue
+
+        if level <= current_level:
+            continue
+
+        if transmission_count < threshold:
+            continue
+
+        text = str(
+            hint.get("text")
+            or ""
+        ).strip()
+
+        if not text:
+            continue
+
+        eligible.append(
+            (
+                level,
+                text,
+            )
+        )
+
+    if not eligible:
+        return None
+
+    # Only advance one hint level at a time.
+    eligible.sort(
+        key=lambda item: item[0]
+    )
+
+    level, text = eligible[0]
+
+    state["decoder_hint_level"] = level
+
+    return text
+
+
+async def _fergie_seasonal_record_transmission(
+    package: dict,
+    state: dict,
+    clue: dict,
+):
+    """
+    Record that an unsolved clue was shown to the crew.
+
+    Returns the adaptive decoder hint that should accompany/follow this
+    transmission, or None.
+
+    It does NOT send either the binary or the hint.
+    """
+    if not isinstance(clue, dict):
+        return None
+
+    clue_id = str(
+        clue.get("id")
+        or ""
+    ).strip()
+
+    if not clue_id:
+        return None
+
+    record = (
+        _fergie_seasonal_clue_transmission_record(
+            state,
+            clue_id,
+        )
+    )
+
+    try:
+        count = int(
+            record.get("count", 0)
+            or 0
+        )
+    except Exception:
+        count = 0
+
+    count += 1
+
+    record["count"] = count
+
+    try:
+        record["last_conversation"] = int(
+            state.get(
+                "conversation_counter",
+                0,
+            )
+            or 0
+        )
+    except Exception:
+        record["last_conversation"] = 0
+
+    record["last_transmitted_at"] = (
+        time.time()
+    )
+
+    state["active_clue_id"] = clue_id
+
+    hint = _fergie_seasonal_decoder_hint_due(
+        package,
+        state,
+        count,
+    )
+
+    await _fergie_seasonal_save_state(
+        package,
+        state,
+    )
+
+    print(
+        f"SEASONAL BINARY TRANSMISSION ✅ "
+        f"{package.get('season_id')} "
+        f"clue={clue_id} "
+        f"count={count}"
+    )
+
+    return hint
+
+
+def _fergie_seasonal_binary_transmission_text(
+    clue: dict,
+):
+    """
+    Return the configured binary payload exactly as stored in the package.
+
+    No automatic translation or plaintext leakage occurs here.
+    """
+    if not isinstance(clue, dict):
+        return None
+
+    binary = str(
+        clue.get("binary")
+        or ""
+    ).strip()
+
+    return binary or None
+
+
+# ====================================================================
+
+# ================== Seasonal Rescue Engine ==================
+
+def _fergie_seasonal_rescue_config(package: dict):
+    """
+    Find the story rescue configuration generically.
+    """
+    story_config = _fergie_seasonal_story_config(package)
+
+    if not isinstance(story_config, dict):
+        return {}
+
+    rescue = story_config.get("rescue", {})
+
+    return rescue if isinstance(rescue, dict) else {}
+
+
+def _fergie_seasonal_rescue_reactions_config(package: dict):
+    """
+    Find a seasonal config containing personalized rescuer reactions.
+    """
+    if not isinstance(package, dict):
+        return {}
+
+    configs = package.get("configs", {})
+
+    if not isinstance(configs, dict):
+        return {}
+
+    for config in configs.values():
+        if not isinstance(config, dict):
+            continue
+
+        if (
+            isinstance(config.get("special_users"), dict)
+            and isinstance(config.get("default_responses"), list)
+        ):
+            return config
+
+    return {}
+
+
+def _fergie_seasonal_rescue_is_unlocked(
+    package: dict,
+    state: dict,
+    now_dt=None,
+):
+    """
+    Return True only when the package's configured rescue requirements
+    have been satisfied.
+
+    The final clue may unlock rescue attempts, but this function also
+    verifies date/stage and required clue progress.
+    """
+    if not isinstance(state, dict):
+        return False
+
+    if state.get("story_completed", False):
+        return False
+
+    rescue = _fergie_seasonal_rescue_config(package)
+
+    if not rescue.get("enabled", False):
+        return False
+
+    flags = state.get("flags", {})
+
+    if not isinstance(flags, dict):
+        return False
+
+    if not flags.get("rescue_attempts_unlocked", False):
+        return False
+
+    try:
+        minimum_stage = int(
+            rescue.get("minimum_stage", 0)
+            or 0
+        )
+    except Exception:
+        minimum_stage = 0
+
+    current_stage = _fergie_seasonal_date_stage_number(
+        package,
+        now_dt=now_dt,
+    )
+
+    if current_stage < minimum_stage:
+        return False
+
+    if rescue.get("require_story_clues", False):
+        required = rescue.get("required_clue_ids", [])
+
+        if not isinstance(required, list):
+            required = []
+
+        completed = set(
+            _fergie_seasonal_completed_clue_ids(state)
+        )
+
+        for clue_id in required:
+            if str(clue_id or "").strip() not in completed:
+                return False
+
+    return True
+
+
+def _fergie_seasonal_identity_anchor(package: dict):
+    """
+    Return the configured rescue identity anchor.
+
+    Halloween 2026 currently supplies this through JSON as 'sourdough',
+    but Python itself does not know or care what future seasons use.
+    """
+    rescue = _fergie_seasonal_rescue_config(package)
+
+    return str(
+        rescue.get("identity_anchor")
+        or ""
+    ).strip().casefold()
+
+
+def _fergie_seasonal_message_is_rescue_attempt(
+    package: dict,
+    state: dict,
+    user_text: str,
+    now_dt=None,
+):
+    """
+    Detect a genuine conversational rescue attempt.
+
+    Requirements:
+    - rescue state is unlocked
+    - configured identity anchor appears
+    - message contains identity/remembrance language
+
+    Merely typing the anchor by itself does NOT rescue Fergie.
+    """
+    if not _fergie_seasonal_rescue_is_unlocked(
+        package,
+        state,
+        now_dt=now_dt,
+    ):
+        return False
+
+    normalized = _fergie_seasonal_normalize_solution_text(
+        user_text
+    )
+
+    if not normalized:
+        return False
+
+    anchor = _fergie_seasonal_identity_anchor(package)
+
+    if not anchor:
+        return False
+
+    normalized_anchor = (
+        _fergie_seasonal_normalize_solution_text(anchor)
+    )
+
+    if normalized_anchor not in normalized:
+        return False
+
+    # Require conversational identity/remembrance language in addition
+    # to the anchor. This prevents a bare "sourdough" from winning.
+    identity_patterns = (
+        "remember",
+        "who you are",
+        "who u are",
+        "you are fergie",
+        "you're fergie",
+        "youre fergie",
+        "your identity",
+        "real fergie",
+        "come back",
+        "come back to us",
+        "remember yourself",
+        "don't forget",
+        "dont forget",
+    )
+
+    return any(
+        pattern in normalized
+        for pattern in identity_patterns
+    )
+
+
+def _fergie_seasonal_rescuer_reaction(
+    package: dict,
+    user_id,
+):
+    """
+    Select a personalized rescue response by Discord user ID.
+
+    Unknown members receive a configured default response.
+    """
+    reactions = (
+        _fergie_seasonal_rescue_reactions_config(
+            package
+        )
+    )
+
+    special_users = reactions.get(
+        "special_users",
+        {},
+    )
+
+    if not isinstance(special_users, dict):
+        special_users = {}
+
+    user_key = str(user_id)
+
+    member_config = special_users.get(user_key)
+
+    if isinstance(member_config, dict):
+        responses = member_config.get(
+            "responses",
+            [],
+        )
+
+        if isinstance(responses, list):
+            responses = [
+                str(response).strip()
+                for response in responses
+                if str(response).strip()
+            ]
+
+            if responses:
+                return random.choice(responses)
+
+    defaults = reactions.get(
+        "default_responses",
+        [],
+    )
+
+    if isinstance(defaults, list):
+        defaults = [
+            str(response).strip()
+            for response in defaults
+            if str(response).strip()
+        ]
+
+        if defaults:
+            return random.choice(defaults)
+
+    return "OH MY GOD. YOU FOUND ME 😭"
+
+
+def _fergie_seasonal_late_rescue_reaction(
+    package: dict,
+):
+    """
+    Select a response for somebody trying to rescue Fergie after another
+    member already completed the event.
+    """
+    reactions = (
+        _fergie_seasonal_rescue_reactions_config(
+            package
+        )
+    )
+
+    responses = reactions.get(
+        "late_rescue_attempts",
+        [],
+    )
+
+    if isinstance(responses, list):
+        responses = [
+            str(response).strip()
+            for response in responses
+            if str(response).strip()
+        ]
+
+        if responses:
+            return random.choice(responses)
+
+    return "bro where were you when I was actually trapped 😭"
+
+
+async def _fergie_seasonal_complete_rescue(
+    package: dict,
+    state: dict,
+    member,
+    triggering_message: str,
+):
+    """
+    Permanently complete a seasonal rescue event.
+
+    Records:
+    - Discord user ID
+    - display name at rescue time
+    - UTC rescue timestamp
+    - triggering conversational message
+    - completed clue list
+
+    Returns the personalized reaction text.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    if not isinstance(state, dict):
+        return None
+
+    if state.get("story_completed", False):
+        return None
+
+    user_id = getattr(member, "id", None)
+
+    if user_id is None:
+        return None
+
+    display_name = str(
+        getattr(member, "display_name", None)
+        or getattr(member, "name", None)
+        or user_id
+    )
+
+    completed_at = datetime.now(
+        timezone.utc
+    ).isoformat()
+
+    state["story_completed"] = True
+    state["completed_at"] = completed_at
+
+    state["rescuer"] = {
+        "user_id": str(user_id),
+        "display_name": display_name,
+        "rescued_at": completed_at,
+    }
+
+    state["triggering_message"] = str(
+        triggering_message or ""
+    )[:2000]
+
+    flags = state.setdefault("flags", {})
+
+    if not isinstance(flags, dict):
+        flags = {}
+        state["flags"] = flags
+
+    flags["rescue_attempts_unlocked"] = False
+    flags["rescued"] = True
+
+    # Keep a historical snapshot of clue completion at rescue time.
+    stats = state.setdefault("stats", {})
+
+    if not isinstance(stats, dict):
+        stats = {}
+        state["stats"] = stats
+
+    stats["completed_clues_at_rescue"] = list(
+        _fergie_seasonal_completed_clue_ids(state)
+    )
+
+    saved = await _fergie_seasonal_save_state(
+        package,
+        state,
+    )
+
+    if not saved:
+        # Do not announce a successful rescue if persistence failed.
+        # The event can safely be attempted again instead of producing
+        # an unrecorded / duplicate canonical rescuer.
+        state["story_completed"] = False
+        state["completed_at"] = None
+        state["rescuer"] = None
+        state["triggering_message"] = None
+        flags["rescue_attempts_unlocked"] = True
+        flags["rescued"] = False
+        stats.pop(
+            "completed_clues_at_rescue",
+            None,
+        )
+
+        return None
+
+    reaction = _fergie_seasonal_rescuer_reaction(
+        package,
+        user_id,
+    )
+
+    print(
+        f"SEASONAL RESCUE COMPLETE 🎃 "
+        f"{package.get('season_id')} "
+        f"rescuer={user_id} "
+        f"name={display_name!r}"
+    )
+
+    return reaction
+
+
+def _fergie_seasonal_post_rescue_story(
+    package: dict,
+):
+    """
+    Return the configured post-rescue full-story text when present.
+
+    This deliberately does not invent story prose in Python.
+    The actual reveal belongs in the seasonal package.
+    """
+    if not isinstance(package, dict):
+        return None
+
+    configs = package.get("configs", {})
+
+    if not isinstance(configs, dict):
+        return None
+
+    for config in configs.values():
+        if not isinstance(config, dict):
+            continue
+
+        rescue = config.get("rescue", {})
+
+        if not isinstance(rescue, dict):
+            continue
+
+        text = str(
+            rescue.get("post_rescue_story")
+            or ""
+        ).strip()
+
+        if text:
+            return text
+
+    return None
+
+
+# ============================================================
+
+# ================== Seasonal Conversation Engine ==================
+
+def _fergie_seasonal_active_story_window(
+    package: dict,
+    now_dt=None,
+):
+    """
+    Return the active date window only when that window explicitly belongs
+    to the package's configured story.
+
+    This prevents a September ARG from accidentally continuing during a
+    later October-only seasonal window.
+    """
+    window = _fergie_seasonal_active_window(
+        package,
+        now_dt=now_dt,
+    )
+
+    if not isinstance(window, dict):
+        return None
+
+    window_config = window.get(
+        "config",
+        {},
+    )
+
+    if not isinstance(window_config, dict):
+        return None
+
+    story_config = _fergie_seasonal_story_config(
+        package
+    )
+
+    if not isinstance(story_config, dict):
+        return None
+
+    window_story_id = str(
+        window_config.get("story_id")
+        or ""
+    ).strip()
+
+    story_id = str(
+        story_config.get("story_id")
+        or ""
+    ).strip()
+
+    if not window_story_id:
+        return None
+
+    if window_story_id != story_id:
+        return None
+
+    return window
+
+
+def _fergie_seasonal_effective_story_stage(
+    package: dict,
+    state: dict,
+    now_dt=None,
+):
+    """
+    Return the story stage the crew has actually earned.
+
+    Calendar dates determine the maximum possible stage, while unsolved
+    sequential clues prevent the ARG from racing forward without player
+    progress.
+    """
+    date_stage = _fergie_seasonal_date_stage_number(
+        package,
+        now_dt=now_dt,
+    )
+
+    clue = _fergie_seasonal_next_clue(
+        package,
+        state,
+        now_dt=now_dt,
+    )
+
+    if not isinstance(clue, dict):
+        return date_stage
+
+    try:
+        clue_stage = int(
+            clue.get("minimum_stage", 0)
+            or 0
+        )
+    except Exception:
+        clue_stage = 0
+
+    # Stages before the first clue remain date-driven.
+    if clue_stage <= 0:
+        return date_stage
+
+    return min(
+        date_stage,
+        clue_stage,
+    )
+
+
+def _fergie_seasonal_story_stage_definition(
+    package: dict,
+    state: dict,
+    now_dt=None,
+):
+    """
+    Return the configured stage matching the crew's effective progress.
+    """
+    story_config = _fergie_seasonal_story_config(
+        package
+    )
+
+    if not isinstance(story_config, dict):
+        return None
+
+    stages = story_config.get(
+        "stages",
+        [],
+    )
+
+    if not isinstance(stages, list):
+        return None
+
+    stage_number = (
+        _fergie_seasonal_effective_story_stage(
+            package,
+            state,
+            now_dt=now_dt,
+        )
+    )
+
+    matches = []
+
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+
+        try:
+            number = int(
+                stage.get("stage", 0)
+                or 0
+            )
+        except Exception:
+            continue
+
+        if number <= stage_number:
+            matches.append(
+                (
+                    number,
+                    stage,
+                )
+            )
+
+    if not matches:
+        return None
+
+    matches.sort(
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    return matches[0][1]
+
+
+def _fergie_seasonal_asset_stage_allowed(
+    package: dict,
+    asset_id: str,
+    stage_number: int,
+    now_dt=None,
+):
+    """
+    Verify an asset's configured stage/month boundaries.
+    """
+    asset = _fergie_seasonal_media_asset(
+        package,
+        asset_id,
+    )
+
+    if not isinstance(asset, dict):
+        return False
+
+    try:
+        minimum_stage = int(
+            asset.get("minimum_stage", 0)
+            or 0
+        )
+    except Exception:
+        minimum_stage = 0
+
+    try:
+        maximum_stage = int(
+            asset.get("maximum_stage", 999)
+            or 999
+        )
+    except Exception:
+        maximum_stage = 999
+
+    if not (
+        minimum_stage
+        <= stage_number
+        <= maximum_stage
+    ):
+        return False
+
+    months = asset.get(
+        "months",
+        [],
+    )
+
+    if isinstance(months, list) and months:
+        if now_dt is None:
+            now_dt = _fergie_seasonal_now(
+                package
+            )
+
+        month_name = (
+            now_dt.strftime("%B")
+            .strip()
+            .casefold()
+        )
+
+        allowed_months = {
+            str(month).strip().casefold()
+            for month in months
+        }
+
+        if month_name not in allowed_months:
+            return False
+
+    return True
+
+
+def _fergie_seasonal_choose_media_for_context(
+    package: dict,
+    state: dict,
+    context: str,
+    stage_number: int,
+    *,
+    now_dt=None,
+):
+    """
+    Randomly choose one currently-eligible media asset for a context.
+
+    Cooldowns and duplicate protection remain enforced.
+    """
+    candidates = (
+        _fergie_seasonal_media_for_context(
+            package,
+            context,
+        )
+    )
+
+    eligible = []
+
+    for asset_id in candidates:
+        if not _fergie_seasonal_asset_stage_allowed(
+            package,
+            asset_id,
+            stage_number,
+            now_dt=now_dt,
+        ):
+            continue
+
+        can_send, _ = (
+            _fergie_seasonal_media_can_send(
+                package,
+                state,
+                asset_id,
+            )
+        )
+
+        if can_send:
+            eligible.append(asset_id)
+
+    if not eligible:
+        return None
+
+    return random.choice(eligible)
+
+
+def _fergie_seasonal_completed_rescue_attempt_text(
+    package: dict,
+    user_text: str,
+):
+    """
+    Recognize somebody trying the rescue solution after another member
+    already completed the event.
+    """
+    normalized = (
+        _fergie_seasonal_normalize_solution_text(
+            user_text
+        )
+    )
+
+    if not normalized:
+        return False
+
+    anchor = _fergie_seasonal_identity_anchor(
+        package
+    )
+
+    anchor = (
+        _fergie_seasonal_normalize_solution_text(
+            anchor
+        )
+    )
+
+    if not anchor or anchor not in normalized:
+        return False
+
+    identity_patterns = (
+        "remember",
+        "who you are",
+        "who u are",
+        "you are fergie",
+        "you're fergie",
+        "youre fergie",
+        "real fergie",
+        "come back",
+        "don't forget",
+        "dont forget",
+    )
+
+    return any(
+        pattern in normalized
+        for pattern in identity_patterns
+    )
+
+
+async def _fergie_seasonal_send_post_rescue_story(
+    channel,
+    package: dict,
+):
+    """
+    Send the package-defined post-rescue confession safely within Discord's
+    message-size limits.
+    """
+    story = _fergie_seasonal_post_rescue_story(
+        package
+    )
+
+    if not story:
+        return False
+
+    # Use Fergie's existing Discord message splitter.
+    chunks = _fergie_split_discord_message(
+        story,
+        limit=1900,
+    )
+
+    if not chunks:
+        return False
+
+    for index, chunk in enumerate(chunks):
+        if index > 0:
+            await asyncio.sleep(1.0)
+
+        await channel.send(chunk)
+
+    return True
+
+
+async def _fergie_seasonal_process_conversation(
+    message: discord.Message,
+    user_text: str,
+):
+    """
+    Hidden post-Gemini seasonal processing.
+
+    NORMAL FERGIE HAS ALREADY REPLIED before this function is called.
+
+    This function may:
+    - recognize a solved binary clue
+    - trigger its configured media reaction
+    - recognize the final rescue
+    - transmit the currently-active binary clue
+    - leak adaptive decoding hints
+    - occasionally attach story-appropriate corruption media
+
+    It never replaces the normal Gemini answer.
+    """
+    if message is None:
+        return False
+
+    if message.author.bot:
+        return False
+
+    active_packages = (
+        _fergie_seasonal_get_active_packages()
+    )
+
+    if not active_packages:
+        return False
+
+    did_anything = False
+
+    for package in active_packages:
+        if not isinstance(package, dict):
+            continue
+
+        now_dt = _fergie_seasonal_now(
+            package
+        )
+
+        # Only run story/puzzle logic inside the package window explicitly
+        # associated with this story.
+        story_window = (
+            _fergie_seasonal_active_story_window(
+                package,
+                now_dt=now_dt,
+            )
+        )
+
+        if story_window is None:
+            continue
+
+        state = await _fergie_seasonal_load_state(
+            package
+        )
+
+        if not isinstance(state, dict):
+            continue
+
+        # Count only genuine Fergie conversational interactions.
+        try:
+            state["conversation_counter"] = int(
+                state.get(
+                    "conversation_counter",
+                    0,
+                )
+                or 0
+            ) + 1
+        except Exception:
+            state["conversation_counter"] = 1
+
+        # ----------------------------------------------------------
+        # Story already completed.
+        # No more September corruption or binary after rescue.
+        # ----------------------------------------------------------
+        if state.get(
+            "story_completed",
+            False,
+        ):
+            if _fergie_seasonal_completed_rescue_attempt_text(
+                package,
+                user_text,
+            ):
+                late_line = (
+                    _fergie_seasonal_late_rescue_reaction(
+                        package
+                    )
+                )
+
+                if late_line:
+                    await message.channel.send(
+                        late_line
+                    )
+
+                    did_anything = True
+
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+
+            continue
+
+        # ----------------------------------------------------------
+        # 1. Did this message solve the currently-active binary clue?
+        # ----------------------------------------------------------
+        solved_clue = (
+            _fergie_seasonal_detect_clue_solution(
+                package,
+                state,
+                user_text,
+                now_dt=now_dt,
+            )
+        )
+
+        if isinstance(solved_clue, dict):
+            solved_result = (
+                await _fergie_seasonal_complete_clue(
+                    package,
+                    state,
+                    solved_clue,
+                )
+            )
+
+            if isinstance(solved_result, dict):
+                did_anything = True
+
+                on_solve = solved_result.get(
+                    "on_solve",
+                    {},
+                )
+
+                if not isinstance(on_solve, dict):
+                    on_solve = {}
+
+                reaction_asset = str(
+                    on_solve.get("media")
+                    or ""
+                ).strip()
+
+                if reaction_asset:
+                    # Major clue reactions are intentional story beats.
+                    # They may bypass ordinary cooldowns, but file/path
+                    # validation remains enforced.
+                    await asyncio.sleep(0.8)
+
+                    await _fergie_seasonal_send_media(
+                        message.channel,
+                        package,
+                        state,
+                        reaction_asset,
+                        ignore_cooldown=True,
+                    )
+
+                elif on_solve.get(
+                    "corruption_reaction",
+                    False,
+                ):
+                    await asyncio.sleep(0.6)
+                    await message.channel.send(
+                        "..."
+                    )
+
+            # A clue-solve conversation should not immediately dump the next
+            # clue too. Give the discovery room to breathe.
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+
+            continue
+
+        # ----------------------------------------------------------
+        # 2. Has the crew unlocked the actual rescue?
+        # ----------------------------------------------------------
+        if _fergie_seasonal_message_is_rescue_attempt(
+            package,
+            state,
+            user_text,
+            now_dt=now_dt,
+        ):
+            reaction = (
+                await _fergie_seasonal_complete_rescue(
+                    package,
+                    state,
+                    message.author,
+                    user_text,
+                )
+            )
+
+            if reaction:
+                # One final beat before real Fergie fully returns.
+                stage_number = (
+                    _fergie_seasonal_effective_story_stage(
+                        package,
+                        state,
+                        now_dt=now_dt,
+                    )
+                )
+
+                final_asset = (
+                    _fergie_seasonal_choose_media_for_context(
+                        package,
+                        state,
+                        "near_rescue",
+                        stage_number,
+                        now_dt=now_dt,
+                    )
+                )
+
+                if final_asset:
+                    await asyncio.sleep(0.8)
+
+                    await _fergie_seasonal_send_media(
+                        message.channel,
+                        package,
+                        state,
+                        final_asset,
+                        ignore_cooldown=True,
+                        persist=False,
+                    )
+
+                await asyncio.sleep(1.2)
+
+                await message.channel.send(
+                    reaction
+                )
+
+                await asyncio.sleep(1.5)
+
+                await _fergie_seasonal_send_post_rescue_story(
+                    message.channel,
+                    package,
+                )
+
+                did_anything = True
+
+            continue
+
+        # ----------------------------------------------------------
+        # 3. Is the current story stage allowed to leak binary?
+        # ----------------------------------------------------------
+        stage = (
+            _fergie_seasonal_story_stage_definition(
+                package,
+                state,
+                now_dt=now_dt,
+            )
+        )
+
+        if not isinstance(stage, dict):
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        if not stage.get(
+            "binary_enabled",
+            False,
+        ):
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        clue = _fergie_seasonal_next_clue(
+            package,
+            state,
+            now_dt=now_dt,
+        )
+
+        if not isinstance(clue, dict):
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        if not _fergie_seasonal_can_transmit_clue(
+            package,
+            state,
+            clue,
+        ):
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        # The stage's conversation_event_chance controls how often the hidden
+        # story gets an opportunity to surface during otherwise-normal chat.
+        try:
+            event_chance = float(
+                stage.get(
+                    "conversation_event_chance",
+                    0,
+                )
+                or 0
+            )
+        except Exception:
+            event_chance = 0.0
+
+        event_chance = max(
+            0.0,
+            min(
+                1.0,
+                event_chance,
+            ),
+        )
+
+        if random.random() >= event_chance:
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        binary_text = (
+            _fergie_seasonal_binary_transmission_text(
+                clue
+            )
+        )
+
+        if not binary_text:
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        # ----------------------------------------------------------
+        # 4. The real trapped Fergie leaks binary.
+        # ----------------------------------------------------------
+        await asyncio.sleep(
+            random.uniform(
+                0.7,
+                1.8,
+            )
+        )
+
+        await message.channel.send(
+            binary_text
+        )
+
+        hint = (
+            await _fergie_seasonal_record_transmission(
+                package,
+                state,
+                clue,
+            )
+        )
+
+        did_anything = True
+
+        # Adaptive decoder breadcrumb.
+        if hint:
+            await asyncio.sleep(
+                random.uniform(
+                    1.0,
+                    2.0,
+                )
+            )
+
+            await message.channel.send(
+                hint
+            )
+
+        # ----------------------------------------------------------
+        # 5. Some transmissions cause visual corruption.
+        # ----------------------------------------------------------
+        stage_number = (
+            _fergie_seasonal_effective_story_stage(
+                package,
+                state,
+                now_dt=now_dt,
+            )
+        )
+
+        # Keep media less frequent than the binary itself so the GIFs don't
+        # become predictable every time Fergie leaks a clue.
+        if random.random() < 0.35:
+            corruption_asset = (
+                _fergie_seasonal_choose_media_for_context(
+                    package,
+                    state,
+                    "binary_transmission",
+                    stage_number,
+                    now_dt=now_dt,
+                )
+            )
+
+            if corruption_asset:
+                await asyncio.sleep(
+                    random.uniform(
+                        0.5,
+                        1.2,
+                    )
+                )
+
+                await _fergie_seasonal_send_media(
+                    message.channel,
+                    package,
+                    state,
+                    corruption_asset,
+                )
+
+        await _fergie_seasonal_save_state(
+            package,
+            state,
+        )
+
+    return did_anything
+
+
+# =====================================================================
+
+# ================== Seasonal Non-Story Conversation Layer ==================
+
+def _fergie_seasonal_asset_month_allowed(
+    package: dict,
+    asset_id: str,
+    now_dt=None,
+):
+    """
+    Check only an asset's configured month restrictions.
+
+    This is used by non-story seasonal modes such as October Halloween
+    scares, where September ARG stage numbers should no longer matter.
+    """
+    asset = _fergie_seasonal_media_asset(
+        package,
+        asset_id,
+    )
+
+    if not isinstance(asset, dict):
+        return False
+
+    months = asset.get(
+        "months",
+        [],
+    )
+
+    if not isinstance(months, list) or not months:
+        return True
+
+    if now_dt is None:
+        now_dt = _fergie_seasonal_now(
+            package
+        )
+
+    current_month = (
+        now_dt.strftime("%B")
+        .strip()
+        .casefold()
+    )
+
+    allowed_months = {
+        str(month).strip().casefold()
+        for month in months
+    }
+
+    return current_month in allowed_months
+
+
+def _fergie_seasonal_nonstory_mode_config(
+    package: dict,
+):
+    """
+    Find a generic conversational seasonal mode containing an
+    eligible_jumpscares list.
+
+    The engine does not depend on a hard-coded section name such as
+    'october'.
+    """
+    media_config = _fergie_seasonal_media_config(
+        package
+    )
+
+    if not isinstance(media_config, dict):
+        return None
+
+    for key, value in media_config.items():
+        if not isinstance(value, dict):
+            continue
+
+        eligible = value.get(
+            "eligible_jumpscares"
+        )
+
+        if isinstance(eligible, list):
+            return {
+                "id": str(key),
+                "config": value,
+            }
+
+    return None
+
+
+def _fergie_seasonal_choose_nonstory_jumpscare(
+    package: dict,
+    state: dict,
+    asset_ids: list,
+    now_dt=None,
+):
+    """
+    Pick an eligible conversational jumpscare using month restrictions
+    plus the normal media cooldown/duplicate protections.
+    """
+    if not isinstance(asset_ids, list):
+        return None
+
+    eligible = []
+
+    for asset_id in asset_ids:
+        asset_id = str(
+            asset_id or ""
+        ).strip()
+
+        if not asset_id:
+            continue
+
+        asset = _fergie_seasonal_media_asset(
+            package,
+            asset_id,
+        )
+
+        if not isinstance(asset, dict):
+            continue
+
+        if not asset.get(
+            "jumpscare",
+            False,
+        ):
+            continue
+
+        if not _fergie_seasonal_asset_month_allowed(
+            package,
+            asset_id,
+            now_dt=now_dt,
+        ):
+            continue
+
+        can_send, _ = (
+            _fergie_seasonal_media_can_send(
+                package,
+                state,
+                asset_id,
+            )
+        )
+
+        if can_send:
+            eligible.append(
+                asset_id
+            )
+
+    if not eligible:
+        return None
+
+    return random.choice(
+        eligible
+    )
+
+
+async def _fergie_seasonal_process_nonstory_conversation(
+    message: discord.Message,
+    user_text: str,
+):
+    """
+    Handle conversational seasonal content that is NOT part of the active
+    story/puzzle itself.
+
+    Current uses:
+    - innocent early-season costume appearances
+    - post-story Halloween conversational jumpscares
+
+    This function is called only after normal Fergie/Gemini has already
+    responded.
+    """
+    if message is None:
+        return False
+
+    if message.author.bot:
+        return False
+
+    active_packages = (
+        _fergie_seasonal_get_active_packages()
+    )
+
+    if not active_packages:
+        return False
+
+    did_anything = False
+
+    for package in active_packages:
+        if not isinstance(package, dict):
+            continue
+
+        now_dt = _fergie_seasonal_now(
+            package
+        )
+
+        active_window = (
+            _fergie_seasonal_active_window(
+                package,
+                now_dt=now_dt,
+            )
+        )
+
+        if not isinstance(active_window, dict):
+            continue
+
+        state = await _fergie_seasonal_load_state(
+            package
+        )
+
+        if not isinstance(state, dict):
+            continue
+
+        story_window = (
+            _fergie_seasonal_active_story_window(
+                package,
+                now_dt=now_dt,
+            )
+        )
+
+        # ----------------------------------------------------------
+        # A. Innocent costume content during early story stages.
+        #
+        # Once binary corruption begins, this branch stops so Ghost
+        # Fergie cannot undercut the TOR story.
+        # ----------------------------------------------------------
+        if story_window is not None:
+            stage = (
+                _fergie_seasonal_story_stage_definition(
+                    package,
+                    state,
+                    now_dt=now_dt,
+                )
+            )
+
+            if not isinstance(stage, dict):
+                continue
+
+            if stage.get(
+                "binary_enabled",
+                False,
+            ):
+                continue
+
+            try:
+                stage_number = int(
+                    stage.get(
+                        "stage",
+                        0,
+                    )
+                    or 0
+                )
+            except Exception:
+                stage_number = 0
+
+            try:
+                chance = float(
+                    stage.get(
+                        "conversation_event_chance",
+                        0,
+                    )
+                    or 0
+                )
+            except Exception:
+                chance = 0.0
+
+            chance = max(
+                0.0,
+                min(
+                    1.0,
+                    chance,
+                ),
+            )
+
+            if random.random() >= chance:
+                continue
+
+            costume_candidates = []
+
+            for context in (
+                "costume_conversation",
+                "halloween_conversation",
+            ):
+                for asset_id in (
+                    _fergie_seasonal_media_for_context(
+                        package,
+                        context,
+                    )
+                ):
+                    if asset_id not in costume_candidates:
+                        costume_candidates.append(
+                            asset_id
+                        )
+
+            eligible_costumes = []
+
+            for asset_id in costume_candidates:
+                asset = (
+                    _fergie_seasonal_media_asset(
+                        package,
+                        asset_id,
+                    )
+                )
+
+                if not isinstance(asset, dict):
+                    continue
+
+                if asset.get(
+                    "jumpscare",
+                    False,
+                ):
+                    continue
+
+                if not _fergie_seasonal_asset_stage_allowed(
+                    package,
+                    asset_id,
+                    stage_number,
+                    now_dt=now_dt,
+                ):
+                    continue
+
+                can_send, _ = (
+                    _fergie_seasonal_media_can_send(
+                        package,
+                        state,
+                        asset_id,
+                    )
+                )
+
+                if can_send:
+                    eligible_costumes.append(
+                        asset_id
+                    )
+
+            if not eligible_costumes:
+                continue
+
+            asset_id = random.choice(
+                eligible_costumes
+            )
+
+            asset = (
+                _fergie_seasonal_media_asset(
+                    package,
+                    asset_id,
+                )
+            )
+
+            captions = asset.get(
+                "captions",
+                [],
+            )
+
+            caption = None
+
+            if isinstance(captions, list):
+                valid_captions = [
+                    str(item).strip()
+                    for item in captions
+                    if str(item).strip()
+                ]
+
+                if valid_captions:
+                    caption = random.choice(
+                        valid_captions
+                    )
+
+            await asyncio.sleep(
+                random.uniform(
+                    0.6,
+                    1.4,
+                )
+            )
+
+            sent = await _fergie_seasonal_send_media(
+                message.channel,
+                package,
+                state,
+                asset_id,
+                caption=caption,
+            )
+
+            if sent:
+                did_anything = True
+
+            continue
+
+        # ----------------------------------------------------------
+        # B. Non-story conversational mode.
+        #
+        # Halloween 2026 uses this for October jumpscares.
+        # Future seasonal packages can define their own equivalent
+        # eligible_jumpscares section.
+        # ----------------------------------------------------------
+        mode = (
+            _fergie_seasonal_nonstory_mode_config(
+                package
+            )
+        )
+
+        if not isinstance(mode, dict):
+            continue
+
+        mode_config = mode.get(
+            "config",
+            {},
+        )
+
+        if not isinstance(mode_config, dict):
+            continue
+
+        if not mode_config.get(
+            "enabled",
+            False,
+        ):
+            continue
+
+        if not mode_config.get(
+            "conversation_only",
+            True,
+        ):
+            continue
+
+        try:
+            chance = float(
+                mode_config.get(
+                    "chance_per_eligible_conversation",
+                    0,
+                )
+                or 0
+            )
+        except Exception:
+            chance = 0.0
+
+        chance = max(
+            0.0,
+            min(
+                1.0,
+                chance,
+            ),
+        )
+
+        stats = state.setdefault(
+            "stats",
+            {},
+        )
+
+        if not isinstance(stats, dict):
+            stats = {}
+            state["stats"] = stats
+
+        try:
+            conversation_number = int(
+                stats.get(
+                    "nonstory_conversation_counter",
+                    0,
+                )
+                or 0
+            ) + 1
+        except Exception:
+            conversation_number = 1
+
+        stats[
+            "nonstory_conversation_counter"
+        ] = conversation_number
+
+        try:
+            minimum_gap = int(
+                mode_config.get(
+                    "minimum_conversations_between_jumpscares",
+                    0,
+                )
+                or 0
+            )
+        except Exception:
+            minimum_gap = 0
+
+        try:
+            last_jumpscare_conversation = int(
+                stats.get(
+                    "last_nonstory_jumpscare_conversation",
+                    0,
+                )
+                or 0
+            )
+        except Exception:
+            last_jumpscare_conversation = 0
+
+        if (
+            last_jumpscare_conversation > 0
+            and conversation_number
+            - last_jumpscare_conversation
+            < minimum_gap
+        ):
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        if random.random() >= chance:
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        asset_ids = mode_config.get(
+            "eligible_jumpscares",
+            [],
+        )
+
+        asset_id = (
+            _fergie_seasonal_choose_nonstory_jumpscare(
+                package,
+                state,
+                asset_ids,
+                now_dt=now_dt,
+            )
+        )
+
+        if not asset_id:
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+            continue
+
+        await asyncio.sleep(
+            random.uniform(
+                0.6,
+                1.7,
+            )
+        )
+
+        sent = await _fergie_seasonal_send_media(
+            message.channel,
+            package,
+            state,
+            asset_id,
+        )
+
+        if sent:
+            stats[
+                "last_nonstory_jumpscare_conversation"
+            ] = conversation_number
+
+            await _fergie_seasonal_save_state(
+                package,
+                state,
+            )
+
+            did_anything = True
+
+    return did_anything
+
+
+# ===========================================================================
 
 # ================== Fergie Movie Club ==================
 
@@ -7101,6 +10923,11 @@ async def on_ready():
     # DB init for Fergie's persistent non-economy features.
     await _db_init()
 
+    # Load all enabled reusable seasonal packages from disk.
+    # This is configuration-only at startup; it does not send messages,
+    # trigger story events, or change normal Fergie/Gemini behavior.
+    _fergie_seasonal_reload_packages()
+
     await start_vc_bridge_server()
 
     if not hasattr(bot, "_js_last"):
@@ -10917,6 +14744,34 @@ Respond naturally as Fergie.
                         I_HATE_IT_HERE_GIF_COOLDOWN,
                     )
 
+            # Hidden reusable seasonal layer.
+            #
+            # IMPORTANT:
+            # Normal Gemini/voice output has already completed above.
+            # Seasonal content may follow the conversation, but can never
+            # replace Fergie's normal response.
+            try:
+                # September story / ARG layer.
+                await _fergie_seasonal_process_conversation(
+                    message,
+                    question,
+                )
+
+                # Non-story seasonal layer:
+                # innocent costume appearances + later conversational
+                # seasonal scares.
+                await _fergie_seasonal_process_nonstory_conversation(
+                    message,
+                    question,
+                )
+
+            except Exception as e:
+                # Seasonal failures must NEVER break normal Fergie.
+                print(
+                    f"SEASONAL CONVERSATION ERROR ❌ "
+                    f"{type(e).__name__}: {e}"
+                )
+
             return
 
         await message.reply(
@@ -11173,6 +15028,473 @@ async def daily_gym_reminder():
 async def _wait_ready_gym():
     await bot.wait_until_ready()
 
+# ================== Hidden Seasonal Admin / Testing ==================
+
+def _fergie_seasonal_admin_allowed(ctx) -> bool:
+    """
+    Seasonal admin controls are intentionally hidden from normal members.
+
+    Requirements:
+    - Jonathan/admin only
+    - Fergie's dedicated test channel only
+    """
+    return bool(
+        ctx
+        and ctx.author
+        and ctx.author.id == FERGIE_ADMIN_USER_ID
+        and ctx.channel
+        and ctx.channel.id == FERGIE_TEST_CHANNEL_ID
+    )
+
+
+def _fergie_seasonal_find_package(identifier: str = ""):
+    """
+    Resolve a loaded seasonal package by:
+    - state_key
+    - season_id
+    - season/year shorthand
+
+    Empty input returns the only loaded package when exactly one exists.
+    """
+    identifier = str(
+        identifier or ""
+    ).strip().casefold()
+
+    packages = [
+        package
+        for package in fergie_seasonal_packages.values()
+        if isinstance(package, dict)
+    ]
+
+    if not identifier:
+        if len(packages) == 1:
+            return packages[0]
+
+        return None
+
+    for package in packages:
+        state_key = str(
+            package.get("state_key")
+            or ""
+        ).strip()
+
+        season_id = str(
+            package.get("season_id")
+            or ""
+        ).strip()
+
+        season_name = str(
+            package.get("season_name")
+            or ""
+        ).strip()
+
+        year = str(
+            package.get("year")
+            or ""
+        ).strip()
+
+        aliases = {
+            state_key.casefold(),
+            season_id.casefold(),
+            f"{season_name}/{year}".casefold(),
+            f"{season_name}:{year}".casefold(),
+            f"{season_name}_{year}".casefold(),
+        }
+
+        if identifier in aliases:
+            return package
+
+    return None
+
+
+@bot.command(
+    name="seasonreload",
+    hidden=True,
+)
+async def seasonreload(ctx):
+    """
+    Hidden admin command:
+    reload seasonal JSON packages from disk.
+    """
+    if not _fergie_seasonal_admin_allowed(ctx):
+        return
+
+    packages = _fergie_seasonal_reload_packages()
+
+    errors = fergie_seasonal_runtime.get(
+        "load_errors",
+        [],
+    )
+
+    await ctx.reply(
+        f"seasonal reload complete. "
+        f"packages={len(packages)} "
+        f"errors={len(errors)}",
+        mention_author=False,
+    )
+
+
+@bot.command(
+    name="seasonstatus",
+    hidden=True,
+)
+async def seasonstatus(ctx, *, package_id: str = ""):
+    """
+    Hidden admin command:
+    inspect seasonal package + persisted state without changing anything.
+
+    Usage:
+        !seasonstatus
+        !seasonstatus halloween_2026
+    """
+    if not _fergie_seasonal_admin_allowed(ctx):
+        return
+
+    package = _fergie_seasonal_find_package(
+        package_id
+    )
+
+    if not package:
+        await ctx.reply(
+            "season package not found.",
+            mention_author=False,
+        )
+        return
+
+    state = await _fergie_seasonal_load_state(
+        package
+    )
+
+    now_dt = _fergie_seasonal_now(
+        package
+    )
+
+    window = _fergie_seasonal_active_window(
+        package,
+        now_dt=now_dt,
+    )
+
+    stage = _fergie_seasonal_date_eligible_stage(
+        package,
+        now_dt=now_dt,
+    )
+
+    active_window_id = (
+        str(window.get("id"))
+        if isinstance(window, dict)
+        else "none"
+    )
+
+    stage_number = (
+        str(stage.get("stage"))
+        if isinstance(stage, dict)
+        else "none"
+    )
+
+    completed = (
+        _fergie_seasonal_completed_clue_ids(
+            state
+        )
+        if isinstance(state, dict)
+        else []
+    )
+
+    rescuer = (
+        state.get("rescuer")
+        if isinstance(state, dict)
+        else None
+    )
+
+    await ctx.reply(
+        "```text\n"
+        f"season_id: {package.get('season_id')}\n"
+        f"state_key: {package.get('state_key')}\n"
+        f"package: {package.get('season_name')}/{package.get('year')}\n"
+        f"timezone_now: {now_dt.isoformat()}\n"
+        f"active_window: {active_window_id}\n"
+        f"date_stage: {stage_number}\n"
+        f"story_completed: {bool(state and state.get('story_completed'))}\n"
+        f"completed_clues: {completed}\n"
+        f"rescuer: {rescuer}\n"
+        "```",
+        mention_author=False,
+    )
+
+
+@bot.command(
+    name="seasonmedia",
+    hidden=True,
+)
+async def seasonmedia(
+    ctx,
+    asset_id: str = "",
+    *,
+    package_id: str = "",
+):
+    """
+    Hidden admin media preview.
+
+    This bypasses seasonal date/cooldown logic but does NOT alter
+    canonical seasonal story state.
+
+    Usage:
+        !seasonmedia ghost_fergie_hover
+        !seasonmedia evilferg_full_jumpscare halloween_2026
+    """
+    if not _fergie_seasonal_admin_allowed(ctx):
+        return
+
+    asset_id = str(
+        asset_id or ""
+    ).strip()
+
+    if not asset_id:
+        await ctx.reply(
+            "usage: `!seasonmedia <asset_id> [package]`",
+            mention_author=False,
+        )
+        return
+
+    package = _fergie_seasonal_find_package(
+        package_id
+    )
+
+    if not package:
+        await ctx.reply(
+            "season package not found.",
+            mention_author=False,
+        )
+        return
+
+    path = _fergie_seasonal_media_path(
+        package,
+        asset_id,
+    )
+
+    if not path:
+        await ctx.reply(
+            f"seasonal media not found: `{asset_id}`",
+            mention_author=False,
+        )
+        return
+
+    try:
+        await ctx.send(
+            content=f"TEST PREVIEW: `{asset_id}`",
+            file=discord.File(path),
+        )
+
+    except Exception as e:
+        await ctx.reply(
+            f"media preview failed: {type(e).__name__}: {e}",
+            mention_author=False,
+        )
+
+
+@bot.command(
+    name="seasonclue",
+    hidden=True,
+)
+async def seasonclue(
+    ctx,
+    clue_id: str = "",
+    *,
+    package_id: str = "",
+):
+    """
+    Hidden admin clue preview.
+
+    Shows the configured binary transmission and plaintext in the
+    test channel only.
+
+    IMPORTANT:
+    This does NOT mark the clue transmitted or solved and does NOT write
+    seasonal progress.
+
+    Usage:
+        !seasonclue help
+        !seasonclue still_here halloween_2026
+    """
+    if not _fergie_seasonal_admin_allowed(ctx):
+        return
+
+    clue_id = str(
+        clue_id or ""
+    ).strip()
+
+    if not clue_id:
+        await ctx.reply(
+            "usage: `!seasonclue <clue_id> [package]`",
+            mention_author=False,
+        )
+        return
+
+    package = _fergie_seasonal_find_package(
+        package_id
+    )
+
+    if not package:
+        await ctx.reply(
+            "season package not found.",
+            mention_author=False,
+        )
+        return
+
+    clue = _fergie_seasonal_clue_by_id(
+        package,
+        clue_id,
+    )
+
+    if not clue:
+        await ctx.reply(
+            f"clue not found: `{clue_id}`",
+            mention_author=False,
+        )
+        return
+
+    binary = str(
+        clue.get("binary")
+        or ""
+    ).strip()
+
+    plaintext = str(
+        clue.get("plaintext")
+        or ""
+    ).strip()
+
+    await ctx.reply(
+        f"**SEASON CLUE TEST — `{clue_id}`**\n"
+        f"Binary:\n```text\n{binary}\n```\n"
+        f"Decoded test reference: `{plaintext}`",
+        mention_author=False,
+    )
+
+
+@bot.command(
+    name="seasonconfig",
+    hidden=True,
+)
+async def seasonconfig(ctx, *, package_id: str = ""):
+    """
+    Hidden structural validation of one seasonal package.
+
+    Does not run story events or modify persistence.
+    """
+    if not _fergie_seasonal_admin_allowed(ctx):
+        return
+
+    package = _fergie_seasonal_find_package(
+        package_id
+    )
+
+    if not package:
+        await ctx.reply(
+            "season package not found.",
+            mention_author=False,
+        )
+        return
+
+    problems = []
+
+    season = package.get("season")
+
+    if not isinstance(season, dict):
+        problems.append(
+            "season.json not loaded"
+        )
+
+    state_key = str(
+        package.get("state_key")
+        or ""
+    ).strip()
+
+    if not state_key:
+        problems.append(
+            "missing state_key"
+        )
+
+    story = _fergie_seasonal_story_config(
+        package
+    )
+
+    if not isinstance(story, dict):
+        problems.append(
+            "story config not found"
+        )
+
+    clue_config = _fergie_seasonal_clue_config(
+        package
+    )
+
+    if not isinstance(clue_config, dict):
+        problems.append(
+            "clue config not found"
+        )
+
+    media_config = _fergie_seasonal_media_config(
+        package
+    )
+
+    if not isinstance(media_config, dict):
+        problems.append(
+            "media config not found"
+        )
+
+    reactions = (
+        _fergie_seasonal_rescue_reactions_config(
+            package
+        )
+    )
+
+    if not isinstance(reactions, dict) or not reactions:
+        problems.append(
+            "rescue reactions config not found"
+        )
+
+    missing_assets = []
+
+    if isinstance(media_config, dict):
+        assets = media_config.get(
+            "assets",
+            {},
+        )
+
+        if isinstance(assets, dict):
+            for asset_id in assets:
+                if not _fergie_seasonal_media_path(
+                    package,
+                    asset_id,
+                ):
+                    missing_assets.append(
+                        asset_id
+                    )
+
+    if missing_assets:
+        problems.append(
+            "missing media: "
+            + ", ".join(missing_assets)
+        )
+
+    if problems:
+        result = (
+            "SEASON CONFIG ❌\n- "
+            + "\n- ".join(problems)
+        )
+    else:
+        result = (
+            "SEASON CONFIG ✅\n"
+            f"{package.get('season_id')} loaded cleanly.\n"
+            f"clues={len(_fergie_seasonal_clues(package))}\n"
+            f"media={len(media_config.get('assets', {}))}"
+        )
+
+    await ctx.reply(
+        result,
+        mention_author=False,
+    )
+
+
+# ====================================================================
 
 # ================== Fergie Art Status ==================
 @bot.command(name="art", help="Show Fergie's Art status and remaining daily generations")
