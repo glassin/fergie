@@ -229,7 +229,7 @@ FIT_IMAGE_URLS = [
     "https://cdn.discordapp.com/attachments/1405470635844435968/1405598818464170195/pinterest_681169512428788228.jpg?ex=689f6969&is=689e17e9&hm=86b1b23a623b8dbbf9789a9a002c8589dec91f139c39caad0a5ee6f470f26d6e&",
 ]
 FIT_CHANNEL_ID = int(os.getenv("FIT_CHANNEL_ID", "1273436116699058290"))
-# FIT_REPLY_TARGET_ID = 661077262468382761  # member who triggers follow-up if replies within 20s
+FIT_REPLY_TARGET_ID = USER3_ID  # Viviana; triggers follow-up if she replies within 20s
 FIT_FOLLOWUP_EMOTE = "<a:slap_peach:1227392416617730078>"
 FIT_FOLLOWUP_TEXT  = "you know you'd look good in this girlie! you go girl! ✂️"
 
@@ -332,7 +332,7 @@ async def _fergie_random_pinterest_fit():
         )
         return None
 
-# ---------- Bonk Papo schedule (3 times/day random) ----------
+# ---------- Bonk Papo schedule (once/day random) ----------
 BONK_PAPO_USER_ID = 1028310674318839878
 BONK_PAPO_CHANNEL_ID = 1131644171455844455  # channel for bonk posts
 BONK_PAPO_LINES = [
@@ -6622,11 +6622,6 @@ def _pick_three_times_today_pt(n: int = 1):
     while len(times) < n:
         times.add(rand_dt_utc())
     return sorted(times)
-    times = sorted({rand_dt() for _ in range(3)})
-    while len(times) < 3:
-        times.add(rand_dt())
-    return list(times)
-
 
 # ================== Fergie 5.0 Stage I.4: Imported Candidate Green-Light ==================
 
@@ -6857,7 +6852,7 @@ async def on_ready():
     daily_scam_post.start()
     kewchie_daily_scheduler.start()  # random twice-daily posts
     fit_auto_daily.start()          # auto-fit once a day
-    bonk_papo_scheduler.start()     # 3x/day random bonk messages
+    bonk_papo_scheduler.start()     # once/day random bonk message
     rebuild_mimic.start()           # build mimic model hourly
     fergie_bored.start()
     
@@ -6899,7 +6894,7 @@ async def kewchie_daily_scheduler():
 async def _wait_bot_ready_kewchie():
     await bot.wait_until_ready()
 
-# ---- BONK PAPO random 3x/day ----
+# ---- BONK PAPO random once/day ----
 @tasks.loop(minutes=1)
 async def bonk_papo_scheduler():
     if not hasattr(bot, "_bonk_times") or not bot._bonk_times:
@@ -10741,17 +10736,55 @@ async def _fit_reply_watch(message: discord.Message):
         await ch.send(f"{FIT_FOLLOWUP_EMOTE} {FIT_FOLLOWUP_TEXT}")
         bot._fit_waiting.pop(replied_to.id, None)
 
+PAPO_DAILY_LINES = [
+    "pinche papo!",
+    "papo??? qué haces ahora. 🙄",
+    "ay papo. aquí vamos otra vez.",
+    "papo por favor, behave.",
+    "SANCHO. control yourself.",
+    "papo i can literally feel you being annoying from the fridge.",
+    "qué pasó papo. you causing problems again?",
+    "papo leave mamá alone for five minutes challenge.",
+    "ay dios mío papo.",
+    "papo??? nobody summoned you.",
+    "sanchooooooo. 🙄",
+    "papo i know you did something. i just don't have evidence yet.",
+    "qué jodes papo.",
+    "papo behave before i tell mamá.",
+    "another beautiful day of me having to supervise papo.",
+]
+
+KURTIE_DAILY_LINES = [
+    "the twist huh?",
+    "Kurtie???",
+    "kurtiiiie what are you doing.",
+    "Kurtie. be serious for literally one second.",
+    "where's the beach ball, Kurtie.",
+    "Kurtie has entered his NPC side quest again.",
+    "the twist huh Kurtie??? still thinking about that one.",
+    "Kurtie i know you're lurking.",
+    "somebody check on Kurtie.",
+    "Kurtie blink twice if you need assistance.",
+    "ay Kurtie. qué haces.",
+    "Kurtie is probably standing somewhere holding a beach ball rn.",
+    "Kurtie??? hello??? earth to Kurtie.",
+    "not Kurtie quietly spawning into the server again.",
+    "Kurtie please report to the principal's office immediately.",
+]
+
 @tasks.loop(time=dtime(hour=22, tzinfo=timezone.utc))
 async def user1_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER1_ID}> pinche papo!")
+        phrase = random.choice(PAPO_DAILY_LINES)
+        await channel.send(f"<@{USER1_ID}> {phrase}")
 
 @tasks.loop(time=dtime(hour=23, tzinfo=timezone.utc))
 async def user2_twice_daily_fixed():
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
-        await channel.send(f"<@{USER2_ID}> the twist huh?")
+        phrase = random.choice(KURTIE_DAILY_LINES)
+        await channel.send(f"<@{USER2_ID}> {phrase}")
 
 @tasks.loop(hours=24)
 async def user3_task():
