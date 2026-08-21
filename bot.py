@@ -7304,7 +7304,6 @@ async def generate_fergie_text_voice(
 
         return None
 
-
 async def maybe_send_fergie_voice_reply(
     message: discord.Message,
     reply_text: str,
