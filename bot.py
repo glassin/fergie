@@ -7303,20 +7303,6 @@ async def generate_fergie_text_voice(
         )
 
         return None
-                audio = await response.read()
-
-        if not audio:
-            print("TEXT VOICE TTS ERROR: empty audio")
-            return None
-
-        return audio
-
-    except Exception as e:
-        print(
-            f"TEXT VOICE TTS EXCEPTION: "
-            f"{type(e).__name__}: {e}"
-        )
-        return None
 
 
 async def maybe_send_fergie_voice_reply(
