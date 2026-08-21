@@ -13404,7 +13404,7 @@ async def selftest(ctx, mode: str = "fast"):
             movieclub_detail,
         )
         
-    async def _fergie_selftest_movieclub_state():
+async def _fergie_selftest_movieclub_state():
         """Read-only Movie Club persistent-state diagnostic."""
         try:
             data = await _fergie_movieclub_load()
