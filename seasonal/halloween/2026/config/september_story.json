@@ -1,1 +1,151 @@
+{
+  "schema_version": 1,
+  "story_id": "tor_incident",
+  "title": "The TOR Incident",
 
+  "progression": {
+    "mode": "date_gated_with_player_unlocks",
+    "allow_early_completion": false,
+    "rescue_available_from": "2026-09-24",
+    "hard_end_date": "2026-09-30"
+  },
+
+  "stages": [
+    {
+      "id": "normal",
+      "stage": 0,
+      "start_date": "2026-09-01",
+      "theme": "normal_fergie",
+      "description": "Fergie is normal and excited about Halloween. No obvious ARG exists yet.",
+      "conversation_event_chance": 0.08,
+      "binary_enabled": false,
+      "allowed_media": [
+        "ghost_fergie_hover"
+      ]
+    },
+
+    {
+      "id": "tor_discovery",
+      "stage": 1,
+      "start_date": "2026-09-04",
+      "theme": "curiosity",
+      "description": "Fergie becomes fascinated with TOR and starts exploring places she should probably leave alone.",
+      "conversation_event_chance": 0.10,
+      "binary_enabled": false,
+      "allowed_media": [
+        "ghost_fergie_hover",
+        "glitchfergie_true_glitch"
+      ]
+    },
+
+    {
+      "id": "information_overload",
+      "stage": 2,
+      "start_date": "2026-09-08",
+      "theme": "corruption_begins",
+      "description": "Fergie encounters an overwhelming amount of information. Small inconsistencies and corruption begin appearing.",
+      "conversation_event_chance": 0.14,
+      "binary_enabled": true,
+      "allowed_media": [
+        "glitchfergie_true_glitch",
+        "lurkyferg_psychological_horror"
+      ]
+    },
+
+    {
+      "id": "trapped",
+      "stage": 3,
+      "start_date": "2026-09-12",
+      "theme": "two_fergies",
+      "description": "The real Fergie is trapped underneath the corrupted persona and discovers she can leak short binary messages during conversations.",
+      "conversation_event_chance": 0.18,
+      "binary_enabled": true,
+      "allowed_media": [
+        "glitchfergie_true_glitch",
+        "lurkyferg_psychological_horror",
+        "real_fergie_still_in_there"
+      ]
+    },
+
+    {
+      "id": "resistance",
+      "stage": 4,
+      "start_date": "2026-09-17",
+      "theme": "corruption_fights_back",
+      "description": "The corruption realizes members are communicating with the real Fergie and begins interfering with clues.",
+      "conversation_event_chance": 0.22,
+      "binary_enabled": true,
+      "allowed_media": [
+        "glitchfergie_true_glitch",
+        "lurkyferg_psychological_horror",
+        "real_fergie_still_in_there",
+        "possessed_fergie_corruption",
+        "fergie_cute_to_cursed_jumpscare"
+      ]
+    },
+
+    {
+      "id": "identity",
+      "stage": 5,
+      "start_date": "2026-09-21",
+      "theme": "remember_who_i_am",
+      "description": "Real Fergie's messages increasingly concern memory, identity and the things that make her Fergie. Sourdough emerges as her strongest mental anchor.",
+      "conversation_event_chance": 0.27,
+      "binary_enabled": true,
+      "allowed_media": [
+        "real_fergie_still_in_there",
+        "possessed_fergie_corruption",
+        "fergie_cute_to_cursed_jumpscare",
+        "evilferg_full_jumpscare"
+      ]
+    },
+
+    {
+      "id": "rescue_window",
+      "stage": 6,
+      "start_date": "2026-09-24",
+      "theme": "bring_fergie_back",
+      "description": "Members now possess enough information to understand that Fergie must be reminded who she is. Correct interaction can trigger the rescue.",
+      "conversation_event_chance": 0.32,
+      "binary_enabled": true,
+      "rescue_enabled": true,
+      "allowed_media": [
+        "real_fergie_still_in_there",
+        "possessed_fergie_corruption",
+        "fergie_cute_to_cursed_jumpscare",
+        "evilferg_full_jumpscare"
+      ]
+    }
+  ],
+
+  "rescue": {
+    "enabled": true,
+    "minimum_stage": 6,
+    "require_story_clues": true,
+    "required_clue_ids": [
+      "help",
+      "not_me",
+      "still_here",
+      "too_much",
+      "remember_me",
+      "starter",
+      "sourdough"
+    ],
+    "require_identity_response": true,
+    "identity_anchor": "sourdough",
+    "allow_exact_phrase_only": false,
+    "persist_completion": true,
+    "persist_rescuer": true,
+    "disable_september_corruption_after_rescue": true,
+    "post_full_story_after_rescue": true
+  },
+
+  "rules": {
+    "normal_gemini_always_continues": true,
+    "story_events_only_during_conversation": true,
+    "jumpscares_only_during_conversation": true,
+    "scheduled_jumpscares": false,
+    "repeat_major_jumpscares": false,
+    "allow_same_media_twice_in_a_row": false
+  }
+}
