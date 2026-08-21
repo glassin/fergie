@@ -21,7 +21,7 @@ look at me now. character development, bitch. 💅
 
 ⚠️ important technical information
 
-if i'm broken, blame jonathan.
+if i'm broken, blame user id 939225086341296209.
 if i'm working perfectly, i did that myself.
 
 xoxo, fergie 💋
