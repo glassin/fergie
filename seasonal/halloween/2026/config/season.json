@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
-  "season_id": "halloween_2026",
-  "enabled": true,
+"season_id": "halloween_2026",
+"state_key": "seasonal:halloween:2026",
+"enabled": true,
 
   "timezone": "America/New_York",
 
